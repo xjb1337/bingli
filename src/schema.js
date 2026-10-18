@@ -2,6 +2,23 @@
  * 大病历生成器 —— 数据模型 / 字段定义
  * 所有科室共用一套「病史」字段，体格检查分为「通用查体 + 专科查体」。
  * 设计原则：手机上尽量点选，少打字；每一项都可以手写补充或改写。
+ *
+ * 字段取舍以 docs/评分表对齐说明.md 为唯一依据（浙江省规培内科结业考核评分表）。
+ * 范围约定：只覆盖「病历内容」本身（病史、查体、SOAP、出院记录）。
+ * 不采集过程性评分项（检查者自我介绍、问诊技巧、医患沟通、查体手法等），
+ * 这些属于现场操作评分，不进入数据模型、也不可能出现在病历正文里。
+ *
+ * 两条必须守住的规矩：
+ *   1) 腹部查体次序必须是 视诊 → 听诊 → 叩诊 → 触诊（评分表第3页「腹部检查次序
+ *      正确得2分」）。触诊、叩诊会刺激肠管、改变肠鸣音，所以听诊必须在它们之前。
+ *      这条只适用于腹部：胸部/心脏仍是 视诊 → 触诊 → 叩诊 → 听诊。
+ *   2) hints.js 靠 `pe:组.项` / `pev:组.项=值` 匹配 47 条诊断提示，所以既有查体项
+ *      的 key、default、options 只能新增，不能改名或删除；拆分出来的新子项一律
+ *      「保留父项 + 新增子项」，父项作为兼容兜底（例如 nervousPE.nerve）。
+ *
+ * 子项约定：细分子项（如 abdomen 的四个触诊子项）默认值为空字符串 ''，
+ * 未填写时不会输出、也不会污染病历正文；正常描述放在 `normal` 字段，
+ * 供界面显示占位、供 hints 判定「填的是正常还是异常」。
  * =========================================================================== */
 
 const SCHEMA = (() => {
@@ -414,15 +431,39 @@ const SCHEMA = (() => {
     {
       key: 'abdomen',
       name: '腹部',
+      // ★ 次序铁律（评分表第3页「腹部检查次序正确得2分」）：
+      //     视诊 → 听诊 → 叩诊 → 触诊
+      //   触诊与叩诊会刺激肠管、改变肠鸣音，所以听诊必须排在它们之前。
+      //   这个数组的顺序就是生成病历时的输出顺序，不要随意调整。
+      //   胸部/心脏不适用本规则，仍为 视诊 → 触诊 → 叩诊 → 听诊。
       items: [
         {
-          key: 'abdInspect', label: '视诊', default: '腹平软，未见腹壁静脉曲张',
-          options: ['腹平软，未见腹壁静脉曲张', '腹部膨隆', '腹壁静脉曲张', '可见胃肠型及蠕动波', '可见手术瘢痕']
+          // ① 视诊：只写腹部形态（2分）。"腹平软"属触诊结论，已移至 abdPalpation。
+          key: 'abdInspect', label: '视诊', default: '腹部平坦，未见腹壁静脉曲张，未见胃肠型及蠕动波',
+          // legacyDefault：旧版本的 default 文本。hints.js 用 `val === item.default`
+          // 判断「用户没改过」，旧存档里可能存着旧文本，两个都要认，否则会误报阳性。
+          legacyDefault: '腹平软，未见腹壁静脉曲张',
+          options: ['腹部平坦，未见腹壁静脉曲张，未见胃肠型及蠕动波', '腹部膨隆', '腹壁静脉曲张', '可见胃肠型及蠕动波', '可见手术瘢痕']
         },
         {
-          key: 'abdPalpation', label: '触诊', default: '全腹无压痛、反跳痛，未触及包块，肝脾肋下未触及',
+          // ② 听诊：必须在触诊、叩诊之前（4分）。评分表要求交代听诊部位与听诊时长。
+          key: 'abdAuscultation', label: '听诊', default: '左上腹听诊1分钟，肠鸣音4次/分',
+          legacyDefault: '肠鸣音正常，约4次/分',
+          options: ['左上腹听诊1分钟，肠鸣音4次/分', '肠鸣音活跃', '肠鸣音减弱', '肠鸣音消失', '可闻及血管杂音']
+        },
+        {
+          // ③ 叩诊：逆时针次序（4分，不要求脾区）
+          key: 'abdPercussion', label: '叩诊', default: '自左下腹起逆时针叩诊，肝区及双肾区无叩击痛，移动性浊音阴性',
+          legacyDefault: '肝区及双肾区无叩击痛，移动性浊音阴性',
+          options: ['自左下腹起逆时针叩诊，肝区及双肾区无叩击痛，移动性浊音阴性', '肝区叩击痛', '双肾区叩击痛', '移动性浊音阳性', '鼓音区缩小']
+        },
+        {
+          // ④ 触诊（10分）。父项保留：hints.js 有 5 条规则依赖 abdomen.abdPalpation，
+          //    其中「急性阑尾炎」等规则的 must 正是它，删改会导致规则静默失效。
+          key: 'abdPalpation', label: '触诊', default: '腹平软，全腹无压痛、反跳痛，未触及包块，肝脾肋下未触及',
+          legacyDefault: '全腹无压痛、反跳痛，未触及包块，肝脾肋下未触及',
           options: [
-            '全腹无压痛、反跳痛，未触及包块，肝脾肋下未触及',
+            '腹平软，全腹无压痛、反跳痛，未触及包块，肝脾肋下未触及',
             '上腹部压痛，无反跳痛',
             '右下腹压痛、反跳痛',
             '全腹压痛、反跳痛，腹肌紧张',
@@ -432,12 +473,26 @@ const SCHEMA = (() => {
           ]
         },
         {
-          key: 'abdPercussion', label: '叩诊', default: '肝区及双肾区无叩击痛，移动性浊音阴性',
-          options: ['肝区及双肾区无叩击痛，移动性浊音阴性', '肝区叩击痛', '双肾区叩击痛', '移动性浊音阳性', '鼓音区缩小']
+          // 触诊细分（各 2.5 分）：默认留空，填了才输出；未填时以上面的 abdPalpation 兜底。
+          // parent 指明聚合父项，供 generator 去重、供 hints 做别名映射。
+          key: 'abdPalpSuperficial', label: '触诊—全腹浅触诊', default: '', parent: 'abdPalpation',
+          normal: '全腹浅触诊无压痛，腹肌柔软',
+          options: ['全腹浅触诊无压痛，腹肌柔软', '上腹部浅触诊压痛', '右下腹浅触诊压痛', '全腹浅触诊压痛，腹肌紧张']
         },
         {
-          key: 'abdAuscultation', label: '听诊', default: '肠鸣音正常，约4次/分',
-          options: ['肠鸣音正常，约4次/分', '肠鸣音活跃', '肠鸣音减弱', '肠鸣音消失', '可闻及血管杂音']
+          key: 'abdPalpDeep', label: '触诊—全腹深触诊', default: '', parent: 'abdPalpation',
+          normal: '全腹深触诊无压痛、反跳痛，未触及包块',
+          options: ['全腹深触诊无压痛、反跳痛，未触及包块', '深触诊可触及包块', '深触诊反跳痛阳性']
+        },
+        {
+          key: 'liverPalpation', label: '触诊—肝', default: '', parent: 'abdPalpation',
+          normal: '肝肋下未触及，肝区无压痛',
+          options: ['肝肋下未触及，肝区无压痛', '肝肋下可触及', '肝区压痛']
+        },
+        {
+          key: 'spleenPalpation', label: '触诊—脾', default: '', parent: 'abdPalpation',
+          normal: '脾肋下未触及',
+          options: ['脾肋下未触及', '脾肋下可触及', '脾肋下可触及且质硬']
         }
       ]
     },
@@ -464,8 +519,42 @@ const SCHEMA = (() => {
           options: ['脊柱生理弯曲存在，无畸形，无压痛及叩击痛，活动度正常', '脊柱侧弯', '脊柱后凸', '胸腰椎压痛', '胸腰椎叩击痛']
         },
         {
+          // 父项保留：hints.js 有 3 条规则依赖 spine.limbs（含 CKD 规则的 must）
           key: 'limbs', label: '四肢', default: '四肢无畸形，关节无红肿，活动自如',
           options: ['四肢无畸形，关节无红肿，活动自如', '双下肢凹陷性水肿', '双下肢非凹陷性水肿', '关节红肿畸形', '杵状指', '四肢肌力减退']
+        },
+        {
+          // 以下为评分表第3-4页「神经系统及四肢」按项给分项的拆分（各 2 分）。
+          // 默认留空，未填写不输出；填了才进病历，正常描述见 normal。
+          // parent 指明聚合父项 limbs，供 generator 去重、供 hints 做别名映射。
+          key: 'limbMuscle', label: '四肢肌力', default: '', parent: 'limbs',
+          normal: '四肢肌力5级',
+          options: ['四肢肌力5级', '四肢肌力4级', '四肢肌力3级', '双上肢肌力正常、双下肢肌力减退', '偏瘫侧肌力减退']
+        },
+        {
+          key: 'kneeJerk', label: '双侧膝跳反射', default: '',
+          normal: '双侧膝跳反射正常对称',
+          options: ['双侧膝跳反射正常对称', '双侧膝跳反射减弱', '双侧膝跳反射亢进', '单侧膝跳反射减弱']
+        },
+        {
+          key: 'edemaAnkle', label: '下肢水肿—踝部', default: '', parent: 'limbs',
+          normal: '双侧踝部无水肿',
+          options: ['双侧踝部无水肿', '双侧踝部凹陷性水肿', '单侧踝部水肿']
+        },
+        {
+          key: 'edemaPretibial', label: '下肢水肿—胫前', default: '', parent: 'limbs',
+          normal: '双侧胫前无水肿',
+          options: ['双侧胫前无水肿', '双侧胫前凹陷性水肿', '单侧胫前水肿']
+        },
+        {
+          key: 'dorsalisPedis', label: '足背动脉搏动', default: '',
+          normal: '双侧足背动脉搏动对称有力',
+          options: ['双侧足背动脉搏动对称有力', '双侧足背动脉搏动减弱', '单侧足背动脉搏动减弱', '单侧足背动脉搏动未触及']
+        },
+        {
+          key: 'radialPulse', label: '桡动脉搏动', default: '',
+          normal: '双侧桡动脉搏动对称',
+          options: ['双侧桡动脉搏动对称', '双侧桡动脉搏动减弱', '脉搏短绌', '水冲脉']
         }
       ]
     },
@@ -474,8 +563,31 @@ const SCHEMA = (() => {
       name: '神经系统',
       items: [
         {
+          // ★ 父项不可删除：hints.js「脑膜炎」等规则 must 依赖 nervousPE.nerve
           key: 'nerve', label: '神经反射', default: '生理反射存在，病理反射未引出',
           options: ['生理反射存在，病理反射未引出', '膝反射减弱', '膝反射亢进', '病理反射阳性', '脑膜刺激征阳性']
+        },
+        {
+          // 以下四项按评分表「腱反射、布氏征、克氏征、巴氏征（每项2分）」分立，
+          // 各 2 分，默认留空。父项 nerve 保留，四项通过 parent 关联回去。
+          key: 'tendonReflex', label: '腱反射', default: '', parent: 'nerve',
+          normal: '双侧肱二头肌、膝腱、跟腱反射正常对称',
+          options: ['双侧肱二头肌、膝腱、跟腱反射正常对称', '腱反射普遍减弱', '腱反射普遍亢进', '单侧腱反射减弱']
+        },
+        {
+          key: 'brudzinski', label: '布氏征（Brudzinski）', default: '', parent: 'nerve',
+          normal: '布氏征阴性',
+          options: ['布氏征阴性', '布氏征阳性']
+        },
+        {
+          key: 'kernig', label: '克氏征（Kernig）', default: '', parent: 'nerve',
+          normal: '克氏征阴性',
+          options: ['克氏征阴性', '克氏征阳性']
+        },
+        {
+          key: 'babinski', label: '巴氏征（Babinski）', default: '', parent: 'nerve',
+          normal: '巴氏征阴性',
+          options: ['巴氏征阴性', '巴氏征阳性', '双侧巴氏征阳性']
         }
       ]
     }
@@ -671,6 +783,10 @@ const SCHEMA = (() => {
         marital: '',
         birthPlace: '',
         occupation: '',
+        // 现住址（generator.buildBasicInfo 已在读，此前未声明，属死字段）
+        address: '',
+        // 病历号/住院号（评分表第2页「询问患者…病历号…」1分；第6页一般项目 2分）
+        recordNo: '',
         admitDate: '',
         recordDate: todayStr(),
         reliability: '可靠',
@@ -682,11 +798,13 @@ const SCHEMA = (() => {
       // 现病史
       hpi: {
         onset: '',              // 起病情况
-        cause: '',              // 诱因
+        cause: '',              // 发病诱因（评分表第2页 2 分）
         symptoms: '',           // 主要症状特点
+        relief: '',             // 缓解因素（评分表第6页现病史明确列出）
         evolution: '',          // 病情进展
         accompanying: '',       // 伴随症状
-        treatment: '',          // 诊治经过
+        negativeDiscriminating: '', // 有鉴别诊断意义的阴性病史（第2页 5 分；第6页现病史）
+        treatment: '',          // 诊治经过（整段手写，覆盖诊治单位/检查/治疗/用药/效果）
         generalCondition: '',   // 一般情况
         extra: ''               // 补充
       },
@@ -697,6 +815,8 @@ const SCHEMA = (() => {
         health: '良好',          // 平素健康状况
         diseaseChecks: {},       // { '高血压': true }
         diseaseOther: '',
+        diseaseDetail: '',       // 慢性病详情（手写优先于勾选；generator 与 hints 均读取）
+        longTermMeds: '',        // 长期用药史（评分表第2页既往史 6 项之一）
         infection: '',
         surgery: '',
         trauma: '',
@@ -705,7 +825,9 @@ const SCHEMA = (() => {
         allergy: '',             // 有无过敏：无 / 有
         allergenChecks: {},      // 过敏原
         allergenOther: '',
-        allergyReaction: '',
+        allergenReactionChecks: {}, // 过敏反应表现勾选（app 已在渲染，此前未声明）
+        allergyReaction: '',     // 过敏反应手写描述
+        otherTreatDiseases: '',  // 与本病无关但仍需治疗的其他疾病（评分表第6页现病史）
         special: ''              // 其他（如传染病接触史）
       },
       // 个人史
@@ -752,7 +874,10 @@ const SCHEMA = (() => {
       family: {
         diseaseChecks: {},
         other: '',
-        deceased: ''
+        deceased: '',
+        // 两系三代遗传疾病史（评分表第2页家族史 5 分 = 类似病情 2.5 + 两系三代 2.5）
+        threeGeneration: '',
+        similarDisease: ''
       },
       // 体格检查
       pe: {
@@ -775,9 +900,67 @@ const SCHEMA = (() => {
       summary: '',
       // 初步诊断
       diagnosis: {
-        confirmed: [],     // 已确认诊断（字符串数组）
+        confirmed: [],     // 已确认诊断（字符串数组，顺序即主次）
         newLine: ''
       },
+
+      /* -------------------------------------------------------------------
+       * 首次病程录 SOAP（评分表第5页 100 分；同时服务第6页「首次病程记录」20 分）
+       *   S 主观简要病史 15 = 概括简练重点突出 10 + 与病史采集一致 5
+       *   O 客观记录     10 = 有意义的体格检查 5 + 相关辅助检查 5
+       *   A 评估与鉴别   40 = 依据(5+5+5) + 主次排序 10 + 鉴别诊断 10 + 不跑题 5
+       *   P 诊疗计划     25 = 符合原则 10 + 与诊断对应 10 + 个体化 5
+       * ----------------------------------------------------------------- */
+      soap: {
+        s: {
+          summary: '',        // 病历特点：对现病史概括简练、重点突出（10）
+          consistency: ''     // 与病史采集病案信息一致性的补充说明（5）
+        },
+        o: {
+          pe: '',             // 对诊断有意义的体格检查（5）；留空则由异常体征自动生成
+          aux: ''             // 与疾病相关的辅助检查结果（5）；留空则由辅助检查自动生成
+        },
+        a: {
+          basis: '',          // 诊断依据概述：简洁完整、不堆砌（5 + 5）
+          basisDetail: [],    // [{ diagnosis, history, pe, aux }] 各项诊断的三项依据（5）
+          ranking: '',        // 诊断准确、主次排序合理（10）
+          diff: [],           // [{ diagnosis, why, against, points }] 鉴别诊断（10）
+          diffNote: ''        // 未出现与诊断无关的鉴别诊断的说明（5）
+        },
+        p: {
+          principle: '',      // 诊疗计划符合基本治疗原则、简明扼要（10）
+          perDiagnosis: [],   // [{ diagnosis, exam, treatment }] 与诊断一一对应（10）
+          individual: ''      // 体现患者病情个体化原则（5）
+        }
+      },
+
+      /* -------------------------------------------------------------------
+       * 出院记录（评分表第6-7页 15 分）
+       * ----------------------------------------------------------------- */
+      discharge: {
+        dischargeDate: '',    // 出院日期（住院天数由 admitDate 推算）
+        admitCondition: '',   // 入院情况：简洁明了、重点突出、入院诊断合理（2）
+        course: '',           // 诊疗经过：病情变化、检查结果、治疗经过及效果（5）
+        dischargeStatus: '',  // 出院情况：主要症状、体征、辅助检查结果（2）
+        diagnoses: [],        // 出院诊断：完整、规范（2）；留空则继承 diagnosis.confirmed
+        advice: {             // 出院医嘱：全面、具体（2）
+          drug: '',           // 药物
+          nonDrug: '',        // 非药物治疗
+          lifestyle: '',      // 生活指导
+          followUp: ''        // 复诊时间
+        }
+      },
+
+      /* -------------------------------------------------------------------
+       * 重点查体（评分表第4页 15 分）
+       * keys 存 '组.key' 形式的查体项引用，如 'chest.lungAuscultation'、
+       * 'abdomen.abdPalpation'、'special_respiratory.respExtra'。
+       * ----------------------------------------------------------------- */
+      focusPE: {
+        keys: [],
+        note: ''
+      },
+
       // 诊断参考提示（工具根据阳性发现给出，默认不自动写入）
       suggestions: { accepted: [] }
     };
@@ -789,11 +972,104 @@ const SCHEMA = (() => {
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   }
 
+  /* ---------------------------------------------------------------------
+   * 八、查体项查询辅助（供 generator / hints / checker 共用）
+   *
+   * 背景：为了让评分表里「按项给分」的查体项能被逐项核对，腹部触诊、神经反射、
+   * 四肢等做了「保留父项 + 新增子项」的拆分。子项默认值为空，未填写就不输出；
+   * 子项一旦被填写，父项就该让位（否则病历里会同时出现两种描述）。
+   * 下面三个函数把这件事收敛到一处，避免各处各写一套判断。
+   * ------------------------------------------------------------------- */
+
+  /** 展平 PE_COMMON 为 [{ group, groupName, item }]，便于按 key 查找 */
+  const PE_INDEX = (() => {
+    const idx = {};
+    PE_COMMON.forEach(group => {
+      group.items.forEach(item => {
+        idx[group.key + '.' + item.key] = { group, groupName: group.name, item };
+      });
+    });
+    return idx;
+  })();
+
+  /**
+   * 查找某个 '组.key' 对应的查体项对象，找不到返回 null。
+   *
+   * 除了普通查体（PE_COMMON），还要支持专科查体引用：
+   * 重点查体里的 key 可以是 'special_neurology.neuroExtra1' 这种形式，
+   * UI 与生成器都支持这种写法，索引也必须覆盖，
+   * 否则专科重点项会被当成「非法 key」而不计分（评审 medium-2）。
+   */
+  function findPEItem(ref) {
+    const text = String(ref || '');
+    const hit = PE_INDEX[text];
+    if (hit) return hit.item;
+    if (text.startsWith('special_')) {
+      const rest = text.slice('special_'.length);
+      const dot = rest.indexOf('.');
+      if (dot <= 0) return null;
+      const spKey = rest.slice(0, dot);
+      const itemKey = rest.slice(dot + 1);
+      const sp = PE_SPECIAL[spKey];
+      if (!sp) return null;
+      return (sp.items || []).find(it => it.key === itemKey) || null;
+    }
+    return null;
+  }
+
+  /** 取一组下以 parent 归属某父项的所有子项 */
+  function childPEItems(groupKey, parentKey) {
+    const g = PE_COMMON.find(x => x.key === groupKey);
+    if (!g) return [];
+    return g.items.filter(it => it.parent === parentKey);
+  }
+
+  /**
+   * 某个子项是否属于「已填写」状态。
+   * 子项默认值为 ''，所以「有值且不等于 normal（正常描述）」才算填过。
+   * 注意：用户可能填的就是 normal 文本，此时也算填过——所以判断标准是「非空」。
+   */
+  function peItemFilled(store, item) {
+    if (!item) return false;
+    const raw = (store || {})[item.key];
+    return raw !== undefined && raw !== null && String(raw).trim() !== '';
+  }
+
+  /**
+   * 父项是否应该让位给子项：
+   * 只要该父项下有任意子项被填写，父项就不再参与输出（由子项接管）。
+   */
+  function parentSupersededByChild(store, groupKey, parentKey) {
+    return childPEItems(groupKey, parentKey).some(it => peItemFilled(store, it));
+  }
+
+  /**
+   * 判断某个查体值是否「仍是默认描述」（即用户没改过）。
+   * 必须同时认 default 与 legacyDefault：本次改动把腹部四项的默认文案改成了
+   * 更贴合评分表的写法，旧存档里存的是旧文案，只比 default 会把它当成阳性发现。
+   *
+   * 另外要忽略尾部标点差异：用户可能在 textarea 里给默认文字补了个句号，
+   * 严格比较会判成「改过」→ 当成阳性体征 → 触发假诊断提示（reviewer 实测 M1）。
+   * @param {object} item PE_COMMON 里的查体项
+   * @param {string} val  当前值
+   */
+  function peValueIsDefault(item, val) {
+    if (!item || !val) return false;
+    const norm = s => String(s).trim().replace(/[，,；;。.、\s]+$/g, '');
+    const v = norm(val);
+    if (item.default && v === norm(item.default)) return true;
+    if (item.legacyDefault && v === norm(item.legacyDefault)) return true;
+    return false;
+  }
+
   return {
     GENDERS, MARITAL, OCCUPATIONS, NATIONALITY, RELIABILITY, DURATION_UNITS,
     ROS, COMMON_PMH, ALLERGENS, ALLERGY_REACTIONS, FAMILY_DISEASES,
     VITALS, PE_COMMON, PE_SPECIAL, DEPARTMENTS,
-    emptyRecord, todayStr
+    emptyRecord, todayStr,
+    // 查体项查询辅助
+    PE_INDEX, findPEItem, childPEItems, peItemFilled, parentSupersededByChild,
+    peValueIsDefault
   };
 })();
 

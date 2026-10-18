@@ -11,6 +11,14 @@
   --red: #d93025;
   --red-light: #fce8e6;
   --green: #1e8e3e;
+  /* 得分三档配色：达标绿 / 待补黄 / 缺失红。
+     单独抽成变量，深色模式只需覆盖这几个值，卡片样式不必跟着改。 */
+  --score-ok: #1e8e3e;
+  --score-ok-bg: #e6f4ea;
+  --score-warn: #b06000;
+  --score-warn-bg: #fef7e0;
+  --score-bad: #c5221f;
+  --score-bad-bg: #fce8e6;
   --gray-1: #f8f9fa;
   --gray-2: #e8eaed;
   --gray-3: #dadce0;
@@ -843,4 +851,669 @@ footer .btn:disabled {
   font-size: calc(12px * var(--fs-scale));
   cursor: pointer;
   font-family: inherit;
+}
+
+/* ===========================================================
+ * 评分自查
+ * 窄屏（412px）约束：所有横向布局都用 flex + min-width:0 允许收缩，
+ * 分数用 tabular-nums 固定字宽，避免百分比换行把卡片撑破。
+ * 放大字号（--fs-scale 最大 1.4）时，标题行允许换行而不是溢出。
+ * =========================================================== */
+
+.tag-score {
+  font-size: calc(11px * var(--fs-scale));
+  color: var(--gray-5);
+  background: var(--gray-2);
+  padding: 1px 7px;
+  border-radius: 4px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* ---------------- 总览 ---------------- */
+
+.check-overall-card { border-left: 3px solid var(--blue); }
+
+.check-overall {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+.check-overall .co-num {
+  flex-shrink: 0;
+  font-size: calc(30px * var(--fs-scale));
+  line-height: 1.1;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.5px;
+}
+
+.check-overall .co-num span {
+  font-size: calc(14px * var(--fs-scale));
+  font-weight: 500;
+  margin-left: 1px;
+}
+
+.check-overall .co-text {
+  flex: 1;
+  min-width: 0;
+  font-size: calc(13px * var(--fs-scale));
+  color: var(--gray-5);
+  line-height: 1.55;
+}
+
+.check-overall .co-text b {
+  color: var(--gray-6);
+  font-size: calc(15px * var(--fs-scale));
+}
+
+/* 四站小比分条 */
+.check-stations {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding-top: 12px;
+  border-top: 1px solid var(--gray-2);
+}
+
+/* 四站小比分条：用 max-content 让站名按自然宽度显示，
+   不截断、也不因为字号放大而把「首次病程录」省略成「首次病…」 */
+.check-mini {
+  display: grid;
+  grid-template-columns: max-content minmax(40px, 1fr) max-content;
+  align-items: center;
+  gap: 8px;
+  font-size: calc(12px * var(--fs-scale));
+}
+
+.check-mini .cm-name {
+  color: var(--gray-5);
+  white-space: nowrap;
+  font-size: calc(12px * var(--fs-scale));
+}
+
+.check-mini .cm-bar {
+  height: 6px;
+  background: var(--gray-2);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.check-mini .cm-bar > i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  transition: width .25s ease;
+}
+
+.check-mini .cm-num {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* ---------------- 得分三档配色 ---------------- */
+
+.ok, .cm-num.ok { color: var(--score-ok); }
+.warn, .cm-num.warn { color: var(--score-warn); }
+.bad, .cm-num.bad { color: var(--score-bad); }
+
+.cm-bar > i.ok,
+.check-bar > i.ok { background: var(--score-ok); }
+.cm-bar > i.warn,
+.check-bar > i.warn { background: #f9ab00; }
+.cm-bar > i.bad,
+.check-bar > i.bad { background: var(--score-bad); }
+
+/* ---------------- 最该补的 3 项 ---------------- */
+
+.top3 {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.top3-item {
+  background: var(--gray-1);
+  border-left: 3px solid #f9ab00;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.top3-head {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.top3-rank {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #f9ab00;
+  color: #fff;
+  font-size: calc(11px * var(--fs-scale));
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+
+.top3-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: calc(14px * var(--fs-scale));
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.top3-station {
+  flex-shrink: 0;
+  font-size: calc(11px * var(--fs-scale));
+  color: var(--gray-4);
+  white-space: nowrap;
+}
+
+.top3-tip {
+  margin-top: 5px;
+  font-size: calc(13px * var(--fs-scale));
+  color: var(--gray-6);
+  line-height: 1.55;
+  word-break: break-word;
+}
+
+.top3-meta {
+  margin-top: 4px;
+  font-size: calc(11px * var(--fs-scale));
+  color: var(--gray-4);
+}
+
+.top3-empty {
+  font-size: calc(13px * var(--fs-scale));
+  color: var(--score-ok);
+  background: var(--score-ok-bg);
+  border-radius: 6px;
+  padding: 10px;
+  border-left: 3px solid var(--score-ok);
+}
+
+/* ---------------- 各考站卡片 ---------------- */
+
+.check-station { padding: 0; overflow: hidden; }
+
+.check-station > summary {
+  padding: 12px 14px;
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  background: #fff;
+}
+
+.check-station > summary::-webkit-details-marker { display: none; }
+
+.check-station > summary::before {
+  content: "▸";
+  color: var(--gray-4);
+  transition: transform .2s;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.check-station[open] > summary::before { transform: rotate(90deg); }
+
+.cs-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-weight: 600;
+  font-size: calc(14px * var(--fs-scale));
+}
+
+.cs-page {
+  display: inline-block;
+  margin-left: 6px;
+  font-weight: 400;
+  font-size: calc(11px * var(--fs-scale));
+  color: var(--gray-4);
+}
+
+.cs-score {
+  flex-shrink: 0;
+  font-size: calc(13px * var(--fs-scale));
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.check-bar {
+  height: 4px;
+  background: var(--gray-2);
+  margin: 0 14px 10px;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.check-bar > i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+}
+
+.check-sum-line {
+  padding: 0 14px;
+  font-size: calc(12px * var(--fs-scale));
+  color: var(--gray-5);
+  line-height: 1.55;
+}
+
+.check-lines {
+  padding: 8px 14px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.check-line {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.cl-dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-top: 6px;
+}
+
+.cl-dot.missing { background: var(--score-bad); }
+.cl-dot.weak { background: #f9ab00; }
+.cl-dot.ok { background: var(--score-ok); }
+
+.cl-body { flex: 1 1 auto; min-width: 0; }
+
+.cl-name {
+  font-size: calc(13px * var(--fs-scale));
+  font-weight: 600;
+  color: var(--gray-6);
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.cl-page {
+  margin-left: 5px;
+  font-weight: 400;
+  font-size: calc(11px * var(--fs-scale));
+  color: var(--gray-4);
+}
+
+.cl-score {
+  margin-left: 5px;
+  font-weight: 500;
+  font-size: calc(11px * var(--fs-scale));
+  color: var(--score-warn);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.cl-tip {
+  margin-top: 3px;
+  font-size: calc(12px * var(--fs-scale));
+  color: var(--gray-5);
+  line-height: 1.55;
+  word-break: break-word;
+}
+
+/* 现场动作分（不计入百分比） */
+.check-process {
+  margin: 6px 14px 12px;
+  padding: 9px 11px;
+  background: var(--gray-1);
+  border-radius: 8px;
+  border-left: 3px solid var(--gray-3);
+}
+
+.cp-title {
+  font-size: calc(12px * var(--fs-scale));
+  font-weight: 600;
+  color: var(--gray-5);
+  margin-bottom: 4px;
+}
+
+.cp-line {
+  font-size: calc(12px * var(--fs-scale));
+  color: var(--gray-5);
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.btn-jump {
+  display: block;
+  width: calc(100% - 28px);
+  margin: 0 14px 14px;
+  text-align: center;
+  font-size: calc(13px * var(--fs-scale));
+}
+
+.check-notes .note-list {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  font-size: calc(12px * var(--fs-scale));
+  color: var(--gray-5);
+  line-height: 1.6;
+}
+
+.check-notes .note-list li { margin-bottom: 5px; }
+
+/* ===========================================================
+ * 生成视图切换（大病历 / 首次病程录 / 出院记录）
+ * =========================================================== */
+
+.view-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding: 3px;
+  background: var(--gray-1);
+  border-radius: 9px;
+}
+
+.view-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 8px 4px;
+  font-size: calc(13px * var(--fs-scale));
+  font-family: inherit;
+  color: var(--gray-5);
+  background: transparent;
+  border: none;
+  border-radius: 7px;
+  cursor: pointer;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.view-btn.on {
+  background: #fff;
+  color: var(--blue-dark);
+  font-weight: 600;
+  box-shadow: var(--shadow);
+}
+
+/* ===========================================================
+ * 首次病程录 / 出院记录录入区
+ * =========================================================== */
+
+.soap-card > summary {
+  font-size: calc(15px * var(--fs-scale));
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.soap-sec {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--gray-2);
+}
+
+.soap-sec-title {
+  font-size: calc(14px * var(--fs-scale));
+  font-weight: 600;
+  color: var(--blue-dark);
+  margin-bottom: 8px;
+}
+
+.soap-sec-title .muted {
+  font-weight: 400;
+  font-size: calc(11px * var(--fs-scale));
+}
+
+.soap-subtitle {
+  font-size: calc(13px * var(--fs-scale));
+  color: var(--gray-5);
+  font-weight: 500;
+  margin: 10px 0 6px;
+}
+
+.soap-row {
+  background: var(--gray-1);
+  border-radius: 8px;
+  padding: 9px 10px;
+  margin-bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.soap-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.soap-row-title {
+  flex: 1;
+  font-size: calc(12px * var(--fs-scale));
+  font-weight: 600;
+  color: var(--gray-5);
+}
+
+.soap-row input {
+  font-size: calc(14px * var(--fs-scale));
+  padding: 8px 10px;
+}
+
+.soap-row .btn-del {
+  width: 28px;
+  height: 28px;
+  font-size: 16px;
+}
+
+/* ===========================================================
+ * 重点查体（第4页 15分）：已标记项以标签展示，可单个移除
+ * =========================================================== */
+
+.focus-picked {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin: 8px 0;
+  min-height: 1px;
+}
+
+.focus-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 5px 4px 5px 10px;
+  font-size: calc(12px * var(--fs-scale));
+  line-height: 1.4;
+  color: var(--blue-dark);
+  background: var(--blue-light);
+  border: 1px solid var(--blue);
+  border-radius: 14px;
+  word-break: break-word;
+}
+
+.focus-x {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--blue-dark);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.focus-x:active { background: rgba(0,0,0,.12); }
+
+.focus-chips { max-height: 240px; overflow: auto; }
+
+/* ===========================================================
+ * 窄屏适配（412px 视口）：把横向排布改为纵向堆叠，
+ * 保证 15px 根字号 + 1.4 倍放大时仍然不横向滚动。
+ * =========================================================== */
+
+@media (max-width: 420px) {
+  .check-overall { gap: 10px; }
+  .check-overall .co-num { font-size: calc(26px * var(--fs-scale)); }
+  .check-mini { gap: 6px; }
+  .cs-page, .cl-page { display: none; }
+  .check-station > summary { padding: 11px 12px; }
+  .check-lines, .check-sum-line { padding-left: 12px; padding-right: 12px; }
+  .btn-jump { width: calc(100% - 24px); margin: 0 12px 12px; }
+}
+
+/* 放大字号时允许标题行换行，分数换到下一行而不是把卡片撑出屏幕 */
+@media (max-width: 420px) {
+  .check-station > summary { align-items: flex-start; }
+  .cs-name { flex-basis: 100%; }
+  .cs-score { margin-left: 18px; }
+  .check-mini { grid-template-columns: max-content minmax(24px, 1fr) max-content; }
+}
+
+/* 极窄屏（<=340px，如 iPhone SE 竖屏 + 大字号） */
+@media (max-width: 340px) {
+  .check-mini { font-size: calc(11px * var(--fs-scale)); gap: 5px; }
+  .check-mini .cm-name { font-size: calc(11px * var(--fs-scale)); }
+  .top3-head { gap: 5px; }
+  .view-btn { padding: 8px 2px; font-size: calc(12px * var(--fs-scale)); }
+}
+
+/* ===========================================================
+ * 深色模式
+ * 只覆盖颜色变量与卡片底色，布局不动；得分三档配色在深色下
+ * 换成高明度版本，保证对比度不低于 4.5:1。
+ * =========================================================== */
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --blue: #8ab4f8;
+    --blue-dark: #aecbfa;
+    --blue-light: #1f2b40;
+    --red: #f28b82;
+    --red-light: #3b1d1b;
+    --green: #81c995;
+    --score-ok: #81c995;
+    --score-ok-bg: #14281a;
+    --score-warn: #fdd663;
+    --score-warn-bg: #322a14;
+    --score-bad: #f28b82;
+    --score-bad-bg: #3b1d1b;
+    --gray-1: #1f1f1f;
+    --gray-2: #2c2c2c;
+    --gray-3: #444746;
+    --gray-4: #9aa0a6;
+    --gray-5: #bdc1c6;
+    --gray-6: #e8eaed;
+    --shadow: 0 1px 3px rgba(0,0,0,.5);
+  }
+
+  html, body { background: #131314; color: var(--gray-6); }
+
+  header, footer { background: #1f1f1f; border-color: var(--gray-2); }
+
+  .card,
+  .hint-card,
+  .ros-group > summary,
+  .pe-group > summary,
+  .check-station > summary { background: #1f1f1f; color: var(--gray-6); }
+
+  .topbar .btn-icon { background: var(--gray-2); color: var(--gray-5); }
+
+  input[type="text"],
+  input[type="number"],
+  input[type="date"],
+  textarea,
+  select {
+    background: #2c2c2c;
+    color: var(--gray-6);
+    border-color: var(--gray-3);
+  }
+
+  .seg-btn, .chip, .jump-btn, .btn-ghost, .view-btn { background: #2c2c2c; color: var(--gray-5); }
+  .seg-btn.on, .btn { color: #131314; }
+  .btn-ghost { color: var(--blue); border-color: var(--gray-3); }
+  .btn-ghost:active { background: var(--blue-light); }
+
+  .view-btn.on {
+    background: #3c4043;
+    color: var(--blue-dark);
+    box-shadow: none;
+  }
+
+  .view-tabs { background: #2c2c2c; }
+
+  .chip.on { background: var(--blue-light); color: var(--blue); }
+  .chip-sym.on { background: var(--red-light); color: var(--red); }
+
+  .output, .top3-item, .soap-row, .check-process { background: #2c2c2c; color: var(--gray-6); }
+
+  .warn-item { background: var(--score-warn-bg); color: var(--score-warn); }
+  .ok-item { background: var(--score-ok-bg); color: var(--score-ok); }
+  .top3-empty { background: var(--score-ok-bg); color: var(--score-ok); }
+
+  .tag-score { background: #3c4043; color: var(--gray-5); }
+
+  .storage-alert { background: var(--score-bad-bg); border-color: var(--score-bad); color: var(--score-bad); }
+  .storage-alert .alert-x { background: #2c2c2c; border-color: var(--score-bad); color: var(--score-bad); }
+
+  .live-preview { background: var(--blue-light); color: var(--blue-dark); }
+  .hint-note { background: #2c2c2c; }
+
+  .focus-tag {
+    background: var(--blue-light);
+    color: var(--blue);
+    border-color: var(--blue);
+  }
+  .focus-x { color: var(--blue); }
+  .focus-x:active { background: rgba(255,255,255,.15); }
+
+  .modal { background: #1f1f1f; }
+  .modal-mask { background: rgba(0,0,0,.65); }
+
+  #toast { background: rgba(232,234,237,.95); color: #202124; }
+}
+
+/* ---------------- 首次病程录的自查提醒（正文之外） ---------------- */
+
+.selfcheck-notes {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: #fef7e0;
+  border-left: 3px solid #f9ab00;
+  border-radius: 8px;
+}
+
+.scn-title {
+  font-size: calc(13px * var(--fs-scale));
+  font-weight: 600;
+  color: #b06000;
+  margin-bottom: 6px;
+}
+
+.scn-line {
+  font-size: calc(12px * var(--fs-scale));
+  color: var(--gray-6);
+  line-height: 1.6;
 }

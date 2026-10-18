@@ -1,4 +1,12 @@
-/* 把 src/ 下的 schema + generator + hints + app + css 内联成单独的 HTML 文件
+/* 把 src/ 下的 schema + core + checker + generator + hints + app + css
+ * 内联成单独的 HTML 文件。
+ *
+ * 内联顺序即运行期依赖顺序，不可随意调整：
+ *   SCHEMA → CORE → CHECKER → GENERATOR → HINTS → APP
+ * CHECKER 必须在 GENERATOR 之前：两者都只用到 SCHEMA，但 checker 在
+ * 自查结果里做「腹部查体实际输出次序」校验时会调用 GENERATOR（运行时判断，
+ * 存在才比对），保证 CHECKER 先于 GENERATOR 定义不影响事后调用。
+ *
  * 用法：node build.js
  */
 const fs = require('fs');
@@ -20,6 +28,7 @@ function stripModule(code) {
 function main() {
   const schema = stripModule(read('schema.js'));
   const core = stripModule(read('core.js'));
+  const checker = stripModule(read('checker.js'));
   const generator = stripModule(read('generator.js'));
   const hints = stripModule(read('hints.js'));
   const app = read('app.js');
@@ -30,6 +39,7 @@ function main() {
     .replace('/*__CSS__*/', () => css)
     .replace('/*__SCHEMA__*/', () => schema)
     .replace('/*__CORE__*/', () => core)
+    .replace('/*__CHECKER__*/', () => checker)
     .replace('/*__GENERATOR__*/', () => generator)
     .replace('/*__HINTS__*/', () => hints)
     .replace('/*__APP__*/', () => app);

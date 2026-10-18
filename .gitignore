@@ -6,8 +6,19 @@ node_modules/
 .DS_Store
 Thumbs.db
 
-# 测试截图
+# 测试截图与临时探针输出
 dist/shots/
+dist/t5shots/
+dist/probe/
+dist/online-shots/
+
+# 团队协作状态
+.agent-teams/
+
+# 从 PDF 提取的评分表原文
+# 仓库是公开的，评分表原属医院内部培训材料，不宜原样上传；
+# docs/评分表对齐说明.md 是我们自己的整理，可以提交。
+tools/评分表全文.txt
 
 # 编辑器
 .vscode/

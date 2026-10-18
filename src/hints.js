@@ -1,4 +1,4 @@
-﻿/* ===========================================================================
+/* ===========================================================================
  * 诊断参考提示（不自动写入病历，仅作为清单提醒，由使用者自行判断）
  *
  * 匹配键说明：
@@ -507,6 +507,84 @@ const HINTS = (() => {
     }
   ];
 
+  /* ---------------------- 查体项别名映射（P1-14） ---------------------- */
+
+  /**
+   * 查体项被拆分后，旧的聚合 key 仍然被规则引用，必须保持可用。
+   *
+   * 背景：为了让评分表里「按项给分」的查体能被逐项核对，abdomen / nervousPE /
+   * spine 三组做了「保留父项 + 新增子项」的拆分。子项的默认值是空字符串，
+   * 用户填了子项之后父项就一直是默认值，于是 `pe:abdomen.abdPalpation` 这类
+   * 键永远不会产生——而「急性阑尾炎」「中枢神经系统感染」等规则的 must 正是它，
+   * 结果会是**静默失效**：不报错，只是该提示的再也不提示。
+   *
+   * 两级映射：
+   *   PE_ALIAS       key 级：子项阳性 → 激活父项的 pe: 键（满足 must）
+   *   PE_VALUE_ALIAS 值级：把子项的具体阳性描述折算成父项规则认识的 pev: 值
+   *                  （满足 match 计数），折算只做临床上一一对应的情形
+   */
+  const PE_ALIAS = {
+    // 腹部触诊 4 子项 → 聚合父项 abdPalpation
+    'abdomen.abdPalpSuperficial': ['abdomen.abdPalpation'],
+    'abdomen.abdPalpDeep': ['abdomen.abdPalpation'],
+    'abdomen.liverPalpation': ['abdomen.abdPalpation'],
+    'abdomen.spleenPalpation': ['abdomen.abdPalpation'],
+    // 神经反射 4 子项 → 聚合父项 nerve
+    'nervousPE.tendonReflex': ['nervousPE.nerve'],
+    'nervousPE.brudzinski': ['nervousPE.nerve'],
+    'nervousPE.kernig': ['nervousPE.nerve'],
+    'nervousPE.babinski': ['nervousPE.nerve'],
+    // 四肢 3 子项 → 聚合父项 limbs（膝跳反射/足背动脉/桡动脉无父项，不映射）
+    'spine.limbMuscle': ['spine.limbs'],
+    'spine.edemaAnkle': ['spine.limbs'],
+    'spine.edemaPretibial': ['spine.limbs']
+  };
+
+  /**
+   * 值级映射：把子项的具体阳性描述折算成父项规则认识的 pev: 值。
+   *
+   * 只收录「临床上一一对应、折算不会凭空增加事实」的情形：
+   *   布氏征/克氏征阳性 ⇔ 脑膜刺激征阳性（这是定义）
+   *   巴氏征阳性     ⇔ 病理反射阳性（这是定义）
+   *   踝部/胫前凹陷性水肿 ⇔ 双下肢凹陷性水肿（部位包含关系）
+   *   肌力 3/4 级     ⇔ 四肢肌力减退（这是定义）
+   *
+   * ★★ 腹部触诊刻意**不**折算——这是有意为之，不是遗漏，不要「修好」它 ★★
+   *
+   * 腹部子项（abdPalpSuperficial / abdPalpDeep / liverPalpation / spleenPalpation）
+   * 只做了 key 级映射（PE_ALIAS，让规则 must 仍能命中），值级折算一律不做。
+   *
+   * 原因：父项的候选值写的是「右下腹压痛、反跳痛」，而子项往往只写了「压痛」。
+   * 一旦按值折算，就等于替医生补上「反跳痛」这个**更严重的、实际没有检查**的体征。
+   * 病历是医疗记录，工具可以少提示（漏报只是少一个提醒，医生自己会判断），
+   * 但绝不能凭空生成没做过的查体发现（误报会直接写进病历、误导诊疗）。
+   *
+   * 代价很小且已验证：只填「右下腹浅触诊压痛」时，「急性阑尾炎」规则靠
+   * must=['pe:abdomen.abdPalpation'] 仍能命中，match 计数靠
+   * 「转移性右下腹痛」「发热」等其他条目已满足 need=2。
+   *
+   * 如果将来有人觉得「少折算一条是 bug」又想加回去，请先读上面这段：
+   * 折算方向必须是「文字完全对应」，不允许从「压痛」推出「反跳痛」。
+   * 目前只保留了 liverPalpation / spleenPalpation 两个文字完全对应的折算。
+   */
+  const PE_VALUE_ALIAS = {
+    // 神经：布氏征/克氏征阳性 = 脑膜刺激征阳性；巴氏征阳性 = 病理反射阳性
+    'nervousPE.brudzinski=布氏征阳性': ['pev:nervousPE.nerve=脑膜刺激征阳性'],
+    'nervousPE.kernig=克氏征阳性': ['pev:nervousPE.nerve=脑膜刺激征阳性'],
+    'nervousPE.babinski=巴氏征阳性': ['pev:nervousPE.nerve=病理反射阳性'],
+    'nervousPE.babinski=双侧巴氏征阳性': ['pev:nervousPE.nerve=病理反射阳性'],
+    // 四肢水肿：踝部/胫前凹陷性水肿即「双下肢凹陷性水肿」
+    'spine.edemaAnkle=双侧踝部凹陷性水肿': ['pev:spine.limbs=双下肢凹陷性水肿'],
+    'spine.edemaPretibial=双侧胫前凹陷性水肿': ['pev:spine.limbs=双下肢凹陷性水肿'],
+    // 四肢肌力减退
+    'spine.limbMuscle=四肢肌力4级': ['pev:spine.limbs=四肢肌力减退'],
+    'spine.limbMuscle=四肢肌力3级': ['pev:spine.limbs=四肢肌力减退'],
+    'spine.limbMuscle=双上肢肌力正常、双下肢肌力减退': ['pev:spine.limbs=四肢肌力减退'],
+    // 腹部：只折算文字完全对应的情形（不补「反跳痛」）
+    'abdomen.liverPalpation=肝肋下可触及': ['pev:abdomen.abdPalpation=肝肋下可触及'],
+    'abdomen.spleenPalpation=脾肋下可触及': ['pev:abdomen.abdPalpation=脾肋下可触及']
+  };
+
   /* ---------------------- 从病历中抽取"发现" ---------------------- */
 
   function extractFindings(r) {
@@ -515,9 +593,12 @@ const HINTS = (() => {
 
     // 主诉 + 现病史关键词
     // 注意：先剔除否定从句（"无咯血、盗汗""否认胸痛"），否则阴性描述会被误判为阳性
+    // 刻意不纳入 hpi.negativeDiscriminating：它是整段阴性病史，"无咯血、盗汗、消瘦"
+    // 按顿号切开后「盗汗」「消瘦」会丢掉否定前缀，反而被误判成阳性。
     const rawText = [
       b.chiefComplaint || '',
-      (r.hpi || {}).onset || '', (r.hpi || {}).symptoms || '',
+      (r.hpi || {}).onset || '', (r.hpi || {}).cause || '',
+      (r.hpi || {}).symptoms || '', (r.hpi || {}).relief || '',
       (r.hpi || {}).evolution || '', (r.hpi || {}).accompanying || ''
     ].join('，');
     const NEG_RE = /^(无|未|不|否认|没有|未见|未出现|无明显|无明|否认有)/;
@@ -584,13 +665,36 @@ const HINTS = (() => {
     }
 
     // 体格检查：异常项用 pe: 与 pev: 两种键
+    //
+    // 两个必须在这里处理的兼容问题：
+    //   ① 默认值比对不能用 `val === it.default`：t2 按评分表重写了腹部四项的默认
+    //      文案，旧存档里存的是旧文案（legacyDefault），只比 default 会把一个完全
+    //      正常的腹部读成 4 条阳性发现。统一交给 SCHEMA.peValueIsDefault。
+    //   ② 查体项拆分后（父项保留 + 新增子项），用户改用子项时父项会保持默认值，
+    //      于是 pe:组.父项 永远不产生，而 47 条规则里的 must 恰恰指着父项
+    //      → 规则会静默失效（不报错、只是不再提示）。所以子项一旦是异常值，
+    //      必须把对应的旧聚合 key 一并激活。映射表见 PE_ALIAS。
+    // 统一去掉尾部标点后再生成 pev: 键。
+    // 用户在文本框里补一个句号（"右下腹压痛、反跳痛。"）时，
+    // 若用原始串拼 key，值别名映射会精确匹配失败，规则静默丢掉一条 match（评审 medium-3）。
+    const normVal = s => String(s).trim().replace(/[，,；;。.、\s]+$/g, '');
+
     (SCHEMA.PE_COMMON || []).forEach(g => {
       g.items.forEach(it => {
         const val = (GENERATOR.peValue ? GENERATOR.peValue(r, g.key, it) : '') || '';
         if (!val) return;
-        if (it.default && val === it.default) return;
+        if (SCHEMA.peValueIsDefault ? SCHEMA.peValueIsDefault(it, val) : (it.default && val === it.default)) return;
+        // 子项默认值是空字符串，用户很可能直接选「正常」那条（item.normal）。
+        // 选正常 = 没异常，不能产生 pe: / pev:，否则会凭空触发诊断提示。
+        if (it.normal && normVal(val) === normVal(it.normal)) return;
+        const v = normVal(val);
+        if (!v) return;   // 只有一个标点的输入不算阳性
         F.add(`pe:${g.key}.${it.key}`);
-        F.add(`pev:${g.key}.${it.key}=${val}`);
+        F.add(`pev:${g.key}.${it.key}=${v}`);
+        // 子项阳性 → 同步激活旧聚合 key，并折算成父项规则认识的值
+        const fullKey = `${g.key}.${it.key}`;
+        (PE_ALIAS[fullKey] || []).forEach(parentRef => { F.add(`pe:${parentRef}`); });
+        (PE_VALUE_ALIAS[`${fullKey}=${v}`] || []).forEach(k => F.add(k));
       });
     });
     const deptKey = b.department || 'general';
@@ -599,9 +703,11 @@ const HINTS = (() => {
       (((SCHEMA.PE_SPECIAL[sp] || {}).items) || []).forEach(it => {
         const val = (GENERATOR.peValue ? GENERATOR.peValue(r, 'special_' + sp, it) : '') || '';
         if (!val) return;
-        if (it.default && val === it.default) return;
+        if (SCHEMA.peValueIsDefault ? SCHEMA.peValueIsDefault(it, val) : (it.default && val === it.default)) return;
+        const v = normVal(val);
+        if (!v) return;
         F.add(`pe:special_${sp}.${it.key}`);
-        F.add(`pev:special_${sp}.${it.key}=${val}`);
+        F.add(`pev:special_${sp}.${it.key}=${v}`);
       });
     });
 
@@ -663,7 +769,7 @@ const HINTS = (() => {
     return out;
   }
 
-  return { RULES, analyze, extractFindings };
+  return { RULES, analyze, extractFindings, PE_ALIAS, PE_VALUE_ALIAS };
 })();
 
 if (typeof module !== 'undefined' && module.exports) {

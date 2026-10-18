@@ -250,7 +250,21 @@ async function main() {
   const diagCount = await evaluate('document.querySelectorAll("[data-diag]").length');
   results.push(['添加诊断', diagCount === 1, `诊断条数=${diagCount}`]);
 
-  // 11. 生成病历
+  // 11. 评分自查（新增的第 11 步）
+  await evaluate('document.getElementById("btnNext").click()');
+  await sleep(500);
+  const checkTitle = await evaluate('document.getElementById("stepTitle").textContent');
+  const checkStations = await evaluate('document.querySelectorAll(".check-station").length');
+  const checkTop3 = await evaluate('document.querySelectorAll(".top3-item").length');
+  const checkPct = await evaluate(`(() => {
+    const el = document.querySelector('.check-head .pct, .check-head b');
+    return el ? el.textContent.trim() : '';
+  })()`);
+  results.push(['评分自查页', checkTitle === '评分自查' && checkStations === 4,
+    `标题=${checkTitle} 考站卡片=${checkStations} 待补=${checkTop3} 总分=${checkPct || 'n/a'}`]);
+  await shot('08-check');
+
+  // 12. 生成病历（第 12 步）
   await evaluate('document.getElementById("btnNext").click()');
   await sleep(500);
   const outTitle = await evaluate('document.getElementById("stepTitle").textContent');
@@ -261,7 +275,24 @@ async function main() {
     && outText.includes('社区获得性肺炎');
   results.push(['生成病历', outTitle === '生成病历' && hasSections && hasData,
     `标题=${outTitle} 章节齐全=${hasSections} 数据注入=${hasData}`]);
-  await shot('08-output');
+  await shot('09-output');
+
+  // 13. 三种视图切换
+  const views = await evaluate(`(() => {
+    const out = {};
+    for (const key of ['firstCourse', 'discharge', 'record']) {
+      const btn = document.querySelector('[data-view="' + key + '"]');
+      if (!btn) { out[key] = -1; continue; }
+      btn.click();
+      const t = document.getElementById('outputText');
+      out[key] = t ? t.textContent.length : -1;
+    }
+    return out;
+  })()`);
+  const viewsOk = views.record > 200 && views.firstCourse > 50 && views.discharge > 50;
+  results.push(['三视图切换', viewsOk,
+    `大病历=${views.record} 首次病程录=${views.firstCourse} 出院记录=${views.discharge}`]);
+  await shot('10-views');
 
   // 12. 本地保存
   await evaluate('document.getElementById("btnSave").click()');

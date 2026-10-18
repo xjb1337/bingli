@@ -335,9 +335,20 @@ test('getRecord 返回当前病历对象', () => {
   assert.ok(r && r.basic, '应返回有病历结构的对象');
 });
 
-test('STEPS 有 11 个步骤', () => {
+test('STEPS 有 12 个步骤', () => {
   const app = boot();
-  assert.equal(app.run('APP.STEPS.length'), 11);
+  assert.equal(app.run('APP.STEPS.length'), 12);
+});
+
+test('STEPS 含「评分自查」步骤，且排在摘要与诊断之后、生成病历之前', () => {
+  const app = boot();
+  const keys = app.run('APP.STEPS.map(s => s.key)');
+  const names = app.run('APP.STEPS.map(s => s.name)');
+  assert.ok(names.includes('评分自查'), '步骤里应有「评分自查」');
+  const iCheck = keys.indexOf('check');
+  assert.ok(iCheck > 0, '应有 check 步骤');
+  assert.equal(keys[iCheck - 1], 'summary', '「评分自查」应在「摘要与诊断」之后');
+  assert.equal(keys[iCheck + 1], 'output', '「评分自查」应在「生成病历」之前');
 });
 
 test('沙箱内不发起网络请求', () => {

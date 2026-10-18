@@ -36,6 +36,7 @@ test('发布产物存在', () => {
 const MODULES = [
   ['schema.js', 'SCHEMA'],
   ['core.js', 'RECORD_CORE'],
+  ['checker.js', 'CHECKER'],
   ['generator.js', 'GENERATOR'],
   ['hints.js', 'HINTS']
 ];
@@ -85,20 +86,23 @@ test('产物中的样式与源码一致', () => {
 
 /* ======================= 结构完整性 ======================= */
 
-test('产物中四个模块按正确顺序内联', () => {
+test('产物中五个模块按正确顺序内联', () => {
   const html = distHtml();
   const iSchema = html.indexOf('const SCHEMA =');
   const iCore = html.indexOf('const RECORD_CORE =');
+  const iChecker = html.indexOf('const CHECKER =');
   const iGen = html.indexOf('const GENERATOR =');
   const iHints = html.indexOf('const HINTS =');
   const iApp = html.indexOf('const APP =');
 
-  for (const [name, idx] of [['SCHEMA', iSchema], ['CORE', iCore], ['GENERATOR', iGen], ['HINTS', iHints], ['APP', iApp]]) {
+  for (const [name, idx] of [['SCHEMA', iSchema], ['CORE', iCore], ['CHECKER', iChecker],
+    ['GENERATOR', iGen], ['HINTS', iHints], ['APP', iApp]]) {
     assert.ok(idx > 0, `产物中缺少 ${name} 模块`);
   }
-  // 依赖顺序：schema → core → generator → hints → app
+  // 依赖顺序：schema → core → checker → generator → hints → app
   assert.ok(iSchema < iCore, 'SCHEMA 应在 CORE 之前');
-  assert.ok(iCore < iGen, 'CORE 应在 GENERATOR 之前');
+  assert.ok(iCore < iChecker, 'CORE 应在 CHECKER 之前');
+  assert.ok(iChecker < iGen, 'CHECKER 应在 GENERATOR 之前');
   assert.ok(iGen < iHints, 'GENERATOR 应在 HINTS 之前');
   assert.ok(iHints < iApp, 'HINTS 应在 APP 之前');
 });
@@ -133,6 +137,9 @@ test('产物声明 UTF-8 编码与移动端 viewport', () => {
 
 test('产物体积在合理范围（手机加载要快）', () => {
   const kb = fs.statSync(DIST).size / 1024;
-  assert.ok(kb < 400, `产物 ${kb.toFixed(1)}KB 偏大`);
+  // 这个断言只用来兜住「模块被重复内联」这类失控增长，不是精确预算。
+  // 参考：2026-10 加入 checker.js（四个考站的自查规则库）后约 390KB，
+  // 经 GitHub Pages 传输时 gzip 后约 80KB，手机上可接受。
+  assert.ok(kb < 700, `产物 ${kb.toFixed(1)}KB 偏大，先检查是否模块被重复内联`);
   assert.ok(kb > 50, `产物 ${kb.toFixed(1)}KB 异常偏小，可能内容缺失`);
 });
