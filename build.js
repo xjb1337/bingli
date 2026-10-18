@@ -1,0 +1,45 @@
+/* 把 src/ 下的 schema + generator + hints + app + css 内联成单独的 HTML 文件
+ * 用法：node build.js
+ */
+const fs = require('fs');
+const path = require('path');
+
+const SRC = path.join(__dirname, 'src');
+const OUT_DIR = path.join(__dirname, 'dist');
+const OUT = path.join(OUT_DIR, '大病历生成器.html');
+
+function read(name) {
+  return fs.readFileSync(path.join(SRC, name), 'utf8');
+}
+
+/** 去掉 node 的 module.exports 尾巴，避免浏览器里报错 */
+function stripModule(code) {
+  return code.replace(/\nif\s*\(typeof\s+module[\s\S]*?\n\}\s*$/m, '\n');
+}
+
+function main() {
+  const schema = stripModule(read('schema.js'));
+  const core = stripModule(read('core.js'));
+  const generator = stripModule(read('generator.js'));
+  const hints = stripModule(read('hints.js'));
+  const app = read('app.js');
+  const css = read('style.css');
+  const html = read('index.html');
+
+  const out = html
+    .replace('/*__CSS__*/', () => css)
+    .replace('/*__SCHEMA__*/', () => schema)
+    .replace('/*__CORE__*/', () => core)
+    .replace('/*__GENERATOR__*/', () => generator)
+    .replace('/*__HINTS__*/', () => hints)
+    .replace('/*__APP__*/', () => app);
+
+  if (!fs.existsSync(OUT_DIR)) fs.mkdirSync(OUT_DIR, { recursive: true });
+  fs.writeFileSync(OUT, out, 'utf8');
+
+  const kb = (Buffer.byteLength(out, 'utf8') / 1024).toFixed(1);
+  console.log(`已生成：${OUT}`);
+  console.log(`文件大小：${kb} KB`);
+}
+
+main();
