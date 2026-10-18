@@ -121,11 +121,21 @@ async function main() {
   const lsOk = await ev(`(() => { try { localStorage.setItem('__t','1'); const v=localStorage.getItem('__t'); localStorage.removeItem('__t'); return v==='1'; } catch(e){ return 'ERR'; } })()`);
   check('线上 localStorage 可用', lsOk === true, String(lsOk));
 
-  // 6. 直接跳到生成页
-  await ev(`(() => { for (let i=0;i<10;i++) document.getElementById('btnNext').click(); })()`);
+  // 6. 走到生成页（共 12 步：点 11 次下一步，末步才是生成）
+  //    注意别写死次数：以步骤标题为准，避免以后再加步骤时又静默失败。
+  const reached = await ev(`(() => {
+    const title = () => (document.getElementById('stepTitle')||{}).textContent || '';
+    for (let i = 0; i < 20 && title() !== '生成病历'; i++) {
+      const btn = document.getElementById('btnNext');
+      if (!btn) break;
+      btn.click();
+    }
+    return title();
+  })()`);
   await sleep(1200);
   const outLen = await ev(`(() => { const t=document.getElementById('outputText'); return t?t.textContent.length:0; })()`);
-  check('生成病历可用', outLen > 300, `输出长度=${outLen}`);
+  check('生成病历可用', reached === '生成病历' && outLen > 300,
+    `到达步骤=${reached} 输出长度=${outLen}`);
   await shot('online-02');
 
   // 7. 保存并刷新恢复
