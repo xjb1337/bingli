@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "dabingli",
   "version": "2.0.0",
   "private": true,
@@ -9,7 +9,9 @@
     "test": "node --test tests/*.test.cjs",
     "test:core": "node --test tests/core.test.cjs",
     "test:ui": "node --test tests/app.test.cjs",
-    "sweep": "node tools/sweep-abnormal.js",`r`n    "cases": "node tools/case-table.js",`r`n    "review-cases": "node tools/verify-review-cases.js",
+    "sweep": "node tools/sweep-abnormal.js",
+    "cases": "node tools/case-table.js",
+    "review-cases": "node tools/verify-review-cases.js",
     "coverage": "node --experimental-test-coverage --test --test-coverage-include=src/core.js --test-coverage-include=src/generator.js --test-coverage-include=src/hints.js --test-coverage-include=src/checker.js tests/core.test.cjs tests/generator.test.cjs tests/generator.scoring.test.cjs tests/checker.test.cjs tests/review-regression.test.cjs tests/abnormal-pe.test.cjs",
     "verify": "node build.js && node tools/sweep-abnormal.js && node tools/case-table.js && node tools/verify-review-cases.js && node --test tests/*.test.cjs",
     "samples": "node test/samples.js",
