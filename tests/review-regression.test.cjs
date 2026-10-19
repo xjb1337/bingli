@@ -197,34 +197,49 @@ test('M8 首次病程录正文不得包含任何自查提示文字', () => {
  * 这条测试是上一轮评审发现的回归防线：
  * 曾经用「异常关键词白名单」判定阳性，结果 41/41 个内置异常选项全部漏报。
  * 现在改为「默认阳性、只排除明确阴性」，这里穷举 schema 里所有选项验证。
+ *
+ * 注意两点（都是评审踩过的坑）：
+ *   1) 必须遍历专科查体（PE_SPECIAL）。产科内置项「未闻及胎心」是阳性体征，
+ *      只测 PE_COMMON 会把它漏掉。
+ *   2) 不能把「未闻及」当成"期望阴性"的话头——「未闻及胎心」是阳性，
+ *      「未闻及病理性杂音」才是阴性。NEG_START 里不列「未闻及」。
  */
-test('H1 回归：schema 里所有非默认异常选项都应被识别为阳性体征', () => {
-  const NORMAL_OPTIONS = new Set([
+test('H1 回归：schema 里所有非默认异常选项都应被识别为阳性体征（含专科）', () => {
+  const NOT_A_FINDING = new Set([
+    '未查', '未查见',
     '营养良好', '营养中等', '营养一般', '查体合作',
     '神志清楚', '神志清楚，精神可', '神志清楚，精神一般',
     '自动体位', '面容自然', '皮肤弹性良好', '毛发分布均匀',
-    '颈软，无抵抗', '气管居中', '腹平软，未见腹壁静脉曲张', '肛门指检未触及异常'
+    '颈软，无抵抗', '气管居中', '腹平软，未见腹壁静脉曲张', '肛门指检未触及异常',
+    '前囟平软', '手术切口愈合良好'
   ]);
-  const POSITIVE_DESPITE_NEG = new Set(['单侧足背动脉搏动未触及']);
+  const POSITIVE_DESPITE_NEG = new Set(['单侧足背动脉搏动未触及', '未闻及胎心']);
   const MIXED = new Set(['上腹部压痛，无反跳痛']);
-  const NEG_START = /^(无|未见|未闻及|未触及|未引出|未扪及|否认|没有|正常|阴性|不)/;
+  const NEG_START = /^(无|未见|未触及|未引出|未扪及|否认|没有|正常|阴性|不)/;
 
   const missed = [];
-  SCHEMA.PE_COMMON.forEach(g => {
-    g.items.forEach(it => {
-      if (it.depts && !it.depts.includes('general')) return;
-      (it.options || []).forEach(o => {
-        if (o === it.default || o === it.normal) return;
-        const positive = POSITIVE_DESPITE_NEG.has(o) || MIXED.has(o) ||
-          (!NORMAL_OPTIONS.has(o) && !NEG_START.test(o));
-        if (!positive) return;
+  const check = (groupKey, it, dept) => {
+    (it.options || []).forEach(o => {
+      if (o === it.default || o === it.normal) return;
+      const positive = POSITIVE_DESPITE_NEG.has(o) || MIXED.has(o) ||
+        (!NOT_A_FINDING.has(o) && !NEG_START.test(o));
+      if (!positive) return;
 
-        const r = mk();
-        r.pe[g.key] = { [it.key]: o };
-        if (!GENERATOR.abnormalPE(r).length) missed.push(`${g.key}.${it.key} = ${o}`);
-      });
+      const r = mk();
+      if (dept) r.basic.department = dept;
+      r.pe[groupKey] = { [it.key]: o };
+      if (!GENERATOR.abnormalPE(r).length) missed.push(`${groupKey}.${it.key} = ${o}`);
     });
+  };
+
+  SCHEMA.PE_COMMON.forEach(g => {
+    g.items.forEach(it => check(g.key, it, (it.depts && it.depts[0]) || 'general'));
   });
+  Object.keys(SCHEMA.PE_SPECIAL).forEach(spKey => {
+    const sp = SCHEMA.PE_SPECIAL[spKey];
+    (sp.items || []).forEach(it => check('special_' + spKey, it, spKey));
+  });
+
   assert.deepEqual(missed.slice(0, 5), [],
     `有 ${missed.length} 个异常选项未被识别为阳性体征（会导致摘要漏报）`);
 });

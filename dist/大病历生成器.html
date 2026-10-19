@@ -5519,7 +5519,7 @@ const CHECKER = (() => {
 
 </script>
 <script>
-﻿/* ===========================================================================
+/* ===========================================================================
  * 大病历生成器 —— 核心生成逻辑（纯函数，可在 Node 中单测）
  * 输入：record（见 schema.emptyRecord）
  * 输出：{ text, sections, warnings, summaryDraft }
@@ -6177,31 +6177,65 @@ const GENERATOR = (() => {
     // 颈静脉怒张、桶状胸、杵状指、肠鸣音活跃……），白名单永远列不全，
     // 漏一个就是摘要丢一个阳性体征，比误报更危险。默认阳性 + 精确排除更稳。
     //
-    // 否定词的位置很关键：
-    //   「未触及包块」= 阴性（否定词 + 体征名词）
-    //   「肝脾肋下未触及」= 阴性（器官/体征 + 未触及，否定词在后）
-    //   「足背动脉搏动未触及」= 阳性（摸不到脉搏是体征，不是"没查"）
-    const NEG_PREFIX = /^(无|未见|未闻及|未引出|未查见|否认|没有|正常|阴性)/;
-    const NEG_FINDING = /(?:无|未见|未闻及|未触及|未引出|未扪及|没有|否认)[^，。；]{0,6}(?:压痛|反跳痛|包块|肿块|肿大|杂音|啰音|哮鸣音|摩擦音|震颤|结节|水肿|黄染|发绀|皮疹|出血点|畸形|抵抗|分泌物|充盈|渗出|溃疡|萎缩|异常|浊音|实音|充血|叩击痛|触痛|膨隆|隆起)/;
-    // 否定词在体征名词之后的：肝脾肋下未触及、Murphy征阴性
-    const NEG_SUFFIX = /(?:肝|脾|包块|肿块|淋巴结|结节|异常|压痛|反跳痛|杂音|啰音|肿大|水肿|黄染|征|试验|反射|杂音)[^，。；]{0,4}(?:未触及|未闻及|未引出|阴性)/;
-    // 公认的「正常」表述（不含否定词，但描述的是正常状态）
-    const NORMAL_PHRASE = /(营养良好|营养中等|营养一般|发育正常|发育良好|神志清楚|精神一般|精神可|自动体位|面容自然|查体合作|皮肤弹性良好|毛发分布均匀|气管居中|颈软|腹平软|脊柱生理弯曲存在|生理反射存在|肌力5级|肌力Ⅴ级|双肺呼吸音清|呼吸音清|律齐|未见异常|不大|无异常)/;
+    // 几个必须小心的地方（都是实测踩过的坑）：
+    //   1) 顿号必须切开：「右下腹压痛、无反跳痛」里前半是阳性，
+    //      不切就会被后半的「无」整句吞掉。
+    //   2) 「未闻及」不能一律当否定：未闻及胎心/呼吸音/心音/肠鸣音是阳性体征。
+    //   3) 「无痛性包块」的「无」是否定「痛」，不是否定「包块」。
+    //   4) 否定词可能在名词之后：肝脾未及、Murphy征阴性。
+    const POSITIVE_OVERRIDE = /未(?:闻及|探及|引出)(?:胎心|胎动|呼吸音|心音|肠鸣音)/;
+    const NEG_PREFIX = /^(?:无(?!痛性)|未见(?!异常)|未发现|未查(?!见)|否认|没有|正常|阴性)/;
+    const NEG_FINDING = /(?:无(?!痛性)|未见(?!异常)|未发现|未闻及|未触及|未引出|未扪及|没有|否认)[^，。；、]{0,6}(?:压痛|反跳痛|包块|肿块|肿大|杂音|啰音|哮鸣音|摩擦音|震颤|结节|水肿|黄染|发绀|皮疹|出血点|畸形|抵抗|分泌物|充盈|渗出|溃疡|萎缩|异常|浊音|实音|充血|叩击痛|触痛|膨隆|隆起)/;
+    // 否定词在体征名词之后的：肝脾未及、Murphy征阴性、双下肢不肿
+    const NEG_SUFFIX = /(?:肝|脾|包块|肿块|淋巴结|结节|异常|压痛|反跳痛|杂音|啰音|肿大|水肿|黄染|征|试验|反射)[^，。；、]{0,4}(?:未触及|未闻及|未引出|未及|阴性)|不肿$/;
+    // 出现这些词说明「换了个部位/对象」，前面的否定不再覆盖它
+    // （「双下肢无水肿、右上肢轻度水肿」里右边是另一个部位）
+    const NEW_SUBJECT = /^(?:左|右|双|两侧|患侧|对侧|头部|颈|胸|腹|背|腰|上肢|下肢|四肢|全身|局部|前|后)/;
+    // 整句就是一个正常状态（必须整句匹配，避免「包块不大」被「不大」吞掉）
+    const NORMAL_EXACT = [
+      /^腹部平坦$/, /^腹软$/, /^腹平软$/, /^腹部柔软$/,
+      /^肠鸣音正常$/, /^肠鸣音正常[，,]?约?\d+次\/分$/,
+      /^心界不大$/, /^心律齐$/, /^律齐$/
+    ];
+    // 公认的「正常」表述
+    const NORMAL_PHRASE = /(营养良好|营养中等|营养一般|发育正常|发育良好|神志清楚|精神一般|精神可|自动体位|面容自然|查体合作|皮肤弹性良好|毛发分布均匀|气管居中|颈软|腹平软|脊柱生理弯曲存在|生理反射存在|肌力正常|肌力5级|肌力Ⅴ级|双肺呼吸音清|呼吸音清|前囟平软|愈合良好)/;
+
+    /** 单个片段是否明确是阴性/正常 */
+    const isNegativeClause = c =>
+      NEG_PREFIX.test(c) || NEG_FINDING.test(c) || NEG_SUFFIX.test(c) ||
+      NORMAL_EXACT.some(rx => rx.test(c)) || NORMAL_PHRASE.test(c);
 
     const isPositiveFinding = (item, val) => {
       if (!val) return false;
       if (SCHEMA.peValueIsDefault(item, val)) return false;
-      if (item.normal && val === item.normal) return false;
+      const norm = s => String(s).trim().replace(/[，,；;。.、\s]+$/g, '');
+      if (item.normal && norm(val) === norm(item.normal)) return false;
+
       const positiveClauses = [];
+      // 顿号也要切开：「压痛、无反跳痛」是两件事
       val.split(/[。；;]/).forEach(sentence => {
-        sentence.split(/[，,]/).forEach(clause => {
+        // negScope：前一个片段是否把否定作用到了后面的列举项上。
+        // 「全腹无压痛、反跳痛」两个都阴性；「右下腹压痛、无反跳痛」前阳后阴。
+        let negScope = false;
+        sentence.split(/[，,、]/).forEach(clause => {
           const c = clause.trim();
           if (!c) return;
-          if (NEG_PREFIX.test(c)) return;          // 句首否定
-          if (NEG_FINDING.test(c)) return;         // 否定词 + 体征名词
-          if (NEG_SUFFIX.test(c)) return;          // 体征名词 + 否定词
-          if (NORMAL_PHRASE.test(c)) return;       // 公认的正常表述
-          positiveClauses.push(c);                 // 其余一律按阳性处理
+          if (POSITIVE_OVERRIDE.test(c)) {          // 未闻及胎心等属阳性
+            positiveClauses.push(c);
+            negScope = false;
+            return;
+          }
+          if (isNegativeClause(c)) {
+            // 这一片段本身是阴性；若它含否定词，否定可能延续到后面的列举项
+            if (/(无|未见|未闻及|未触及|未引出|否认|没有)/.test(c)) negScope = true;
+            return;
+          }
+          if (negScope && !NEW_SUBJECT.test(c)) {
+            // 继承上一片段的否定：「无压痛、反跳痛」里的「反跳痛」
+            return;
+          }
+          negScope = false;
+          positiveClauses.push(c);                  // 其余一律按阳性处理
         });
       });
       if (!positiveClauses.length) return false;
@@ -6288,7 +6322,13 @@ const GENERATOR = (() => {
     const sbp = parseFloat(v.sbp), dbp = parseFloat(v.dbp);
     if (!isNaN(sbp) && (sbp >= 140 || sbp < 90)) abnormalVitals.push(`BP ${v.sbp || '—'}/${v.dbp || '—'}mmHg`);
     const peAll = abnormalVitals.concat(abn.map(a => a.text).filter(Boolean));
-    seg.push(peAll.length ? `查体：${peAll.join('，')}` : '查体未见明显阳性体征');
+    // 心率去重：查体描述里已经写了「心率108次/分」时，不要再pushed一个「P 108次/分」
+    const dedup = peAll.filter((txt, i) => {
+      if (!/^P \d+次\/分$/.test(txt)) return true;
+      const num = txt.match(/\d+/)[0];
+      return !peAll.some((other, j) => j !== i && /心率/.test(other) && other.includes(num));
+    });
+    seg.push(dedup.length ? `查体：${dedup.join('，')}` : '查体未见明显阳性体征');
 
     // 4) 辅助检查
     const aux = ((r.auxiliary || {}).items || []).filter(it => stripTail(it.name) || stripTail(it.result));
@@ -6385,7 +6425,7 @@ const GENERATOR = (() => {
 
     // 阳性体征与辅助检查各留一句，细节放到 O 段，避免 S/O 两段重复
     const abn = abnormalPE(r);
-    if (abn.length) seg.push(`查体${abn.slice(0, 3).map(a => a.text).join('，')}`);
+    if (abn.length) seg.push(`查体：${abn.slice(0, 3).map(a => a.text).join('，')}`);
     const aux = auxItems(r);
     if (aux.length) {
       seg.push(`辅助检查：${aux.slice(0, 2).map(it =>
