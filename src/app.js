@@ -1,4 +1,4 @@
-/* ===========================================================================
+﻿/* ===========================================================================
  * UI 层：分步骤表单、本地保存、预览导出、评分自查
  * 依赖 RECORD_CORE / SCHEMA / CHECKER / GENERATOR / HINTS（构建时内联到同一文件）
  *
@@ -44,10 +44,10 @@ const APP = (() => {
     { key: 'ros', name: '系统回顾', icon: '③' },
     { key: 'pmh', name: '既往史', icon: '④' },
     { key: 'personal', name: '个人史', icon: '⑤' },
-    { key: 'marriage', name: '婚育史', icon: '⑥' },
-    { key: 'family', name: '家族史', icon: '⑦' },
+    { key: 'marriage', name: '婚姻与生育史', icon: '⑥' },
+    { key: 'family', name: '家庭史', icon: '⑦' },
     { key: 'pe', name: '体格检查', icon: '⑧' },
-    { key: 'aux', name: '辅助检查', icon: '⑨' },
+    { key: 'aux', name: '实验室检查', icon: '⑨' },
     { key: 'summary', name: '摘要与诊断', icon: '⑩' },
     { key: 'check', name: '评分自查', icon: '⑪' },
     { key: 'output', name: '生成病历', icon: '✓' }
@@ -252,21 +252,28 @@ const APP = (() => {
         <div class="card-title">一般项目</div>
         ${input('姓名', 'basic.name', { placeholder: '如：张三' })}
         ${seg('性别', 'basic.gender', SCHEMA.GENDERS)}
-        ${input('年龄（岁）', 'basic.age', { type: 'number', inputmode: 'numeric', placeholder: '58' })}
+        ${input('年龄', 'basic.age', {
+          placeholder: '58 或 7月 / 3天',
+          hint: '成人直接写数字（自动补「岁」）；婴儿写「7月」「3天」这类，不要再加「岁」。'
+        })}
+        ${input('民族', 'basic.nationality', { placeholder: '汉族' })}
         ${seg('婚姻', 'basic.marital', SCHEMA.MARITAL)}
         ${input('职业', 'basic.occupation', { placeholder: '退休 / 农民 / 工人…' })}
-        ${input('籍贯', 'basic.birthPlace', { placeholder: '浙江温州' })}
-        ${input('现住址', 'basic.address', {
+        ${input('工作单位', 'basic.workUnit', { placeholder: '无 / ××公司' })}
+        ${input('籍贯', 'basic.nativePlace', { placeholder: '浙江温州' })}
+        ${input('出生地', 'basic.birthPlace', { placeholder: '浙江温州' })}
+        ${input('通讯地址', 'basic.address', {
           placeholder: '如：浙江省温州市鹿城区××路××号',
-          hint: '评分表第6页「一般项目」要求记录住址；留空则病历里不出现这一项。'
+          hint: '一般项目里的通讯地址；留空则病历里不出现这一项。'
         })}
+        ${input('电话号码', 'basic.phone', { placeholder: '138××××××××' })}
         ${input('病历号 / 住院号', 'basic.recordNo', {
           placeholder: '如：01234567',
-          hint: '评分表第2页病史采集要求询问病历号（1 分）；出院记录的一般情况也会用到。'
+          hint: '出院记录的一般情况也会用到。'
         })}
         ${input('入院日期', 'basic.admitDate', { type: 'date' })}
         ${input('记录日期', 'basic.recordDate', { type: 'date' })}
-        ${input('病史陈述者', 'basic.informant', { placeholder: '留空则默认患者本人' })}
+        ${input('病史陈述者', 'basic.informant', { placeholder: '留空则默认患者本人；儿科写「母亲」' })}
         ${select('病史可靠程度', 'basic.reliability', SCHEMA.RELIABILITY)}
       </div>
 
@@ -450,7 +457,13 @@ const APP = (() => {
         ${textarea('手术史', 'pmh.surgery', { rows: 2, placeholder: '如：2015年阑尾切除术' })}
         ${textarea('外伤史', 'pmh.trauma', { rows: 2, placeholder: '如：否认外伤史' })}
         ${textarea('输血史', 'pmh.transfusion', { rows: 2, placeholder: '如：否认输血史' })}
-        ${textarea('预防接种史', 'pmh.vaccine', { rows: 2, placeholder: '如：预防接种史不详' })}
+        ${textarea('中毒史', 'pmh.poisoning', { rows: 2, placeholder: '如：否认中毒史' })}
+        ${textarea('预防接种史', 'pmh.vaccine', { rows: 2, placeholder: '如：按计划预防接种' })}
+        ${textarea('与本病相关病史', 'pmh.relatedHistory', {
+          rows: 2,
+          placeholder: '如：既往有类似发作史（3年前同样出现右下腹痛，保守治疗好转）',
+          hint: '和本次发病直接相关的既往情况，例如反复发作、既往同样症状、相关手术史。'
+        })}
       </div>
 
       <div class="card">
@@ -479,10 +492,30 @@ const APP = (() => {
   function renderPersonal() {
     return `
       <div class="card">
-        <div class="card-title">出生与居住</div>
-        ${textarea('出生地及居留情况', 'personal.birth', {
-          rows: 2, placeholder: '如：出生于浙江温州，无疫区长期居留史'
+        <div class="card-title">出生与成长 <span class="muted">儿科 / 妇产科必填</span></div>
+        ${textarea('母孕史', 'personal.maternal', {
+          rows: 2,
+          placeholder: '如：母孕期体健，否认重大感染病史及特殊服药史，否认毒物、放射线接触史',
+          hint: '母亲怀孕期间的健康与用药情况。成人病历可留空。'
         })}
+        ${textarea('出生史', 'personal.birth', {
+          rows: 2,
+          placeholder: '如：G2P2，足月剖宫产，出生体重4.2kg，无产伤、窒息史'
+        })}
+        ${textarea('喂养史', 'personal.feeding', {
+          rows: 2,
+          placeholder: '如：生后人工喂养至今，6个月始添加辅食',
+          hint: '儿科病历要求写明喂养方式与辅食添加时间。成人可留空。'
+        })}
+        ${textarea('生长发育史', 'personal.growth', {
+          rows: 2,
+          placeholder: '如：3个月会抬头，6个月会坐，生长发育与正常同龄儿相同',
+          hint: '儿科病历要求写明与同龄儿的比较。成人可留空。'
+        })}
+      </div>
+
+      <div class="card">
+        <div class="card-title">居住与接触</div>
         ${input('长期居住地', 'personal.residence', { placeholder: '温州' })}
         ${input('近期旅行/居住史', 'personal.travel', { placeholder: '近1月无外地旅居史' })}
       </div>
@@ -1165,7 +1198,7 @@ const APP = (() => {
     if (OUT_VIEW === 'discharge') {
       return '出院记录占 15 分：一般情况、入院情况、诊疗经过、出院情况、出院诊断、出院医嘱六项齐全才拿满；出院诊断留空时自动沿用初步诊断。';
     }
-    return '大病历 = 一般项目 → 主诉 → 现病史 → 既往史 → 系统回顾 → 个人史 → 婚育史 → 家族史 → 体格检查 → 辅助检查 → 病历摘要 → 初步诊断。';
+    return '大病历 = 一般项目 → 主诉 → 现病史 → 既往史 → 系统回顾 → 个人史 → 婚姻史 → 月经与生育史 → 家庭史 → 体格检查 → 实验室检查 → 摘要 → 诊断依据 → 初步诊断。';
   }
 
   /** 取某个生成视图的纯文本（始终按当前 record 现算，不用旧缓存） */

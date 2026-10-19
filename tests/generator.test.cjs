@@ -1,4 +1,4 @@
-/* ===========================================================================
+﻿/* ===========================================================================
  * 病历生成逻辑测试（node:test）
  * 运行：node --test tests/
  *
@@ -12,9 +12,11 @@ const { bootGlobals } = require('./bootstrap.cjs');
 
 const { SCHEMA, GENERATOR, HINTS } = bootGlobals();
 
+// 章节顺序对齐用户提供的病历模板（2026-10）
 const REQUIRED_SECTIONS = [
   '一般项目', '主诉', '现病史', '既往史', '系统回顾',
-  '个人史', '婚育史', '家族史', '体格检查', '辅助检查', '病历摘要', '初步诊断'
+  '个人史', '婚姻史', '月经与生育史', '家庭史', '体格检查', '实验室检查',
+  '摘要', '诊断依据', '初步诊断'
 ];
 
 function makeRecord(deptKey, over) {
@@ -35,7 +37,7 @@ function makeRecord(deptKey, over) {
 
 /* ======================= 科室完整性 ======================= */
 
-test('每个科室都能生成全部12个章节', async t => {
+test('每个科室都能生成全部14个章节', async t => {
   for (const dept of SCHEMA.DEPARTMENTS) {
     await t.test(dept.name, () => {
       const text = GENERATOR.generate(makeRecord(dept.key)).text;

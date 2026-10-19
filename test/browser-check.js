@@ -190,7 +190,7 @@ async function main() {
     return evaluate('document.getElementById("stepTitle").textContent');
   };
   const peTitle = await gotoStep(4); // ros -> pmh -> personal -> marriage -> family
-  results.push(['步骤跳转', peTitle === '婚育史' || peTitle === '家族史', peTitle]);
+  results.push(['步骤跳转', peTitle === '婚姻与生育史' || peTitle === '家庭史', peTitle]);
 
   await evaluate('document.getElementById("btnNext").click()');
   await sleep(400);

@@ -1,4 +1,4 @@
-/* ===========================================================================
+﻿/* ===========================================================================
  * 大病历生成器 —— 数据模型 / 字段定义
  * 所有科室共用一套「病史」字段，体格检查分为「通用查体 + 专科查体」。
  * 设计原则：手机上尽量点选，少打字；每一项都可以手写补充或改写。
@@ -60,7 +60,7 @@ const SCHEMA = (() => {
     },
     {
       key: 'skin',
-      name: '皮肤黏膜',
+      name: '皮肤粘膜',
       symptoms: [
         { key: 'rash', label: '皮疹', detail: '部位/形态' },
         { key: 'pruritus', label: '皮肤瘙痒' },
@@ -279,7 +279,7 @@ const SCHEMA = (() => {
     },
     {
       key: 'skin',
-      name: '皮肤黏膜',
+      name: '皮肤粘膜',
       items: [
         {
           key: 'color', label: '色泽', default: '全身皮肤黏膜无黄染、苍白、发绀',
@@ -306,7 +306,7 @@ const SCHEMA = (() => {
     },
     {
       key: 'head',
-      name: '头部及其器官',
+      name: '头颅及其器官',
       items: [
         {
           key: 'headShape', label: '头颅', default: '头颅大小、形态正常，无压痛及包块',
@@ -781,10 +781,15 @@ const SCHEMA = (() => {
         gender: '',
         age: '',
         marital: '',
+        // 籍贯（祖籍）与出生地在病历一般项目里是两栏，分开存
+        nativePlace: '',
         birthPlace: '',
+        nationality: '汉族',
         occupation: '',
-        // 现住址（generator.buildBasicInfo 已在读，此前未声明，属死字段）
+        workUnit: '',
+        // 通讯地址
         address: '',
+        phone: '',
         // 病历号/住院号（评分表第2页「询问患者…病历号…」1分；第6页一般项目 2分）
         recordNo: '',
         admitDate: '',
@@ -821,18 +826,23 @@ const SCHEMA = (() => {
         surgery: '',
         trauma: '',
         transfusion: '',
+        poisoning: '',           // 中毒史
         vaccine: '',
         allergy: '',             // 有无过敏：无 / 有
         allergenChecks: {},      // 过敏原
         allergenOther: '',
         allergenReactionChecks: {}, // 过敏反应表现勾选（app 已在渲染，此前未声明）
         allergyReaction: '',     // 过敏反应手写描述
+        relatedHistory: '',      // 与本病相关病史
         otherTreatDiseases: '',  // 与本病无关但仍需治疗的其他疾病（评分表第6页现病史）
-        special: ''              // 其他（如传染病接触史）
+        special: ''              // 其它
       },
       // 个人史
       personal: {
-        birth: '',
+        maternal: '',            // 母孕史（儿科/产科）
+        birth: '',               // 出生史
+        feeding: '',             // 喂养史（儿科）
+        growth: '',              // 生长发育史（儿科）
         residence: '',
         travel: '',
         smoking: '无',           // 无 / 有 / 已戒
@@ -845,7 +855,8 @@ const SCHEMA = (() => {
       },
       // 婚姻史
       marriage: {
-        status: '未婚',
+        // 留空表示「跟一般项目一致」；填了才覆盖，避免两处默认值打架
+        status: '',
         age: '',
         spouseHealth: ''
       },

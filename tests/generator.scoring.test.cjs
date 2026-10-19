@@ -34,8 +34,24 @@ function makeRecord(deptKey) {
 }
 
 /** 只取某一组查体的那一行 */
+/**
+ * 取出某一节的完整文本。
+ *
+ * 查体现在按「大节 + 小节」分段输出（例如「肺：」下面缩进写视诊/触诊/听诊），
+ * 所以不能只取一行——要把该节标题行连同后续缩进子行一起取出来，
+ * 否则次序断言会拿到空字符串而变成假通过。
+ */
 function groupLine(text, name) {
-  return text.split('\n').find(l => l.startsWith(name + '：')) || '';
+  const lines = text.split('\n');
+  const start = lines.findIndex(l => l.startsWith(name + '：'));
+  if (start < 0) return '';
+  const out = [lines[start]];
+  for (let i = start + 1; i < lines.length; i++) {
+    // 子行以全角空格缩进
+    if (/^\u3000/.test(lines[i])) out.push(lines[i]);
+    else break;
+  }
+  return out.join('\n');
 }
 
 /* ======================= 1. 腹部查体次序 ======================= */
