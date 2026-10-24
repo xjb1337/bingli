@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <title>大病历生成器</title>
 <style>
-/* ===========================================================
+﻿/* ===========================================================
  * 大病历生成器 —— 移动端样式
  * 设计目标：手机上单手操作、点选为主、字号可读
  * =========================================================== */
@@ -147,6 +147,70 @@ main {
   padding: 1px 6px;
   border-radius: 4px;
   font-weight: 500;
+  margin-left: 6px;
+}
+
+/* 「建议填」：不填不致命，但病历会缺内容 */
+.tag-should {
+  font-size: calc(11px * var(--fs-scale));
+  color: var(--score-warn);
+  background: var(--score-warn-bg);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 500;
+  margin-left: 6px;
+}
+
+/* 「可留空」：留空由工具自动补默认描述 */
+.tag-auto {
+  font-size: calc(11px * var(--fs-scale));
+  color: var(--gray-5);
+  background: var(--gray-2);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 500;
+  margin-left: 6px;
+}
+
+/* 「已填」：用户确实填过 */
+.tag-done {
+  font-size: calc(11px * var(--fs-scale));
+  color: var(--score-ok);
+  background: var(--score-ok-bg);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 500;
+  margin-left: 6px;
+}
+
+/* 查体项：默认值 vs 已填，用左侧色条区分 */
+.pe-item.is-default {
+  border-left: 3px solid var(--gray-3);
+  padding-left: 8px;
+}
+
+.pe-item.is-blank {
+  border-left: 3px solid var(--red);
+  padding-left: 8px;
+}
+
+.pe-item.is-blank .pe-text {
+  background: var(--red-light);
+}
+
+.pe-item.is-filled {
+  border-left: 3px solid var(--green);
+  padding-left: 8px;
+}
+
+.pe-item.is-default .pe-text {
+  color: var(--gray-5);
+  font-style: italic;
+}
+
+.pe-item.is-filled .pe-text {
+  color: var(--gray-6);
+  font-style: normal;
 }
 
 .tag-dept {
@@ -1526,6 +1590,45 @@ footer .btn:disabled {
   font-size: calc(12px * var(--fs-scale));
   color: var(--gray-6);
   line-height: 1.6;
+}
+
+/* ---------------- 填写情况总览（生成病历页） ---------------- */
+
+.fill-status .fs-row {
+  padding: 10px 0;
+  border-top: 1px solid var(--gray-2);
+}
+
+.fill-status .fs-row:first-of-type { border-top: none; }
+
+.fs-head {
+  font-size: calc(13px * var(--fs-scale));
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.fs-miss {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.fs-chip {
+  font-size: calc(12px * var(--fs-scale));
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-weight: 500;
+}
+
+.fs-chip.bad {
+  color: var(--red);
+  background: var(--red-light);
+}
+
+.fs-chip.warn {
+  color: var(--score-warn);
+  background: var(--score-warn-bg);
 }
 
 </style>
@@ -7847,7 +7950,7 @@ const HINTS = (() => {
 
 </script>
 <script>
-﻿/* ===========================================================================
+/* ===========================================================================
  * UI 层：分步骤表单、本地保存、预览导出、评分自查
  * 依赖 RECORD_CORE / SCHEMA / CHECKER / GENERATOR / HINTS（构建时内联到同一文件）
  *
@@ -7901,6 +8004,46 @@ const APP = (() => {
     { key: 'check', name: '评分自查', icon: '⑪' },
     { key: 'output', name: '生成病历', icon: '✓' }
   ];
+
+  /* ===================== 字段填写等级（必填 / 建议 / 可留空） =====================
+   *
+   * 用户反馈过「分不清什么必须填、什么可以留空」——这里把每个字段的等级写死成一张表，
+   * 界面上按等级打标记，同时在「生成病历」页给一个总览。
+   *
+   *   must   必填：不填病历就不成立（姓名、性别、年龄、主诉）
+   *   should 建议填：不填会留空或写成通用默认，病历质量下降
+   *   auto   可留空：留空由工具自动补默认描述（会标注「系统默认」）
+   */
+  const FIELD_LEVEL = {
+    must: new Set([
+      'basic.name', 'basic.gender', 'basic.age', 'basic.department',
+      'basic.chiefComplaint', 'basic.chiefComplaintDuration'
+    ]),
+    // 留空后「病历里会缺这一项」或只剩通用套话
+    should: new Set([
+      'basic.recordNo', 'basic.admitDate', 'basic.informant',
+      'hpi.onset', 'hpi.symptoms', 'hpi.treatment',
+      'pmh.health', 'pmh.surgery', 'pmh.trauma', 'pmh.transfusion',
+      'personal.smoking', 'personal.drinking',
+      'pe.vitals.temperature', 'pe.vitals.pulse', 'pe.vitals.respiration',
+      'pe.vitals.sbp', 'pe.vitals.dbp'
+    ])
+  };
+
+  /** 取某个字段的等级：must / should / auto */
+  function fieldLevel(path) {
+    if (FIELD_LEVEL.must.has(path)) return 'must';
+    if (FIELD_LEVEL.should.has(path)) return 'should';
+    return 'auto';
+  }
+
+  /** 等级对应的角标 HTML */
+  function levelTag(path) {
+    const lv = fieldLevel(path);
+    if (lv === 'must') return '<span class="tag-req">必填</span>';
+    if (lv === 'should') return '<span class="tag-should">建议填</span>';
+    return '<span class="tag-auto">可留空</span>';
+  }
 
   /* ========================= 存储（委托给 core） ========================= */
 
@@ -7988,6 +8131,15 @@ const APP = (() => {
 
   /* ========================= 通用控件 ========================= */
 
+  /**
+   * 字段标签行：名称 + 等级角标（必填 / 建议填 / 可留空）。
+   * opts.tag = false 可关掉角标（用于明确不需要的场合）。
+   */
+  function fieldLabel(label, path, opts) {
+    const tag = opts && opts.tag === false ? '' : levelTag(path);
+    return `<span class="field-label">${esc(label)}${tag}</span>`;
+  }
+
   /** 文本输入 */
   function input(label, path, opts = {}) {
     const val = getPath(R, path) || '';
@@ -7995,7 +8147,7 @@ const APP = (() => {
     const ph = opts.placeholder ? ` placeholder="${esc(opts.placeholder)}"` : '';
     const hint = opts.hint ? `<div class="hint">${esc(opts.hint)}</div>` : '';
     return `<label class="field">
-      <span class="field-label">${esc(label)}</span>
+      ${fieldLabel(label, path, opts)}
       <input type="${type}" data-path="${path}" value="${esc(val)}"${ph}
         ${opts.inputmode ? `inputmode="${opts.inputmode}"` : ''}>
       ${hint}
@@ -8009,7 +8161,7 @@ const APP = (() => {
     const ph = opts.placeholder ? ` placeholder="${esc(opts.placeholder)}"` : '';
     const hint = opts.hint ? `<div class="hint">${esc(opts.hint)}</div>` : '';
     return `<label class="field">
-      <span class="field-label">${esc(label)}</span>
+      ${fieldLabel(label, path, opts)}
       <textarea rows="${rows}" data-path="${path}"${ph}>${esc(val)}</textarea>
       ${hint}
     </label>`;
@@ -8025,7 +8177,7 @@ const APP = (() => {
       return `<button type="button" class="seg-btn${on}" data-seg="${path}" data-val="${esc(v)}">${esc(t)}</button>`;
     }).join('');
     return `<div class="field">
-      <span class="field-label">${esc(label)}</span>
+      ${fieldLabel(label, path, opts)}
       <div class="seg">${btns}</div>
       ${opts.hint ? `<div class="hint">${esc(opts.hint)}</div>` : ''}
     </div>`;
@@ -8050,7 +8202,7 @@ const APP = (() => {
     }
 
     return `<label class="field">
-      <span class="field-label">${esc(label)}</span>
+      ${fieldLabel(label, path, opts)}
       <select data-path="${path}">
         ${opts.empty ? `<option value="">${esc(opts.empty)}</option>` : ''}
         ${optsHtml}
@@ -8521,14 +8673,26 @@ const APP = (() => {
         const cur = R.pe[group.key] && R.pe[group.key][it.key];
         const val = cur !== undefined && cur !== null && String(cur) !== '' ? String(cur) : '';
         const shown = val || it.default || '';
+        // 三种状态必须分开：
+        //   filled  —— 用户填过
+        //   default —— 没填，但 schema 有默认正常描述，留空会自动写进病历
+        //   blank   —— 没填也没默认（子项/实查项），必须自己填，否则病历里没这段
+        const state = val ? 'filled' : (it.default ? 'default' : 'blank');
+        const badge = state === 'filled'
+          ? '<span class="tag-done">已填</span>'
+          : (state === 'default'
+            ? '<span class="tag-auto">系统默认</span>'
+            : '<span class="tag-req">需填</span>');
         const quick = (it.options || []).map(o =>
           `<button type="button" class="chip small${shown === o ? ' on' : ''}"
             data-pequick="${group.key}" data-pekey="${it.key}" data-val="${esc(o)}">${esc(o)}</button>`
         ).join('');
-        return `<div class="pe-item">
-          <div class="pe-label">${esc(it.label)}</div>
+        return `<div class="pe-item is-${state}">
+          <div class="pe-label">${esc(it.label)}${badge}</div>
           <textarea rows="2" class="pe-text" data-path="pe.${group.key}.${it.key}"
-            placeholder="${esc(it.default || '')}">${esc(shown)}</textarea>
+            placeholder="${esc(it.default || '填写检查所见')}">${esc(shown)}</textarea>
+          ${state === 'default' ? '<div class="hint">自动补的正常描述，留空也能生成；核对过再改一个字即算已填。</div>' : ''}
+          ${state === 'blank' ? '<div class="hint">这一项没有默认值，留空则病历里不会出现这句。</div>' : ''}
           <details class="pe-opts">
             <summary>常用描述</summary>
             <div class="chips">${quick}</div>
@@ -8550,14 +8714,22 @@ const APP = (() => {
         const cur = (R.pe[storeKey] || {})[it.key];
         const val = cur !== undefined && cur !== null && String(cur) !== '' ? String(cur) : '';
         const shown = val || it.default || '';
+        const state = val ? 'filled' : (it.default ? 'default' : 'blank');
+        const badge = state === 'filled'
+          ? '<span class="tag-done">已填</span>'
+          : (state === 'default'
+            ? '<span class="tag-auto">系统默认</span>'
+            : '<span class="tag-req">需填</span>');
         const quick = (it.options || []).map(o =>
           `<button type="button" class="chip small${shown === o ? ' on' : ''}"
             data-pequick="${storeKey}" data-pekey="${it.key}" data-val="${esc(o)}">${esc(o)}</button>`
         ).join('');
-        return `<div class="pe-item">
-          <div class="pe-label">${esc(it.label)}</div>
+        return `<div class="pe-item is-${state}">
+          <div class="pe-label">${esc(it.label)}${badge}</div>
           <textarea rows="2" class="pe-text" data-path="pe.${storeKey}.${it.key}"
-            placeholder="${esc(it.default || '')}">${esc(shown)}</textarea>
+            placeholder="${esc(it.default || '填写检查所见')}">${esc(shown)}</textarea>
+          ${state === 'default' ? '<div class="hint">自动补的正常描述，留空也能生成；核对过再改一个字即算已填。</div>' : ''}
+          ${state === 'blank' ? '<div class="hint">这一项没有默认值，留空则病历里不会出现这句。</div>' : ''}
           <details class="pe-opts">
             <summary>常用描述</summary>
             <div class="chips">${quick}</div>
@@ -8957,6 +9129,8 @@ const APP = (() => {
       <button type="button" class="view-btn${OUT_VIEW === v.key ? ' on' : ''}"
         data-view="${v.key}">${esc(v.name)}</button>`).join('');
     return `
+      ${renderFillStatus()}
+
       <div class="card">
         <div class="card-title">生成设置</div>
         ${seg('系统回顾详略', 'settings.rosMode', [
@@ -8992,6 +9166,94 @@ const APP = (() => {
         <div class="card-title">质控提醒</div>
         <div class="warn-list">
           ${res.warnings.length ? res.warnings.map(w => `<div class="warn-item">${esc(w)}</div>`).join('') : '<div class="ok-item">✓ 主要项目已填写完整</div>'}
+        </div>
+      </div>
+    `;
+  }
+
+  /**
+   * 填写情况总览：把「必填 / 建议填 / 可留空」三类一次性列清楚。
+   *
+   * 用户反馈过分不清哪些必须填——这里用实际数据回答：
+   * 必填没填 = 红色，建议没填 = 黄色，留空由系统补的 = 灰色（且可点开看是哪些）。
+   */
+  function renderFillStatus() {
+    const mustList = Array.from(FIELD_LEVEL.must);
+    const shouldList = Array.from(FIELD_LEVEL.should);
+
+    const isBlank = p => {
+      const v = getPath(R, p);
+      return v === undefined || v === null || String(v).trim() === '';
+    };
+    const NAME = {
+      'basic.name': '姓名', 'basic.gender': '性别', 'basic.age': '年龄',
+      'basic.department': '科室', 'basic.chiefComplaint': '主诉症状',
+      'basic.chiefComplaintDuration': '主诉时长',
+      'basic.recordNo': '病历号', 'basic.admitDate': '入院日期',
+      'basic.informant': '病史陈述者',
+      'hpi.onset': '起病情况', 'hpi.symptoms': '症状特点', 'hpi.treatment': '诊治经过',
+      'pmh.health': '平素健康状况', 'pmh.surgery': '手术史',
+      'pmh.trauma': '外伤史', 'pmh.transfusion': '输血史',
+      'personal.smoking': '吸烟史', 'personal.drinking': '饮酒史',
+      'pe.vitals.temperature': '体温', 'pe.vitals.pulse': '脉搏',
+      'pe.vitals.respiration': '呼吸', 'pe.vitals.sbp': '收缩压', 'pe.vitals.dbp': '舒张压'
+    };
+
+    const mustMissing = mustList.filter(isBlank).map(p => NAME[p] || p);
+    const shouldMissing = shouldList.filter(isBlank).map(p => NAME[p] || p);
+
+    // 查体里有多少项还是「系统默认」没核对
+    const deptKey = R.basic.department || 'general';
+    const dept = SCHEMA.DEPARTMENTS.find(d => d.key === deptKey) || SCHEMA.DEPARTMENTS[0];
+    let peTotal = 0;
+    let peDefault = 0;
+    SCHEMA.PE_COMMON.forEach(g => {
+      g.items.filter(it => !it.depts || it.depts.includes(deptKey)).forEach(it => {
+        peTotal++;
+        const cur = (R.pe[g.key] || {})[it.key];
+        if (cur === undefined || cur === null || String(cur).trim() === '') peDefault++;
+      });
+    });
+    (dept.special || []).forEach(spKey => {
+      const sp = SCHEMA.PE_SPECIAL[spKey];
+      if (!sp) return;
+      sp.items.forEach(it => {
+        peTotal++;
+        const cur = (R.pe['special_' + spKey] || {})[it.key];
+        if (cur === undefined || cur === null || String(cur).trim() === '') peDefault++;
+      });
+    });
+
+    const okAll = !mustMissing.length && !shouldMissing.length;
+    return `
+      <div class="card fill-status">
+        <div class="card-title">填写情况
+          ${okAll ? '<span class="tag-done">该填的都填了</span>' : ''}
+        </div>
+
+        <div class="fs-row">
+          <div class="fs-head"><span class="tag-req">必填</span> ${mustMissing.length ? `还差 ${mustMissing.length} 项` : '已填齐'}</div>
+          ${mustMissing.length
+            ? `<div class="fs-miss">${mustMissing.map(n => `<span class="fs-chip bad">${esc(n)}</span>`).join('')}</div>
+               <div class="hint">这几项不填，病历开头就是残缺的，无法提交。</div>`
+            : '<div class="hint">姓名、性别、年龄、科室、主诉都已填。</div>'}
+        </div>
+
+        <div class="fs-row">
+          <div class="fs-head"><span class="tag-should">建议填</span> ${shouldMissing.length ? `还差 ${shouldMissing.length} 项` : '已填齐'}</div>
+          ${shouldMissing.length
+            ? `<div class="fs-miss">${shouldMissing.map(n => `<span class="fs-chip warn">${esc(n)}</span>`).join('')}</div>
+               <div class="hint">不填也能生成，但这几处会空着或只剩通用说法，病历会被带教挑出来。</div>`
+            : '<div class="hint">建议项都已填。</div>'}
+        </div>
+
+        <div class="fs-row">
+          <div class="fs-head"><span class="tag-auto">可留空</span> 查体 ${peTotal} 项中 ${peDefault} 项用系统默认</div>
+          <div class="hint">
+            这些项目留空时，工具会自动补一句常规的正常描述写进病历（例如「腹平软，全腹无压痛」）。
+            <b>你只需要改掉本例异常的那几项</b>，其余保持默认即可。
+            生成页的「评分自查」会把用到默认值的项单独标出来，方便核对。
+          </div>
         </div>
       </div>
     `;
@@ -9301,6 +9563,52 @@ const APP = (() => {
 
   /* ========================= 事件处理 ========================= */
 
+  /**
+   * 输入查体项时，就地刷新它的状态标记与左侧色条。
+   *
+   * 不整页重绘的原因：重绘会让 textarea 失焦、光标跳到开头，手机上基本没法用。
+   * 这里只改那一个 .pe-item 的 class 和角标文字。
+   */
+  function refreshPeBadge(el) {
+    const item = el.closest('.pe-item');
+    if (!item) return;
+    const val = String(el.value || '').trim();
+    const placeholder = el.getAttribute('placeholder') || '';
+    const hasDefault = placeholder && placeholder !== '填写检查所见';
+    const state = val ? 'filled' : (hasDefault ? 'default' : 'blank');
+    item.classList.remove('is-filled', 'is-default', 'is-blank');
+    item.classList.add('is-' + state);
+
+    const label = item.querySelector('.pe-label');
+    if (label) {
+      // 去掉旧角标再插新的
+      label.querySelectorAll('.tag-done,.tag-auto,.tag-req').forEach(n => n.remove());
+      const span = document.createElement('span');
+      if (state === 'filled') { span.className = 'tag-done'; span.textContent = '已填'; }
+      else if (state === 'default') { span.className = 'tag-auto'; span.textContent = '系统默认'; }
+      else { span.className = 'tag-req'; span.textContent = '需填'; }
+      label.appendChild(span);
+    }
+    // 提示文案跟着状态切换
+    const oldHint = item.querySelector('.hint');
+    if (oldHint && (oldHint.textContent.includes('自动补的正常描述') || oldHint.textContent.includes('没有默认值'))) {
+      oldHint.remove();
+    }
+    if (state === 'default') {
+      const d = document.createElement('div');
+      d.className = 'hint';
+      d.textContent = '自动补的正常描述，留空也能生成；核对过再改一个字即算已填。';
+      const opts = item.querySelector('.pe-opts');
+      item.insertBefore(d, opts);
+    } else if (state === 'blank') {
+      const d = document.createElement('div');
+      d.className = 'hint';
+      d.textContent = '这一项没有默认值，留空则病历里不会出现这句。';
+      const opts = item.querySelector('.pe-opts');
+      item.insertBefore(d, opts);
+    }
+  }
+
   function bindEvents() {
     // 输入事件（委托）
     document.addEventListener('input', e => {
@@ -9313,6 +9621,9 @@ const APP = (() => {
         setPath(R, t.dataset.path, v);
         saveCurrent();
         updateLivePreviews();
+        // 查体项：只刷新这一个条目的「已填 / 系统默认 / 需填」标记，
+        // 不整页重绘（否则输入框会失焦、光标跳到开头）。
+        if (t.dataset.path.startsWith('pe.')) refreshPeBadge(t);
         // 过敏史/性别切换需要重绘
         if (t.dataset.path === 'pmh.allergy' || t.dataset.path === 'marital') { }
       }

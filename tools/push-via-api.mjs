@@ -70,8 +70,20 @@ if (baseSha === localHead) {
 const baseCommit = await api('GET', `/repos/${OWNER}/${REPO}/git/commits/${baseSha}`);
 const baseTree = baseCommit.tree.sha;
 
-// 本地相对远端的差异
-const nameStatus = git('diff', '--name-status', baseSha, localHead).split('\n').filter(Boolean);
+// 本地相对远端的差异。
+// 注意：远端那个提交可能是本脚本上一次用 API 重建的，本地并没有它的对象，
+// 直接 `git diff <远端sha>` 会报 bad object。这里检测本地是否有该对象，
+// 没有就退回到 HEAD 的父提交做基准，再用远端 tree 当 base_tree —— 效果等价：
+// 没改动的文件保持远端内容，只覆盖本次真正变了的文件。
+let diffBase = baseSha;
+try {
+  git('cat-file', '-e', baseSha + '^{commit}');
+} catch {
+  diffBase = git('rev-parse', 'HEAD~1');
+  console.log(`远端提交 ${baseSha.slice(0, 7)} 本地不存在，改用 ${diffBase.slice(0, 7)} 作差异基准。`);
+}
+
+const nameStatus = git('diff', '--name-status', diffBase, localHead).split('\n').filter(Boolean);
 if (!nameStatus.length) {
   console.log('本地与远端内容一致，无需推送。');
   process.exit(0);
