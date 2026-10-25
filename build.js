@@ -2,8 +2,9 @@
  * 内联成单独的 HTML 文件。
  *
  * 内联顺序即运行期依赖顺序，不可随意调整：
- *   SCHEMA → CORE → TEMPLATE_DATA → TEMPLATES → CHECKER → GENERATOR → HINTS → APP
+ *   SCHEMA → CORE → TEMPLATE_DATA → TEMPLATES → CHECKER → DEPTH → GENERATOR → HINTS → APP
  * TEMPLATE_DATA 是纯数据，必须在 TEMPLATES（读它的逻辑）之前。
+ * DEPTH（问诊深度自查）只读记录、不依赖别的模块，放 CHECKER 之后即可。
  * CHECKER 必须在 GENERATOR 之前：两者都只用到 SCHEMA，但 checker 在
  * 自查结果里做「腹部查体实际输出次序」校验时会调用 GENERATOR（运行时判断，
  * 存在才比对），保证 CHECKER 先于 GENERATOR 定义不影响事后调用。
@@ -32,6 +33,7 @@ function main() {
   const tplData = stripModule(read('template-data.js'));
   const templates = stripModule(read('templates.js'));
   const checker = stripModule(read('checker.js'));
+  const depth = stripModule(read('depth.js'));
   const generator = stripModule(read('generator.js'));
   const hints = stripModule(read('hints.js'));
   const app = read('app.js');
@@ -45,6 +47,7 @@ function main() {
     .replace('/*__TPL_DATA__*/', () => tplData)
     .replace('/*__TEMPLATES__*/', () => templates)
     .replace('/*__CHECKER__*/', () => checker)
+    .replace('/*__DEPTH__*/', () => depth)
     .replace('/*__GENERATOR__*/', () => generator)
     .replace('/*__HINTS__*/', () => hints)
     .replace('/*__APP__*/', () => app);

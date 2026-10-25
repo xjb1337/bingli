@@ -1435,6 +1435,70 @@ footer .btn:disabled {
 
 .check-notes .note-list li { margin-bottom: 5px; }
 
+/* ---------- 问诊深度自查 ---------- */
+
+.check-depth-card .hint { margin-bottom: 10px; }
+
+.depth-lines { display: flex; flex-direction: column; gap: 8px; }
+
+.depth-line {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--gray-1);
+  border-left: 3px solid var(--gray-3);
+}
+
+/* 三档与评分自查同一套颜色语义：红=必须补，黄=建议补，灰=留意 */
+.depth-line.lv-high { border-left-color: var(--score-bad); background: var(--score-bad-bg); }
+.depth-line.lv-mid { border-left-color: var(--score-warn); background: var(--score-warn-bg); }
+.depth-line.lv-low { border-left-color: var(--gray-3); }
+
+.dl-tag {
+  flex: none;
+  font-size: calc(11px * var(--fs-scale));
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: var(--gray-2);
+  color: var(--gray-6);
+  white-space: nowrap;
+}
+
+.depth-line.lv-high .dl-tag { background: var(--score-bad); color: #fff; }
+.depth-line.lv-mid .dl-tag { background: var(--score-warn); color: #fff; }
+
+.dl-body { flex: 1 1 auto; min-width: 0; }
+
+.dl-msg {
+  font-size: calc(13px * var(--fs-scale));
+  line-height: 1.6;
+  color: var(--gray-6);
+}
+
+.dl-meta {
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: calc(11px * var(--fs-scale));
+  color: var(--gray-5);
+}
+
+/* 行内「去补」按钮：不占满整行，也不低于 44px 触摸下限 */
+.dl-jump.btn-jump {
+  display: inline-block;
+  width: auto;
+  margin: 0;
+  padding: 0 10px;
+  min-height: 44px;
+  line-height: 44px;
+  font-size: calc(12px * var(--fs-scale));
+}
+
+
 /* ===========================================================
  * 生成视图切换（大病历 / 首次病程录 / 出院记录）
  * =========================================================== */

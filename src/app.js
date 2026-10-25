@@ -1705,6 +1705,30 @@ const APP = (() => {
     }).join('');
 
     const notes = (sum.notes || []).filter(Boolean);
+
+    // 问诊深度自查：读自由文本，指出「提到了但没问深」的地方。
+    // 与上面的评分自查是两回事——那边对评分表，这边对带教老师会追问的点。
+    const D = typeof DEPTH !== 'undefined' ? DEPTH : null;
+    const depthList = D ? D.check(R) : [];
+    const depthCount = { high: 0, mid: 0, low: 0 };
+    depthList.forEach(f => { depthCount[f.level] = (depthCount[f.level] || 0) + 1; });
+    const depthHtml = depthList.length ? depthList.map(f => `
+      <div class="depth-line lv-${f.level}">
+        <span class="dl-tag">${esc(f.label)}</span>
+        <div class="dl-body">
+          <div class="dl-msg">${esc(f.message)}</div>
+          <div class="dl-meta">${esc(f.section)}${depthStep(f.section) ? `<button class="btn btn-ghost btn-jump dl-jump" data-checkjump="${esc(depthStep(f.section))}">去补</button>` : ''}</div>
+        </div>
+      </div>`).join('') : '<div class="ok-item">✓ 常见追问点都已问到</div>';
+    const depthCard = D ? `
+      <div class="card check-depth-card">
+        <div class="card-title">问诊深度自查
+          <span class="tag-score">${depthCount.high ? `必补 ${depthCount.high} 条` : '无必补项'}</span>
+        </div>
+        <div class="hint">这一栏不看你写没写，看你写够了没有。只读你自己敲进去的字，模板和系统默认描述不算；结论只是提醒，不会进病历正文。</div>
+        <div class="depth-lines">${depthHtml}</div>
+      </div>` : '';
+
     return `
       <div class="card check-overall-card">
         <div class="card-title">评分自查
@@ -1729,6 +1753,8 @@ const APP = (() => {
 
       ${stationCards}
 
+      ${depthCard}
+
       <div class="card check-notes">
         <div class="card-title">说明</div>
         <div class="hint">${esc(C.DISCLAIMER)}</div>
@@ -1741,6 +1767,18 @@ const APP = (() => {
   /** 考站 → 对应录入步骤（自查页「去补本站内容」用） */
   function stationStep(key) {
     return ({ history: 'hpi', physical: 'pe', firstCourse: 'summary', writing: 'summary' })[key] || 'summary';
+  }
+
+  /** 深度自查的栏目名 → 对应录入步骤 */
+  function depthStep(section) {
+    return ({
+      主诉: 'hpi',
+      现病史: 'hpi',
+      既往史: 'pmh',
+      个人史: 'personal',
+      月经史: 'marriage',
+      辅助检查: 'aux'
+    })[section] || '';
   }
 
   /** 得分档位：达标绿 / 待补黄 / 缺失红 */
@@ -2918,7 +2956,9 @@ const APP = (() => {
       getOutputView: () => OUT_VIEW,
       outputTextOf: v => outputTextOf(v || OUT_VIEW, null),
       // 自查结果（与界面同一份数据，供测试直接断言）
-      checkSummary: () => (typeof CHECKER !== 'undefined' ? CHECKER.summary(R) : null)
+      checkSummary: () => (typeof CHECKER !== 'undefined' ? CHECKER.summary(R) : null),
+      // 问诊深度自查（同上，界面走 renderCheck 里的卡片）
+      depthOf: r => (typeof DEPTH !== 'undefined' ? DEPTH.check(r || R) : [])
     }
   };
 })();
