@@ -356,3 +356,43 @@ test('沙箱内不发起网络请求', () => {
   const app = boot();
   assert.ok(app.document.querySelector('#content').innerHTML.length > 0);
 });
+
+/* ======================= 记住上次停留的步骤 ======================= */
+
+test('stepIndexOf 认得出步骤键，认不出来的一律回第 0 步', () => {
+  const app = boot();
+  assert.equal(app.run('APP._test.stepIndexOf("basic")'), 0);
+  assert.equal(app.run('APP._test.stepIndexOf("pe")'), 7);
+  assert.equal(app.run('APP._test.stepIndexOf("output")'), 11);
+  // 空串、旧键、拼错的键都不能让页面白屏
+  assert.equal(app.run('APP._test.stepIndexOf("")'), 0);
+  assert.equal(app.run('APP._test.stepIndexOf(undefined)'), 0);
+  assert.equal(app.run('APP._test.stepIndexOf("不存在的步骤")'), 0);
+});
+
+test('刷新后回到上次停留的步骤，不必从第一步重新点', () => {
+  const app = boot({
+    initial: { 'dabingli.settings.v1': JSON.stringify({ rosMode: 'detail', fontScale: 1, lastStep: 'pe' }) }
+  });
+  assert.equal(app.document.querySelector('#stepNum').textContent, '8/12');
+  assert.match(app.document.querySelector('#stepTitle').textContent, /体格检查/);
+});
+
+test('存档里的步骤键坏掉时退回第一步，不白屏', () => {
+  const app = boot({
+    initial: { 'dabingli.settings.v1': JSON.stringify({ lastStep: 'steps-changed' }) }
+  });
+  assert.equal(app.document.querySelector('#stepNum').textContent, '1/12');
+  assert.match(app.document.querySelector('#stepTitle').textContent, /基本情况/);
+  assert.ok(app.document.querySelector('#content').innerHTML.length > 100);
+});
+
+test('切换步骤后立即写回设置，生成页不记', () => {
+  const app = boot();
+  app.run('APP._test.gotoStep("summary")');
+  assert.equal(app.stored(KEYS.settings).lastStep, 'summary');
+
+  app.run('APP._test.gotoStep("output")');
+  // 生成页只是输出，记它等于下次打开先看一屏只读的文字
+  assert.equal(app.stored(KEYS.settings).lastStep, 'summary');
+});

@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <title>大病历生成器</title>
 <style>
-﻿/* ===========================================================
+/* ===========================================================
  * 大病历生成器 —— 移动端样式
  * 设计目标：手机上单手操作、点选为主、字号可读
  * =========================================================== */
@@ -213,6 +213,72 @@ main {
   font-style: normal;
 }
 
+/* 未勾选：本次没查这一项，病历里完全不出现。
+   用虚线灰条，和「需填」的红色实线区分开——它不是没做完，是主动不选。 */
+.pe-item.is-off {
+  border-left: 3px dashed var(--gray-3);
+  padding-left: 8px;
+  opacity: .62;
+}
+
+.pe-item.is-off .pe-text {
+  background: var(--gray-1);
+}
+
+.pe-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 8px;
+  font-size: calc(13px * var(--fs-scale));
+  color: var(--gray-5);
+  font-weight: 400;
+  cursor: pointer;
+  user-select: none;
+  /* 手指点得中才算数：勾选框是这轮功能的主入口，原来 68x19 的点击区
+     在手机上几乎点不中。28px 勾选框 + 上下 padding 撑到 44px 高。 */
+  min-height: 44px;
+  padding: 0 4px 0 0;
+  box-sizing: border-box;
+}
+
+.pe-check input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--green);
+  /* 视觉上 20px，实际可点范围靠外层 label 的 44px 高度撑开 */
+}
+
+.tag-off {
+  font-size: calc(11px * var(--fs-scale));
+  color: var(--gray-5);
+  background: var(--gray-1);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 500;
+  margin-left: 6px;
+}
+
+.pe-count {
+  font-size: calc(11px * var(--fs-scale));
+  color: var(--gray-5);
+  font-weight: 400;
+  margin-left: auto;
+  padding-left: 8px;
+}
+
+.pe-tools {
+  margin: 4px 0 8px;
+}
+
+.btn-sm {
+  /* 手指点得中：原来 4px/10px 的 padding 只有 39.6px 高 */
+  padding: 9px 14px;
+  font-size: calc(13px * var(--fs-scale));
+  min-height: 44px;
+}
+
 .tag-dept {
   font-size: calc(11px * var(--fs-scale));
   color: var(--blue);
@@ -347,9 +413,12 @@ select {
 }
 
 .chip.small {
-  padding: 5px 10px;
+  /* 手指点得中：原来 5px/10px 只有 28.9px 高。
+     查体「常用描述」是这次的主要录入方式，点不中等于白做。 */
+  padding: 10px 14px;
   font-size: calc(13px * var(--fs-scale));
-  border-radius: 14px;
+  border-radius: 16px;
+  min-height: 44px;
 }
 
 /* 系统回顾：阳性用红色区分 */
@@ -363,7 +432,10 @@ select {
 /* ---------------- 按钮 ---------------- */
 
 .btn {
+  /* 44px 是手指点得中的下限。底部「上一步/下一步」实测只有 39.6px，
+     而这是每次录入都要点的两个按钮，点空一次就得多点一次。 */
   padding: 9px 16px;
+  min-height: 44px;
   font-size: calc(14px * var(--fs-scale));
   border: 1px solid var(--blue);
   background: var(--blue);
@@ -490,15 +562,17 @@ select {
 
 .jump-btn {
   position: relative;
-  padding: 5px 10px;
-  font-size: calc(12px * var(--fs-scale));
+  /* 手指点得中：原来 5px/10px 只有 27.6px 高 */
+  padding: 10px 14px;
+  font-size: calc(13px * var(--fs-scale));
   border: 1px solid var(--gray-3);
   background: #fff;
   color: var(--gray-5);
-  border-radius: 14px;
+  border-radius: 16px;
   cursor: pointer;
   font-family: inherit;
   line-height: 1.3;
+  min-height: 44px;
 }
 
 .jump-btn.has-pos {
@@ -1657,7 +1731,7 @@ footer .btn:disabled {
 </footer>
 
 <script>
-﻿/* ===========================================================================
+/* ===========================================================================
  * 大病历生成器 —— 数据模型 / 字段定义
  * 所有科室共用一套「病史」字段，体格检查分为「通用查体 + 专科查体」。
  * 设计原则：手机上尽量点选，少打字；每一项都可以手写补充或改写。
@@ -1702,54 +1776,21 @@ const SCHEMA = (() => {
    * 每一项：{ key, name, symptoms: [{ key, label, detail?: 录入提示 }] }
    * 勾选「有」即默认阳性，生成时按「症状 + 时间」组装；全无则写「无异常」。
    * ------------------------------------------------------------------- */
+  /* 系统回顾：按《诊断学》第10版（第556页）的 8 个系统划分。
+   *
+   * 教材原文的 8 个系统：
+   *   1 呼吸  2 循环  3 消化  4 泌尿  5 血液  6 内分泌及代谢  7 神经精神  8 肌肉骨骼
+   *
+   * 原来的 12 个系统里有 4 个（一般情况/皮肤粘膜/头部及五官/精神心理）
+   * 教材并不单列，其症状已按教材条文并入下列 8 个系统。
+   * 映射关系见 tools/ros-map.js。
+   *
+   * 注意：hints.js 里有 26 条规则引用 ros:系统.症状 键，
+   * 改动症状 key 会让规则静默失效。改动前先跑 node tools/check-ros-keys.js。
+   */
   const ROS = [
     {
-      key: 'general',
-      name: '一般情况',
-      symptoms: [
-        { key: 'fatigue', label: '疲乏无力' },
-        { key: 'fever', label: '发热', detail: '热峰' },
-        { key: 'chills', label: '畏寒寒战' },
-        { key: 'nightSweat', label: '盗汗' },
-        { key: 'weightLoss', label: '体重下降', detail: '约下降' },
-        { key: 'weightGain', label: '体重增加', detail: '约增加' },
-        { key: 'appetiteLoss', label: '食欲减退' },
-        { key: 'edemaSys', label: '水肿' }
-      ]
-    },
-    {
-      key: 'skin',
-      name: '皮肤粘膜',
-      symptoms: [
-        { key: 'rash', label: '皮疹', detail: '部位/形态' },
-        { key: 'pruritus', label: '皮肤瘙痒' },
-        { key: 'jaundice', label: '皮肤黏膜黄染' },
-        { key: 'pallorSkin', label: '皮肤苍白' },
-        { key: 'purpura', label: '瘀点瘀斑' },
-        { key: 'ulcer', label: '皮肤溃疡' },
-        { key: 'hairLoss', label: '脱发' }
-      ]
-    },
-    {
-      key: 'head',
-      name: '头部及五官',
-      symptoms: [
-        { key: 'headache', label: '头痛' },
-        { key: 'dizziness', label: '头晕' },
-        { key: 'vertigo', label: '眩晕' },
-        { key: 'syncope', label: '晕厥' },
-        { key: 'visualBlur', label: '视物模糊' },
-        { key: 'eyePain', label: '眼痛/畏光' },
-        { key: 'hearingLoss', label: '听力下降' },
-        { key: 'tinnitus', label: '耳鸣' },
-        { key: 'nasalObstruction', label: '鼻塞流涕' },
-        { key: 'epistaxis', label: '鼻出血' },
-        { key: 'toothache', label: '牙痛' },
-        { key: 'soreThroat', label: '咽痛' },
-        { key: 'hoarseness', label: '声音嘶哑' }
-      ]
-    },
-    {
+      // 教材：慢性咳嗽、咳痰、呼吸困难、咯血、低热、盗汗等。
       key: 'resp',
       name: '呼吸系统',
       symptoms: [
@@ -1759,10 +1800,18 @@ const SCHEMA = (() => {
         { key: 'dyspnea', label: '呼吸困难' },
         { key: 'chestPainResp', label: '胸痛' },
         { key: 'wheeze', label: '喘息' },
-        { key: 'pleurisy', label: '胸膜炎性胸痛' }
+        { key: 'pleurisy', label: '胸膜炎性胸痛' },
+        { key: 'fever', label: '发热', detail: '热峰' },
+        { key: 'chills', label: '畏寒寒战' },
+        { key: 'nightSweat', label: '盗汗' },
+        { key: 'nasalObstruction', label: '鼻塞流涕' },
+        { key: 'soreThroat', label: '咽痛' },
+        { key: 'hoarseness', label: '声音嘶哑' }
       ]
     },
     {
+      // 教材：心悸、气急、咯血、发绀，心前区疼痛、晕厥、水肿及高血压、动脉硬化、
+      //       心脏疾病、风湿热病史等。
       key: 'cardio',
       name: '循环系统',
       symptoms: [
@@ -1771,10 +1820,13 @@ const SCHEMA = (() => {
         { key: 'orthopnea', label: '夜间阵发性呼吸困难/端坐呼吸' },
         { key: 'intermittentClaudication', label: '间歇性跛行' },
         { key: 'edemaCardio', label: '下肢水肿' },
-        { key: 'cyanosis', label: '发绀' }
+        { key: 'cyanosis', label: '发绀' },
+        { key: 'syncope', label: '晕厥' },
+        { key: 'edemaSys', label: '全身水肿' }
       ]
     },
     {
+      // 教材：慢性腹胀、腹痛、嗳气、反酸、呕血、便血、黄疸和慢性腹泻、便秘史等。
       key: 'gi',
       name: '消化系统',
       symptoms: [
@@ -1788,12 +1840,17 @@ const SCHEMA = (() => {
         { key: 'hematochezia', label: '便血' },
         { key: 'bloating', label: '腹胀' },
         { key: 'reflux', label: '反酸烧心' },
-        { key: 'jaundiceGi', label: '黄疸' }
+        { key: 'jaundiceGi', label: '黄疸' },
+        { key: 'jaundice', label: '皮肤黏膜黄染' },
+        { key: 'appetiteLoss', label: '食欲减退' },
+        { key: 'toothache', label: '牙痛' }
       ]
     },
     {
+      // 教材：尿频、尿急、尿痛、排尿不畅或淋沥，尿色（洗肉水样或酱油色）、清浊度，
+      //       水肿，肾毒性药物应用史，铅、汞化学毒物接触或中毒史，下疳、淋病、梅毒等性病史。
       key: 'gu',
-      name: '泌尿生殖系统',
+      name: '泌尿系统',
       symptoms: [
         { key: 'dysuria', label: '尿频尿急尿痛' },
         { key: 'hematuria', label: '血尿' },
@@ -1806,20 +1863,32 @@ const SCHEMA = (() => {
       ]
     },
     {
+      // 教材：头晕、乏力，皮肤或黏膜瘀点、紫癜、血肿，反复鼻出血，牙龈出血，骨骼痛。
+      // 原「一般情况」的乏力、「皮肤粘膜」的出血相关症状并入此处。
       key: 'hemat',
-      name: '造血系统',
+      name: '血液系统',
       symptoms: [
         { key: 'anemia', label: '乏力、面色苍白' },
+        { key: 'fatigue', label: '疲乏无力' },
         { key: 'bleeding', label: '易出血/出血难止' },
         { key: 'bruise', label: '皮下瘀斑' },
+        { key: 'purpura', label: '瘀点瘀斑' },
+        { key: 'epistaxis', label: '鼻出血' },
         { key: 'lymphNode', label: '淋巴结肿大' },
         { key: 'bonePain', label: '骨痛' },
-        { key: 'transfusion', label: '输血史' }
+        { key: 'transfusion', label: '输血史' },
+        { key: 'rash', label: '皮疹', detail: '部位/形态' },
+        { key: 'pruritus', label: '皮肤瘙痒' },
+        { key: 'pallorSkin', label: '皮肤苍白' },
+        { key: 'ulcer', label: '皮肤溃疡' }
       ]
     },
     {
+      // 教材：畏寒、怕热、多汗、食欲异常、烦渴、多饮、多尿、头痛、视力障碍、
+      //       肌肉震颤、性格、体重、皮肤、毛发和第二性征改变史等。
+      // 原「一般情况」的体重/食欲、「皮肤粘膜」的脱发并入此处。
       key: 'endocrine',
-      name: '内分泌及代谢',
+      name: '内分泌及代谢系统',
       symptoms: [
         { key: 'polydipsia', label: '多饮' },
         { key: 'polyphagia', label: '多食' },
@@ -1828,13 +1897,27 @@ const SCHEMA = (() => {
         { key: 'coldIntolerance', label: '怕冷少汗' },
         { key: 'hairChange', label: '毛发改变' },
         { key: 'neckMass', label: '颈部肿块' },
-        { key: 'growthChange', label: '身高明显改变' }
+        { key: 'growthChange', label: '身高明显改变' },
+        { key: 'weightLoss', label: '体重下降', detail: '约下降' },
+        { key: 'weightGain', label: '体重增加', detail: '约增加' },
+        { key: 'hairLoss', label: '脱发' }
       ]
     },
     {
+      // 教材：头痛、失眠或嗜睡、意识障碍、晕厥、痉挛、瘫痪、视力障碍、
+      //       感觉及运动异常、性格改变、记忆力和智力减退等。
+      // 原「头部及五官」「精神心理」两系统的症状并入此处。
       key: 'nervous',
-      name: '神经系统',
+      name: '神经精神系统',
       symptoms: [
+        { key: 'headache', label: '头痛' },
+        { key: 'dizziness', label: '头晕' },
+        { key: 'vertigo', label: '眩晕' },
+        { key: 'syncopeNerve', label: '晕厥' },
+        { key: 'visualBlur', label: '视物模糊' },
+        { key: 'eyePain', label: '眼痛/畏光' },
+        { key: 'hearingLoss', label: '听力下降' },
+        { key: 'tinnitus', label: '耳鸣' },
         { key: 'numbness', label: '肢体麻木' },
         { key: 'weakness', label: '肢体无力' },
         { key: 'seizure', label: '抽搐' },
@@ -1842,10 +1925,15 @@ const SCHEMA = (() => {
         { key: 'memoryLoss', label: '记忆力减退' },
         { key: 'sleepDisorder', label: '睡眠障碍' },
         { key: 'speech', label: '言语不清' },
-        { key: 'incontinence', label: '大小便失禁' }
+        { key: 'incontinence', label: '大小便失禁' },
+        { key: 'insomnia', label: '失眠' },
+        { key: 'moodLow', label: '情绪低落' },
+        { key: 'anxiety', label: '焦虑' },
+        { key: 'hallucination', label: '幻觉妄想' }
       ]
     },
     {
+      // 教材：关节肿痛，运动障碍，肢体麻木、痉挛、萎缩、瘫痪史等。
       key: 'joint',
       name: '肌肉骨骼系统',
       symptoms: [
@@ -1853,16 +1941,6 @@ const SCHEMA = (() => {
         { key: 'morningStiff', label: '晨僵' },
         { key: 'backPain', label: '腰背痛' },
         { key: 'muscleWeak', label: '肌肉酸痛无力' }
-      ]
-    },
-    {
-      key: 'psych',
-      name: '精神心理',
-      symptoms: [
-        { key: 'insomnia', label: '失眠' },
-        { key: 'moodLow', label: '情绪低落' },
-        { key: 'anxiety', label: '焦虑' },
-        { key: 'hallucination', label: '幻觉妄想' }
       ]
     }
   ];
@@ -1898,6 +1976,10 @@ const SCHEMA = (() => {
     { key: 'dbp', label: '舒张压', unit: 'mmHg', placeholder: '80', type: 'number' },
     { key: 'height', label: '身高', unit: 'cm', placeholder: '170', type: 'number' },
     { key: 'weight', label: '体重', unit: 'kg', placeholder: '60', type: 'number' },
+    // 腹围：教材《病历书写》「腹部」一节明确列出「腹围（妊娠、肥胖、腹腔积液等情况时测量）」，
+    // 测量方法为「让病人排尿后平卧，用软尺经脐绕腹一周」。放在生命体征卡里与身高体重同排，
+    // 消化内科/产科/儿科都常用，因此不加 dept 限制。
+    { key: 'abdCirc', label: '腹围', unit: 'cm', placeholder: '80', type: 'number' },
     // 儿科专用
     { key: 'headCirc', label: '头围', unit: 'cm', placeholder: '34', type: 'number', dept: 'pediatrics' },
     { key: 'chestCirc', label: '胸围', unit: 'cm', placeholder: '33', type: 'number', dept: 'pediatrics' }
@@ -1912,23 +1994,40 @@ const SCHEMA = (() => {
   const PE_COMMON = [
     {
       key: 'general',
-      name: '一般情况',
+      name: '一般状况',
+      // 顺序按《诊断学》（第10版）第六篇病历书写「一般状况」原文：
+      //   发育（正常、异常），营养（良好、中等、不良），神志（清晰、模糊、嗜睡…），
+      //   体位（自主、被动、强迫），面容与表情，检查能否合作。
+      // 生成病历时就按这个顺序逐项列举，读起来与教材、医院模板一致。
+      //
+      // joinWith：教材与医院模板里一般状况是**一整句逗号连写**
+      // （「发育正常，营养良好，神志清楚，自主体位。」），不是逐句句号断开。
+      // 其余查体组仍是句号分隔，所以把分隔符放在组上，不在 generator 里硬编码组名。
+      joinWith: '，',
       items: [
+        {
+          // 教材「一般状况」第一项就是「发育（正常、异常）」，原 schema 缺此项。
+          key: 'development', label: '发育', default: '发育正常',
+          options: ['发育正常', '发育不良', '发育迟缓', '发育异常']
+        },
+        {
+          key: 'nutrition', label: '营养', default: '营养中等',
+          options: ['营养良好', '营养中等', '营养不良', '肥胖']
+        },
         {
           key: 'conscious', label: '神志', default: '神志清楚，精神可',
           options: ['神志清楚，精神可', '神志清楚，精神一般', '神志清楚，精神差', '嗜睡', '昏睡', '浅昏迷', '深昏迷']
         },
         {
-          key: 'posture', label: '体位', default: '自动体位',
-          options: ['自动体位', '被动体位', '强迫体位']
+          // 教材原文是「体位（自主、被动、强迫）」，医院模板写成「自主体位」。
+          // 旧版这里写的是「自动体位」（不规范说法），已按教材改为「自主体位」。
+          key: 'posture', label: '体位', default: '自主体位',
+          options: ['自主体位', '被动体位', '强迫体位'],
+          legacyDefault: '自动体位'
         },
         {
           key: 'face', label: '面容', default: '面容自然',
           options: ['面容自然', '急性病容', '慢性病容', '贫血面容', '二尖瓣面容', '甲亢面容', '满月面容']
-        },
-        {
-          key: 'nutrition', label: '营养', default: '营养中等',
-          options: ['营养良好', '营养中等', '营养不良', '肥胖']
         },
         {
           key: 'cooperation', label: '查体合作', default: '查体合作',
@@ -1976,9 +2075,9 @@ const SCHEMA = (() => {
           options: ['毛发分布均匀', '毛发稀疏', '毛发分布异常']
         },
         {
-          key: 'eyes', label: '眼', default: '眼睑无水肿，巩膜无黄染，双侧瞳孔等大等圆，直径约3mm，对光反射灵敏',
+          key: 'eyes', label: '眼', default: '眼睑无水肿，巩膜无黄染，双侧瞳孔等大等圆，对光反射灵敏',
           options: [
-            '眼睑无水肿，巩膜无黄染，双侧瞳孔等大等圆，直径约3mm，对光反射灵敏',
+            '眼睑无水肿，巩膜无黄染，双侧瞳孔等大等圆，对光反射灵敏',
             '眼睑水肿',
             '巩膜黄染',
             '双侧瞳孔不等大',
@@ -2042,8 +2141,8 @@ const SCHEMA = (() => {
           options: ['语颤对称，无胸膜摩擦感', '语颤增强', '语颤减弱', '可触及胸膜摩擦感']
         },
         {
-          key: 'lungPercussion', label: '肺—叩诊', default: '双肺叩诊清音，肺下界位于锁骨中线第6肋间',
-          options: ['双肺叩诊清音，肺下界位于锁骨中线第6肋间', '双肺叩诊过清音', '局部叩诊浊音', '局部叩诊实音', '肺下界下移']
+          key: 'lungPercussion', label: '肺—叩诊', default: '双肺叩诊清音，肺下界位置正常',
+          options: ['双肺叩诊清音，肺下界位置正常', '双肺叩诊过清音', '局部叩诊浊音', '局部叩诊实音', '肺下界下移']
         },
         {
           key: 'lungAuscultation', label: '肺—听诊', default: '双肺呼吸音清，未闻及干湿性啰音及胸膜摩擦音',
@@ -2058,8 +2157,8 @@ const SCHEMA = (() => {
           ]
         },
         {
-          key: 'heartInspect', label: '心—视诊', default: '心前区无隆起，心尖搏动位于第5肋间左锁骨中线内0.5cm',
-          options: ['心前区无隆起，心尖搏动位于第5肋间左锁骨中线内0.5cm', '心尖搏动向左下移位', '心前区隆起']
+          key: 'heartInspect', label: '心—视诊', default: '心前区无隆起，心尖搏动位置正常，未超出正常范围',
+          options: ['心前区无隆起，心尖搏动位置正常，未超出正常范围', '心尖搏动向左下移位', '心前区隆起']
         },
         {
           key: 'heartPalpation', label: '心—触诊', default: '心尖搏动无抬举性，未触及震颤',
@@ -2070,9 +2169,9 @@ const SCHEMA = (() => {
           options: ['心界不大', '心界向左下扩大', '心界向两侧扩大']
         },
         {
-          key: 'heartAuscultation', label: '心—听诊', default: '心率78次/分，律齐，各瓣膜听诊区未闻及病理性杂音',
+          key: 'heartAuscultation', label: '心—听诊', default: '心律齐，各瓣膜听诊区未闻及病理性杂音',
           options: [
-            '心率78次/分，律齐，各瓣膜听诊区未闻及病理性杂音',
+            '心律齐，各瓣膜听诊区未闻及病理性杂音',
             '心律不齐，可闻及早搏',
             '心尖区可闻及收缩期杂音',
             '主动脉瓣区可闻及舒张期杂音',
@@ -2106,9 +2205,9 @@ const SCHEMA = (() => {
         },
         {
           // ② 听诊：必须在触诊、叩诊之前（4分）。评分表要求交代听诊部位与听诊时长。
-          key: 'abdAuscultation', label: '听诊', default: '左上腹听诊1分钟，肠鸣音4次/分',
+          key: 'abdAuscultation', label: '听诊', default: '肠鸣音正常，未闻及血管杂音',
           legacyDefault: '肠鸣音正常，约4次/分',
-          options: ['左上腹听诊1分钟，肠鸣音4次/分', '肠鸣音活跃', '肠鸣音减弱', '肠鸣音消失', '可闻及血管杂音']
+          options: ['肠鸣音正常，未闻及血管杂音', '肠鸣音活跃', '肠鸣音减弱', '肠鸣音消失', '可闻及血管杂音']
         },
         {
           // ③ 叩诊：逆时针次序（4分，不要求脾区）
@@ -2152,6 +2251,41 @@ const SCHEMA = (() => {
           key: 'spleenPalpation', label: '触诊—脾', default: '', parent: 'abdPalpation',
           normal: '脾肋下未触及',
           options: ['脾肋下未触及', '脾肋下可触及', '脾肋下可触及且质硬']
+        },
+        {
+          // 胆囊触诊与 Murphy 征。教材腹部触诊原文：「医师以拇指指腹勾压于右肋下
+          // 胆囊点为胆囊触痛点，然后嘱病人缓慢深吸气。在吸气过程中发炎的胆囊下移
+          // 时碰到用力按压的拇指，即可引起疼痛，此为胆囊触痛；如因剧烈疼痛而致
+          // 吸气中止称墨菲征（Murphy sign）阳性」。
+          key: 'gallbladderPalpation', label: '触诊—胆囊（Murphy征）', default: '', parent: 'abdPalpation',
+          normal: '胆囊未触及，Murphy征阴性',
+          options: ['胆囊未触及，Murphy征阴性', '胆囊触痛阳性', 'Murphy征阳性', '胆囊可触及']
+        },
+        {
+          // 肾脏触诊。教材：「双手触诊法…病人取仰卧位，屈髋屈膝…」正常不可触及。
+          key: 'kidneyPalpation', label: '触诊—肾', default: '', parent: 'abdPalpation',
+          normal: '双肾未触及，季肋点及肋脊点无压痛',
+          options: ['双肾未触及，季肋点及肋脊点无压痛', '右肾下极可触及', '双肾可触及', '季肋点压痛', '肋脊点压痛']
+        },
+        {
+          // 膀胱触诊。教材：「膀胱膨胀时可在下腹部触到圆形或椭圆形肿物…」
+          key: 'bladderPalpation', label: '触诊—膀胱', default: '', parent: 'abdPalpation',
+          normal: '膀胱未触及，耻骨上区无压痛',
+          options: ['膀胱未触及，耻骨上区无压痛', '膀胱充盈可触及', '耻骨上区压痛']
+        },
+        {
+          // 液波震颤。教材：「需 3000ml 以上液量才能查出，不如移动性浊音敏感，
+          // 肥胖者可出现假阳性」。放在触诊块内，紧接在腹部触诊细分之后。
+          key: 'fluidThrill', label: '触诊—液波震颤', default: '', parent: 'abdPalpation',
+          normal: '液波震颤阴性',
+          options: ['液波震颤阴性', '液波震颤阳性']
+        },
+        {
+          // 振水音。教材：「餐后 6～8 小时以上仍有此音，提示幽门梗阻或胃扩张，
+          // 是幽门梗阻的特征性体征」。属听诊内容，父项挂 abdAuscultation。
+          key: 'succussionSplash', label: '听诊—振水音', default: '', parent: 'abdAuscultation',
+          normal: '振水音阴性',
+          options: ['振水音阴性', '振水音阳性']
         }
       ]
     },
@@ -2262,34 +2396,223 @@ const SCHEMA = (() => {
       items: [
         {
           key: 'respExtra', label: '呼吸专科', default: '三凹征阴性，语音传导正常',
-          options: ['三凹征阴性，语音传导正常', '三凹征阳性', '语音传导增强', '语音传导减弱', '可闻及支气管呼吸音']
+          options: ['三凹征阴性，语音传导正常', '三凹征阳性', '语音传导增强', '语音传导减弱', '可闻及支气管呼吸音'],
+          summaryOf: ['respAccessory', 'respVocalResonance'],
+        },
+        {
+          key: 'respShape', label: '胸廓外形与呼吸运动',
+          default: '呼吸运动两侧对称，呼吸平稳，未见桶状胸',
+          options: ['呼吸运动两侧对称，呼吸平稳，未见桶状胸', '桶状胸', '肋间隙增宽', '肋间隙变窄', '一侧呼吸运动减弱', '胸廓不对称']
+        },
+        {
+          key: 'respAccessory', label: '辅助呼吸肌与三凹征',
+          default: '未见辅助呼吸肌参与呼吸运动，三凹征阴性',
+          options: ['未见辅助呼吸肌参与呼吸运动，三凹征阴性', '可见辅助呼吸肌参与呼吸运动', '吸气性三凹征', '端坐呼吸']
+        },
+        {
+          key: 'respVocalFremitus', label: '语音震颤',
+          default: '双侧语音震颤对称，无明显增强或减弱',
+          options: ['双侧语音震颤对称，无明显增强或减弱', '患侧语音震颤增强', '患侧语音震颤减弱', '双侧语音震颤减弱']
+        },
+        {
+          key: 'respPercussion', label: '叩诊音与肺下界',
+          default: '双肺叩诊清音，肺下界位置正常',
+          options: ['双肺叩诊清音，肺下界位置正常', '局部叩诊浊音', '局部叩诊实音', '局部叩诊过清音', '肺下界下移', '肺下界上移']
+        },
+        {
+          key: 'respChestExpansion', label: '肺下界移动度',
+          default: '肺下界移动度正常，两侧对称',
+          options: ['肺下界移动度正常，两侧对称', '肺下界移动度减小', '一侧肺下界移动度消失']
+        },
+        {
+          key: 'respBreathSound', label: '呼吸音',
+          default: '双肺呼吸音清晰，未闻及异常呼吸音',
+          options: ['双肺呼吸音清晰，未闻及异常呼吸音', '双肺呼吸音减弱', '可闻及支气管呼吸音', '可闻及湿啰音', '可闻及干啰音']
+        },
+        {
+          key: 'respVocalResonance', label: '语音共振',
+          default: '双侧语音共振对称，无增强或减弱',
+          options: ['双侧语音共振对称，无增强或减弱', '患侧语音共振增强', '患侧语音共振减弱']
+        },
+        {
+          key: 'respPleuralRub', label: '胸膜摩擦音',
+          default: '未闻及胸膜摩擦音',
+          options: ['未闻及胸膜摩擦音', '可闻及胸膜摩擦音']
+        },
+        {
+          key: 'respCyanosis', label: '发绀与杵状指',
+          default: '无杵状指，无球结膜水肿',
+          options: ['无杵状指，无球结膜水肿', '口唇发绀', '杵状指', '球结膜水肿']
         }
       ]
     },
     cardiology: {
-      name: '心血管专科查体',
+      name: '心血管内科专科查体',
       items: [
         {
           key: 'cardioExtra', label: '心血管专科', default: '未闻及额外心音，毛细血管搏动征阴性，水冲脉阴性',
-          options: ['未闻及额外心音，毛细血管搏动征阴性，水冲脉阴性', '可闻及奔马律', '毛细血管搏动征阳性', '水冲脉阳性', '交替脉', '奇脉', '周围血管搏动征阳性']
+          options: ['未闻及额外心音，毛细血管搏动征阴性，水冲脉阴性', '可闻及奔马律', '毛细血管搏动征阳性', '水冲脉阳性', '交替脉', '奇脉', '周围血管搏动征阳性'],
+          summaryOf: ['cardioHeartSound', 'cardioPeripheralSign'],
+        },
+        {
+          key: 'cardioApex', label: '心前区视诊与心尖搏动',
+          default: '心尖搏动位置正常，搏动范围无明显扩大',
+          options: ['心尖搏动位置正常，搏动范围无明显扩大', '心尖搏动向左下移位', '心尖搏动弥散', '心前区隆起', '心尖搏动消失']
+        },
+        {
+          key: 'cardioThrill', label: '心前区触诊与震颤',
+          default: '心尖搏动无抬举感，未触及震颤及心包摩擦感',
+          options: ['心尖搏动无抬举感，未触及震颤及心包摩擦感', '可触及收缩期震颤', '可触及舒张期震颤', '心尖搏动呈抬举样', '可触及心包摩擦感']
+        },
+        {
+          key: 'cardioBorder', label: '心脏叩诊与心界',
+          default: '心浊音界各径线在正常范围',
+          options: ['心浊音界各径线在正常范围', '心界向左下扩大', '心界向两侧扩大', '心界向左侧扩大', '心界缩小']
+        },
+        {
+          key: 'cardioRate', label: '心率与心律',
+          default: '心率正常，心律齐',
+          options: ['心率正常，心律齐', '心动过速', '心动过缓', '心律不齐，心房颤动', '早搏']
+        },
+        {
+          key: 'cardioHeartSound', label: '心音与额外心音',
+          default: '第一心音正常，P2与A2强度相等，未闻及额外心音及奔马律',
+          options: ['第一心音正常，P2与A2强度相等，未闻及额外心音及奔马律', '第一心音减弱', 'P2亢进', 'P2减弱', '可闻及第三心音', '可闻及奔马律']
+        },
+        {
+          key: 'cardioMurmur', label: '心脏杂音',
+          default: '各瓣膜听诊区未闻及病理性杂音',
+          options: ['各瓣膜听诊区未闻及病理性杂音', '二尖瓣区可闻及2/6级收缩期杂音', '二尖瓣区可闻及3/6级收缩期杂音', '主动脉瓣区可闻及舒张期杂音', '全收缩期杂音伴传导']
+        },
+        {
+          key: 'cardioPericardium', label: '心包摩擦音',
+          default: '未闻及心包摩擦音',
+          options: ['未闻及心包摩擦音', '可闻及心包摩擦音']
+        },
+        {
+          key: 'cardioJVP', label: '颈静脉与肝颈静脉回流征',
+          default: '肝颈静脉回流征阴性',
+          options: ['肝颈静脉回流征阴性', '颈静脉充盈', '颈静脉怒张', '肝颈静脉回流征阳性']
+        },
+        {
+          key: 'cardioPeripheralSign', label: '周围血管征',
+          default: '水冲脉、枪击音、毛细血管搏动征、交替脉、奇脉均阴性',
+          options: ['水冲脉、枪击音、毛细血管搏动征、交替脉、奇脉均阴性', '水冲脉阳性', '枪击音阳性', '毛细血管搏动征阳性', '交替脉', '奇脉']
+        },
+        {
+          key: 'cardioEdema', label: '下肢水肿',
+          default: '双下肢无水肿',
+          options: ['双下肢无水肿', '双下肢凹陷性水肿', '双下肢非凹陷性水肿', '单侧下肢水肿']
         }
       ]
     },
     digestive: {
-      name: '消化专科查体',
+      name: '消化内科专科查体',
       items: [
         {
-          key: 'giExtra', label: '消化专科', default: '肝颈静脉回流征阴性，Murphy征阴性',
-          options: ['肝颈静脉回流征阴性，Murphy征阴性', 'Murphy征阳性', '肝颈静脉回流征阳性', '麦氏点压痛', '液波震颤阳性', '振水音阳性']
+          key: 'giExtra', label: '消化专科', default: '肝颈静脉回流征阴性',
+          // 只留「肝颈静脉回流征」——这一句没有别的项会写。
+          // Murphy 征归下面的胆囊触诊，两边都写会在一段话里出现两遍。
+          options: ['肝颈静脉回流征阴性', '肝颈静脉回流征阳性', 'Murphy征阳性', '麦氏点压痛', '液波震颤阳性', '振水音阳性']
+        },
+        {
+          key: 'giAbdShape', label: '腹部视诊',
+          default: '腹部平坦，未见胃肠型及蠕动波，未见腹壁静脉曲张',
+          options: ['腹部平坦，未见胃肠型及蠕动波，未见腹壁静脉曲张', '腹部膨隆', '呈蛙状腹', '可见胃肠型及蠕动波', '腹壁静脉曲张，血流方向自下而上', '可见手术瘢痕']
+        },
+        {
+          key: 'giTenderness', label: '压痛点',
+          default: '麦氏点、胆囊点、上输尿管点及中输尿管点均无压痛',
+          options: ['麦氏点、胆囊点、上输尿管点及中输尿管点均无压痛', '麦氏点压痛', '右上腹压痛，胆囊点压痛', '上腹部压痛', '脐周压痛', '全腹压痛']
+        },
+        {
+          key: 'giRebound', label: '反跳痛与腹肌紧张',
+          default: '全腹无反跳痛，腹肌柔软',
+          options: ['全腹无反跳痛，腹肌柔软', '右下腹反跳痛', '全腹反跳痛伴腹肌紧张', '局部腹肌紧张', '板状腹']
+        },
+        {
+          key: 'giLiverPalp', label: '肝脏触诊',
+          default: '肝肋下未触及，剑突下未触及，肝区无压痛及叩击痛',
+          options: ['肝肋下未触及，剑突下未触及，肝区无压痛及叩击痛', '肝肋下可触及，质软，边缘钝', '肝肋下可触及，质韧，边缘结节状', '肝区压痛', '肝区叩击痛', '肝浊音界缩小']
+        },
+        {
+          key: 'giSpleenPalp', label: '脾脏触诊',
+          default: '脾脏未触及，脾区无摩擦感',
+          options: ['脾脏未触及，脾区无摩擦感', '脾肋下可触及，质软', '脾肋下可触及，质硬', '脾区摩擦感', '脾浊音区扩大']
+        },
+        {
+          key: 'giGallbladderPalp', label: '胆囊触诊与Murphy征',
+          default: '胆囊未触及，Murphy征阴性，无胆囊触痛',
+          options: ['胆囊未触及，Murphy征阴性，无胆囊触痛', '胆囊触痛阳性', 'Murphy征阳性', '可触及肿大胆囊，无压痛', '库瓦西耶征阳性']
+        },
+        {
+          key: 'giFluidThrill', label: '液波震颤',
+          default: '液波震颤阴性',
+          options: ['液波震颤阴性', '液波震颤阳性']
+        },
+        {
+          key: 'giShiftingDullness', label: '移动性浊音',
+          default: '移动性浊音阴性',
+          options: ['移动性浊音阴性', '移动性浊音阳性', '移动性浊音可疑']
+        },
+        {
+          key: 'giBowelSound', label: '肠鸣音与振水音',
+          default: '未闻及振水音及血管杂音',
+          options: ['未闻及振水音及血管杂音', '肠鸣音活跃', '肠鸣音减弱', '肠鸣音消失', '可闻及金属音', '振水音阳性', '可闻及腹部血管杂音']
+        },
+        {
+          key: 'giRectal', label: '直肠指检',
+          default: '直肠指检未触及肿物，指套无染血',
+          options: ['直肠指检未触及肿物，指套无染血', '直肠内可触及肿物', '指套染血', '肛门括约肌松弛', '直肠前壁触痛', '未行直肠指检']
         }
       ]
     },
     endocrinology: {
-      name: '内分泌专科查体',
+      name: '内分泌科专科查体',
       items: [
         {
           key: 'endoExtra', label: '内分泌专科', default: '皮肤细腻，无明显满月脸、水牛背',
           options: ['皮肤细腻，无明显满月脸、水牛背', '满月脸、水牛背', '皮肤粗糙', '手足增大', '胫前黏液性水肿', '突眼']
+        },
+        {
+          key: 'endoBody', label: '体型与脂肪分布',
+          default: '体型匀称，脂肪分布正常，无向心性肥胖',
+          options: ['体型匀称，脂肪分布正常，无向心性肥胖', '向心性肥胖', '满月脸', '水牛背', '消瘦', '巨人症体型']
+        },
+        {
+          key: 'endoSkin', label: '皮肤改变',
+          default: '皮肤无紫纹、痤疮及色素沉着，毛发分布正常',
+          options: ['皮肤无紫纹、痤疮及色素沉着，毛发分布正常', '可见紫纹', '痤疮', '多毛', '色素沉着', '皮肤菲薄', '胫前黏液性水肿']
+        },
+        {
+          key: 'endoThyroid', label: '甲状腺',
+          default: '甲状腺不大，质软，未触及结节，未闻及血管杂音',
+          options: ['甲状腺不大，质软，未触及结节，未闻及血管杂音', '甲状腺Ⅰ度肿大', '甲状腺Ⅱ度肿大', '甲状腺Ⅲ度肿大', '可触及甲状腺结节', '可闻及甲状腺血管杂音', '可触及甲状腺震颤']
+        },
+        {
+          key: 'endoEye', label: '眼部征象',
+          default: '双眼球无突出，眼征阴性',
+          options: ['双眼球无突出，眼征阴性', '双眼球突出', '单侧眼球突出', 'Graefe征阳性', 'Stellwag征阳性', '眼睑闭合不全']
+        },
+        {
+          key: 'endoHandFoot', label: '手足改变',
+          default: '手足无畸形，指端无增粗',
+          options: ['手足无畸形，指端无增粗', '手指增粗呈杵状', '手足增大', '指端粗隆', '掌骨增宽']
+        },
+        {
+          key: 'endoBreast', label: '男性乳房发育',
+          default: '男性乳房未发育',
+          options: ['男性乳房未发育', '男性乳房发育', '乳房可触及结节']
+        },
+        {
+          key: 'endoPulseBP', label: '脉搏与血压',
+          default: '脉搏节律规整，双上肢血压对称',
+          options: ['脉搏节律规整，双上肢血压对称', '脉搏增快', '脉搏缓慢', '双上肢血压不对称', '血压升高', '体位性低血压']
+        },
+        {
+          key: 'endoWound', label: '皮肤伤口与溃疡',
+          default: '全身皮肤完整，未见溃疡及伤口愈合不良',
+          options: ['全身皮肤完整，未见溃疡及伤口愈合不良', '足部溃疡', '伤口愈合不良', '皮肤感染']
         }
       ]
     },
@@ -2297,8 +2620,49 @@ const SCHEMA = (() => {
       name: '肾脏专科查体',
       items: [
         {
-          key: 'renalExtra', label: '肾脏专科', default: '双肾区无叩击痛，颜面及双下肢无水肿，未见皮下出血点',
-          options: ['双肾区无叩击痛，颜面及双下肢无水肿，未见皮下出血点', '双侧眼睑水肿', '双下肢水肿', '双肾区叩击痛']
+          key: 'renalExtra', label: '肾脏专科', default: '颜面及双下肢无水肿，未见皮下出血点',
+          options: ['颜面及双下肢无水肿，未见皮下出血点', '双侧眼睑水肿', '双下肢水肿', '双肾区叩击痛'],
+          summaryOf: ['renalFacialEdema', 'renalLegEdema', 'renalSkin'],
+        },
+        {
+          key: 'renalFacialEdema', label: '颜面及眼睑水肿',
+          default: '颜面无水肿，双眼睑无水肿',
+          options: ['颜面无水肿，双眼睑无水肿', '双眼睑水肿', '颜面水肿', '晨起眼睑水肿']
+        },
+        {
+          key: 'renalLegEdema', label: '下肢水肿',
+          default: '双下肢无水肿',
+          options: ['双下肢无水肿', '双下肢凹陷性水肿', '双下肢非凹陷性水肿', '单侧下肢水肿', '腰骶部水肿']
+        },
+        {
+          key: 'renalPercussion', label: '肾区叩击痛',
+          default: '双肾区无叩击痛',
+          options: ['双肾区无叩击痛', '左肾区叩击痛', '右肾区叩击痛', '双肾区叩击痛']
+        },
+        {
+          key: 'renalTenderPoint', label: '季肋点与输尿管点压痛',
+          default: '季肋点、上输尿管点、中输尿管点均无压痛',
+          options: ['季肋点、上输尿管点、中输尿管点均无压痛', '季肋点压痛', '上输尿管点压痛', '中输尿管点压痛']
+        },
+        {
+          key: 'renalBladder', label: '膀胱充盈',
+          default: '膀胱未触及，耻骨上区无压痛',
+          options: ['膀胱未触及，耻骨上区无压痛', '膀胱充盈可触及', '耻骨上区压痛']
+        },
+        {
+          key: 'renalSkin', label: '皮肤与贫血貌',
+          default: '皮肤黏膜无苍白、出血点及尿素霜',
+          options: ['皮肤黏膜无苍白、出血点及尿素霜', '睑结膜苍白', '皮肤可见瘀点瘀斑', '皮肤可见尿素霜', '皮肤瘙痒抓痕']
+        },
+        {
+          key: 'renalCardio', label: '心肺（容量负荷）',
+          default: '双肺未闻及湿啰音，未闻及心包摩擦音',
+          options: ['双肺未闻及湿啰音，未闻及心包摩擦音', '双肺底可闻及湿啰音', '可闻及心包摩擦音', '颈静脉怒张']
+        },
+        {
+          key: 'renalBP', label: '血压',
+          default: '血压正常，双上肢对称',
+          options: ['血压正常，双上肢对称', '血压升高', '血压偏低', '双上肢血压不对称']
         }
       ]
     },
@@ -2306,8 +2670,49 @@ const SCHEMA = (() => {
       name: '血液专科查体',
       items: [
         {
-          key: 'hemExtra', label: '血液专科', default: '胸骨无压痛，全身浅表淋巴结未触及肿大，无皮下出血点，牙龈无渗血',
-          options: ['胸骨无压痛，全身浅表淋巴结未触及肿大，无皮下出血点，牙龈无渗血', '胸骨压痛', '浅表淋巴结肿大', '皮下瘀点瘀斑', '牙龈渗血']
+          key: 'hemExtra', label: '血液专科', default: '胸骨无压痛，无皮下出血点，牙龈无渗血',
+          options: ['胸骨无压痛，无皮下出血点，牙龈无渗血', '胸骨压痛', '浅表淋巴结肿大', '皮下瘀点瘀斑', '牙龈渗血'],
+          summaryOf: ['hemSternum', 'hemBleeding', 'hemGum'],
+        },
+        {
+          key: 'hemAnemia', label: '贫血体征',
+          default: '睑结膜、口唇及甲床无苍白',
+          options: ['睑结膜、口唇及甲床无苍白', '睑结膜苍白', '口唇苍白', '甲床苍白', '面色苍白']
+        },
+        {
+          key: 'hemBleeding', label: '皮肤黏膜出血',
+          default: '皮肤黏膜未见瘀点、瘀斑及紫癜',
+          options: ['皮肤黏膜未见瘀点、瘀斑及紫癜', '可见瘀点', '可见瘀斑', '可见紫癜', '可见血肿']
+        },
+        {
+          key: 'hemNode', label: '浅表淋巴结',
+          default: '全身浅表淋巴结未触及肿大',
+          options: ['全身浅表淋巴结未触及肿大', '颈部淋巴结肿大', '腋窝淋巴结肿大', '腹股沟淋巴结肿大', '全身多发淋巴结肿大']
+        },
+        {
+          key: 'hemSternum', label: '胸骨压痛',
+          default: '胸骨无压痛',
+          options: ['胸骨无压痛', '胸骨中下段压痛', '肋骨压痛']
+        },
+        {
+          key: 'hemHepatospleen', label: '肝脾触诊',
+          default: '肝脾肋下未触及',
+          options: ['肝脾肋下未触及', '脾肋下可触及', '肝肋下可触及', '巨脾']
+        },
+        {
+          key: 'hemGum', label: '牙龈与口腔黏膜',
+          default: '牙龈无增生、渗血',
+          options: ['牙龈无增生、渗血', '牙龈增生', '牙龈渗血', '口腔黏膜溃疡', '口腔黏膜血疱']
+        },
+        {
+          key: 'hemJaundice', label: '黄疸',
+          default: '皮肤巩膜无黄染',
+          options: ['皮肤巩膜无黄染', '皮肤巩膜轻度黄染', '皮肤巩膜明显黄染', '尿色加深']
+        },
+        {
+          key: 'hemBoneTender', label: '骨与关节压痛',
+          default: '四肢长骨及关节无压痛',
+          options: ['四肢长骨及关节无压痛', '长骨压痛', '关节肿痛', '病理性骨折体征']
         }
       ]
     },
@@ -2315,16 +2720,16 @@ const SCHEMA = (() => {
       name: '神经内科专科查体',
       items: [
         {
-          key: 'neuroExtra1', label: '高级神经活动', default: '神志清楚，言语流利，定向力、记忆力、计算力正常',
-          options: ['神志清楚，言语流利，定向力、记忆力、计算力正常', '言语不利', '记忆力减退', '计算力减退', '失语']
+          key: 'neuroExtra1', label: '高级神经活动', default: '言语流利，定向力、记忆力、计算力正常',
+          options: ['言语流利，定向力、记忆力、计算力正常', '言语不利', '记忆力减退', '计算力减退', '失语']
         },
         {
           key: 'neuroExtra2', label: '颅神经', default: '十二对颅神经检查未见异常',
           options: ['十二对颅神经检查未见异常', '面部感觉减退', '面瘫', '伸舌偏斜', '眼睑下垂']
         },
         {
-          key: 'neuroExtra3', label: '运动系统', default: '四肢肌张力正常，肌力5级，未见肌萎缩',
-          options: ['四肢肌张力正常，肌力5级，未见肌萎缩', '四肢肌力4级', '偏瘫', '肌张力增高', '肌张力减低', '肌萎缩']
+          key: 'neuroExtra3', label: '运动系统', default: '四肢肌张力正常，肌力正常，未见肌萎缩',
+          options: ['四肢肌张力正常，肌力正常，未见肌萎缩', '四肢肌力4级', '偏瘫', '肌张力增高', '肌张力减低', '肌萎缩']
         },
         {
           key: 'neuroExtra4', label: '感觉系统', default: '痛温觉、触觉、深感觉检查未见异常',
@@ -2333,6 +2738,36 @@ const SCHEMA = (() => {
         {
           key: 'neuroExtra5', label: '共济运动', default: '指鼻试验、跟膝胫试验稳准，Romberg征阴性',
           options: ['指鼻试验、跟膝胫试验稳准，Romberg征阴性', '指鼻试验欠稳准', 'Romberg征阳性', '共济失调']
+        },
+        {
+          key: 'neuroSuperficialReflex', label: '浅反射',
+          default: '腹壁反射、提睾反射存在且对称',
+          options: ['腹壁反射、提睾反射存在且对称', '腹壁反射减弱', '腹壁反射消失', '提睾反射消失']
+        },
+        {
+          key: 'neuroDeepReflex', label: '深反射',
+          default: '肱二头肌反射、肱三头肌反射、膝腱反射、跟腱反射正常对称',
+          options: ['肱二头肌反射、肱三头肌反射、膝腱反射、跟腱反射正常对称', '深反射减弱', '深反射消失', '深反射亢进', '反射不对称']
+        },
+        {
+          key: 'neuroPathologic', label: '病理反射',
+          default: 'Babinski征、Oppenheim征、Gordon征、Chaddock征、Hoffmann征均阴性',
+          options: ['Babinski征、Oppenheim征、Gordon征、Chaddock征、Hoffmann征均阴性', 'Babinski征阳性', 'Hoffmann征阳性', '踝阵挛阳性', '髌阵挛阳性']
+        },
+        {
+          key: 'neuroMeningeal', label: '脑膜刺激征',
+          default: '颈项强直阴性，Kernig征阴性，Brudzinski征阴性',
+          options: ['颈项强直阴性，Kernig征阴性，Brudzinski征阴性', '颈项强直阳性', 'Kernig征阳性', 'Brudzinski征阳性']
+        },
+        {
+          key: 'neuroGait', label: '步态',
+          default: '步态正常，行走平稳',
+          options: ['步态正常，行走平稳', '偏瘫步态', '共济失调步态', '慌张步态', '跨阈步态', '剪刀步态']
+        },
+        {
+          key: 'neuroAutonomic', label: '自主神经功能',
+          default: '皮肤划痕试验阴性，出汗正常，无体位性低血压',
+          options: ['皮肤划痕试验阴性，出汗正常，无体位性低血压', '皮肤划痕试验阳性', '出汗减少', '出汗增多', '体位性低血压']
         }
       ]
     },
@@ -2344,12 +2779,47 @@ const SCHEMA = (() => {
           options: ['生长发育与同龄儿相仿', '生长发育落后', '前囟未闭', '前囟平软', '前囟饱满']
         },
         {
-          key: 'pedExtra2', label: '皮肤黏膜', default: '皮肤无黄染、花纹，毛细血管充盈时间<3秒',
-          options: ['皮肤无黄染、花纹，毛细血管充盈时间<3秒', '皮肤黄染', '皮肤花纹', '毛细血管充盈时间延长']
+          key: 'pedExtra2', label: '皮肤黏膜', default: '皮肤无黄染、花纹，毛细血管充盈良好',
+          options: ['皮肤无黄染、花纹，毛细血管充盈良好', '皮肤黄染', '皮肤花纹', '毛细血管充盈时间延长']
         },
         {
-          key: 'pedExtra3', label: '小儿特殊体征', default: '咽充血，扁桃体无肿大',
-          options: ['咽充血，扁桃体无肿大', '咽充血，扁桃体肿大', '假性脑膜刺激征阳性']
+          key: 'pedExtra3', label: '小儿特殊体征', default: '咽无充血，扁桃体无肿大',
+          options: ['咽无充血，扁桃体无肿大', '咽充血，扁桃体肿大', '假性脑膜刺激征阳性']
+        },
+        {
+          key: 'pedGrowth', label: '体格生长指标',
+          default: '身高、体重、头围在同龄儿正常范围内',
+          options: ['身高、体重、头围在同龄儿正常范围内', '体重低于同龄儿', '身高低于同龄儿', '头围异常', '生长迟缓']
+        },
+        {
+          key: 'pedFontanel', label: '前囟与颅缝',
+          default: '前囟平坦，大小正常，颅缝无分离',
+          options: ['前囟平坦，大小正常，颅缝无分离', '前囟饱满隆起', '前囟凹陷', '前囟已闭', '颅缝分离', '方颅']
+        },
+        {
+          key: 'pedResp', label: '呼吸与三凹征',
+          default: '呼吸平稳，无三凹征，无鼻翼扇动',
+          options: ['呼吸平稳，无三凹征，无鼻翼扇动', '呼吸急促', '三凹征阳性', '鼻翼扇动', '呼气性呻吟']
+        },
+        {
+          key: 'pedHeart', label: '心率与心音',
+          default: '心率在正常范围，心音有力，律齐，未闻及杂音',
+          options: ['心率在正常范围，心音有力，律齐，未闻及杂音', '心率增快', '心率减慢', '心音低钝', '可闻及心脏杂音']
+        },
+        {
+          key: 'pedAbdomen', label: '腹部',
+          default: '腹部平软，肝脾未超出同龄儿正常范围',
+          options: ['腹部平软，肝脾未超出同龄儿正常范围', '腹部膨隆', '肝肋下可触及', '脾肋下可触及', '可触及腹部包块']
+        },
+        {
+          key: 'pedNeuro', label: '神经系统',
+          default: '原始反射已消失，脑膜刺激征阴性',
+          options: ['原始反射已消失，脑膜刺激征阴性', '原始反射未消失', '生理反射减弱', '脑膜刺激征阳性', '肌张力异常']
+        },
+        {
+          key: 'pedRickets', label: '佝偻病体征',
+          default: '未见方颅、肋骨串珠、手镯及足镯征',
+          options: ['未见方颅、肋骨串珠、手镯及足镯征', '方颅', '肋骨串珠', '手镯征', '足镯征', '鸡胸', '漏斗胸']
         }
       ]
     },
@@ -2363,6 +2833,46 @@ const SCHEMA = (() => {
         {
           key: 'surgExtra2', label: '疝及浅表肿块', default: '腹股沟及股区未触及肿块，站立位无咳嗽冲击感',
           options: ['腹股沟及股区未触及肿块，站立位无咳嗽冲击感', '腹股沟区可触及肿块', '肿块有咳嗽冲击感']
+        },
+        {
+          key: 'surgWound', label: '切口与引流',
+          default: '切口对合良好，无渗血渗液，引流管通畅',
+          options: ['切口对合良好，无渗血渗液，引流管通畅', '切口裂开', '切口渗血', '切口渗液', '引流液浑浊', '引流管堵塞']
+        },
+        {
+          key: 'surgMass', label: '浅表肿块',
+          default: '全身未触及异常浅表肿块',
+          options: ['全身未触及异常浅表肿块', '可触及皮下肿块，质软，活动度好', '可触及皮下肿块，质硬，活动度差', '肿块伴红肿压痛']
+        },
+        {
+          key: 'surgPeritoneum', label: '腹膜刺激征',
+          default: '全腹无压痛、反跳痛及腹肌紧张',
+          options: ['全腹无压痛、反跳痛及腹肌紧张', '局部压痛伴反跳痛', '全腹压痛、反跳痛伴板状腹', '肝浊音界消失']
+        },
+        {
+          key: 'surgAbdomenMass', label: '腹部包块',
+          default: '腹部未触及包块',
+          options: ['腹部未触及包块', '右上腹可触及包块', '右下腹可触及包块', '中腹部可触及包块', '包块随呼吸移动']
+        },
+        {
+          key: 'surgLymph', label: '局部淋巴结',
+          default: '引流区域淋巴结未触及肿大',
+          options: ['引流区域淋巴结未触及肿大', '引流区域淋巴结肿大伴压痛', '引流区域淋巴结质硬固定']
+        },
+        {
+          key: 'surgTrauma', label: '创伤部位',
+          default: '未见皮肤软组织损伤、畸形及异常活动',
+          options: ['未见皮肤软组织损伤、畸形及异常活动', '局部肿胀压痛', '皮肤裂伤', '肢体畸形', '反常活动', '骨擦音']
+        },
+        {
+          key: 'surgVessel', label: '患肢血运',
+          default: '患肢远端动脉搏动可及，毛细血管充盈良好，皮温正常',
+          options: ['患肢远端动脉搏动可及，毛细血管充盈良好，皮温正常', '远端动脉搏动减弱', '远端动脉搏动消失', '毛细血管充盈时间延长', '皮温降低', '肢体肿胀']
+        },
+        {
+          key: 'surgJoint', label: '关节活动度',
+          default: '各关节活动度正常，无红肿及压痛',
+          options: ['各关节活动度正常，无红肿及压痛', '关节活动受限', '关节红肿', '关节压痛', '关节畸形']
         }
       ]
     },
@@ -2374,8 +2884,48 @@ const SCHEMA = (() => {
           options: ['宫高、腹围与孕周相符，胎位纵产式', '宫高与孕周不符', '横产式', '臀先露']
         },
         {
-          key: 'obsExtra2', label: '胎心', default: '胎心音145次/分，律齐',
-          options: ['胎心音145次/分，律齐', '胎心音偏快', '胎心音偏慢', '未闻及胎心']
+          key: 'obsExtra2', label: '胎心', default: '胎心音可闻及，律齐',
+          options: ['胎心音可闻及，律齐', '胎心音偏快', '胎心音偏慢', '未闻及胎心']
+        },
+        {
+          key: 'obsLeopold', label: '四步触诊法',
+          default: '宫底为胎臀，胎背位于左侧，先露为头，未入盆',
+          options: ['宫底为胎臀，胎背位于左侧，先露为头，未入盆', '宫底为胎头', '先露已入盆', '胎位不清', '跨耻征阳性']
+        },
+        {
+          key: 'obsContraction', label: '子宫收缩',
+          default: '无规律宫缩，子宫无压痛',
+          options: ['无规律宫缩，子宫无压痛', '有不规律宫缩', '规律宫缩', '宫缩过强', '子宫压痛', '板状腹']
+        },
+        {
+          key: 'obsCervix', label: '宫颈（Bishop评分）',
+          default: '宫颈未消，宫口未开，质地中等，位置居中',
+          options: ['宫颈未消，宫口未开，质地中等，位置居中', '宫颈部分消退', '宫颈完全消退', '宫口开大2cm', '宫口开全', '宫颈质硬']
+        },
+        {
+          key: 'obsPelvis', label: '骨盆测量',
+          default: '骨盆外测量各径线在正常范围',
+          options: ['骨盆外测量各径线在正常范围', '骶耻外径偏小', '坐骨结节间径偏小', '骨盆出口狭窄', '均小骨盆']
+        },
+        {
+          key: 'obsEdema', label: '水肿与体重',
+          default: '双下肢无水肿，体重增长在正常范围',
+          options: ['双下肢无水肿，体重增长在正常范围', '双下肢凹陷性水肿', '全身水肿', '体重增长过快', '体重增长不足']
+        },
+        {
+          key: 'obsBP', label: '血压与尿蛋白',
+          default: '血压正常，尿蛋白阴性',
+          options: ['血压正常，尿蛋白阴性', '血压升高', '尿蛋白阳性', '尿蛋白强阳性', '血压升高伴尿蛋白阳性']
+        },
+        {
+          key: 'obsBreast', label: '乳房与乳头',
+          default: '双侧乳房对称，乳头无凹陷，无红肿及结节',
+          options: ['双侧乳房对称，乳头无凹陷，无红肿及结节', '乳头凹陷', '乳房红肿', '可触及乳房结节', '乳汁分泌']
+        },
+        {
+          key: 'obsFetalMovement', label: '胎动与胎心监护',
+          default: '胎动正常，胎心监护反应型',
+          options: ['胎动正常，胎心监护反应型', '胎动减少', '胎动频繁', '胎心监护无反应型', '胎心监护见减速']
         }
       ]
     },
@@ -2384,11 +2934,53 @@ const SCHEMA = (() => {
       items: [
         {
           key: 'gynExtra1', label: '外阴及阴道', default: '外阴发育正常；阴道通畅，分泌物不多',
-          options: ['外阴发育正常；阴道通畅，分泌物不多', '阴道分泌物增多', '阴道可见异常分泌物', '宫颈糜烂样改变']
+          options: ['外阴发育正常；阴道通畅，分泌物不多', '阴道分泌物增多', '阴道可见异常分泌物', '宫颈糜烂样改变'],
+          summaryOf: ['gynVulva', 'gynVagina'],
         },
         {
           key: 'gynExtra2', label: '双合诊（直肠-腹部）', default: '子宫前倾前屈，正常大小，无压痛，双附件未触及包块',
-          options: ['子宫前倾前屈，正常大小，无压痛，双附件未触及包块', '子宫压痛', '附件区可触及包块', '附件区压痛']
+          options: ['子宫前倾前屈，正常大小，无压痛，双附件未触及包块', '子宫压痛', '附件区可触及包块', '附件区压痛'],
+          summaryOf: ['gynUterus', 'gynAdnexa'],
+        },
+        {
+          key: 'gynVulva', label: '外阴',
+          default: '外阴发育正常，未见赘生物、溃疡及色素减退',
+          options: ['外阴发育正常，未见赘生物、溃疡及色素减退', '外阴赘生物', '外阴溃疡', '外阴色素减退', '外阴静脉曲张', '处女膜完整']
+        },
+        {
+          key: 'gynVagina', label: '阴道',
+          default: '阴道通畅，黏膜光滑，分泌物量少、色白、无异味',
+          options: ['阴道通畅，黏膜光滑，分泌物量少、色白、无异味', '阴道分泌物增多伴异味', '阴道分泌物呈豆腐渣样', '阴道分泌物呈泡沫状', '阴道壁充血', '阴道狭窄']
+        },
+        {
+          key: 'gynCervix', label: '宫颈',
+          default: '宫颈光滑，大小正常，无举痛，无接触性出血',
+          options: ['宫颈光滑，大小正常，无举痛，无接触性出血', '宫颈糜烂样改变', '宫颈息肉', '宫颈举痛', '接触性出血', '宫颈质硬']
+        },
+        {
+          key: 'gynUterus', label: '子宫',
+          default: '子宫前倾前屈，正常大小，质中，活动度好，无压痛',
+          options: ['子宫前倾前屈，正常大小，质中，活动度好，无压痛', '子宫增大', '子宫压痛', '子宫活动度差', '子宫后倾后屈', '子宫质硬']
+        },
+        {
+          key: 'gynAdnexa', label: '双附件',
+          default: '双附件区未触及包块，无压痛',
+          options: ['双附件区未触及包块，无压痛', '左附件区可触及包块', '右附件区可触及包块', '双附件区压痛', '附件区增厚']
+        },
+        {
+          key: 'gynTriple', label: '三合诊',
+          default: '三合诊未触及异常，直肠黏膜光滑',
+          options: ['三合诊未触及异常，直肠黏膜光滑', '宫骶韧带增厚结节', '直肠窝可触及结节', '直肠黏膜不平']
+        },
+        {
+          key: 'gynBreast', label: '乳房检查',
+          default: '双侧乳房对称，未触及肿块，乳头无溢液',
+          options: ['双侧乳房对称，未触及肿块，乳头无溢液', '乳房可触及肿块', '乳头溢液', '乳房皮肤橘皮样改变', '腋窝淋巴结肿大']
+        },
+        {
+          key: 'gynAbdomen', label: '腹部检查',
+          default: '腹平软，未触及包块，移动性浊音阴性',
+          options: ['腹平软，未触及包块，移动性浊音阴性', '下腹部可触及包块', '下腹部压痛', '移动性浊音阳性', '腹部膨隆']
         }
       ]
     },
@@ -2396,12 +2988,52 @@ const SCHEMA = (() => {
       name: '急诊/重症专科查体',
       items: [
         {
-          key: 'emExtra1', label: '病情评估', default: '神志清楚，生命体征平稳，GCS评分15分',
-          options: ['神志清楚，生命体征平稳，GCS评分15分', 'GCS评分下降', '休克表现', '意识障碍']
+          key: 'emExtra1', label: '病情评估', default: '生命体征平稳，格拉斯哥昏迷评分正常',
+          options: ['生命体征平稳，格拉斯哥昏迷评分正常', 'GCS评分下降', '休克表现', '意识障碍']
         },
         {
           key: 'emExtra2', label: '创伤评估', default: '全身未见明显创伤',
           options: ['全身未见明显创伤', '皮肤软组织损伤', '骨折表现', '腹部闭合性损伤']
+        },
+        {
+          key: 'emConscious', label: '意识与瞳孔',
+          default: '神志清楚，双侧瞳孔等大等圆，对光反射灵敏',
+          options: ['神志清楚，双侧瞳孔等大等圆，对光反射灵敏', '嗜睡', '昏睡', '昏迷', '双侧瞳孔不等大', '瞳孔对光反射迟钝', '瞳孔散大固定']
+        },
+        {
+          key: 'emAirway', label: '气道与呼吸',
+          default: '气道通畅，呼吸平稳，双肺呼吸音对称',
+          options: ['气道通畅，呼吸平稳，双肺呼吸音对称', '气道不畅', '呼吸困难', '一侧呼吸音减弱', '三凹征阳性']
+        },
+        {
+          key: 'emCirculation', label: '循环与灌注',
+          default: '脉搏有力，毛细血管充盈良好，四肢温暖',
+          options: ['脉搏有力，毛细血管充盈良好，四肢温暖', '脉搏细速', '毛细血管充盈时间延长', '四肢湿冷', '皮肤花斑', '血压测不出']
+        },
+        {
+          key: 'emShock', label: '休克指数与末梢',
+          default: '休克指数<0.5，末梢循环良好',
+          options: ['休克指数<0.5，末梢循环良好', '休克指数0.5～1.0', '休克指数>1.0', '末梢发绀']
+        },
+        {
+          key: 'emTraumaABC', label: '创伤初级评估（ABCDE）',
+          default: '按ABCDE顺序评估，各环节未见致命性损伤',
+          options: ['按ABCDE顺序评估，各环节未见致命性损伤', '气道梗阻', '张力性气胸', '开放性气胸', '活动性出血', '连枷胸']
+        },
+        {
+          key: 'emTraumaSurvey', label: '全身系统筛查',
+          default: '头、颈、胸、腹、脊柱、骨盆及四肢系统筛查未见异常',
+          options: ['头、颈、胸、腹、脊柱、骨盆及四肢系统筛查未见异常', '头部血肿', '颈部压痛', '胸部压痛', '腹部压痛', '骨盆挤压痛', '脊柱压痛']
+        },
+        {
+          key: 'emSkin', label: '皮肤与出血',
+          default: '皮肤完整，未见出血点及伤口',
+          options: ['皮肤完整，未见出血点及伤口', '皮肤湿冷', '皮肤出血点', '皮肤裂伤', '皮下血肿', '烧伤创面']
+        },
+        {
+          key: 'emAbdomen', label: '腹部（急腹症）',
+          default: '腹部平软，无压痛及反跳痛，肠鸣音正常',
+          options: ['腹部平软，无压痛及反跳痛，肠鸣音正常', '腹部压痛', '腹膜刺激征阳性', '肠鸣音消失', '腹围增大']
         }
       ]
     }
@@ -2443,7 +3075,10 @@ const SCHEMA = (() => {
         // 籍贯（祖籍）与出生地在病历一般项目里是两栏，分开存
         nativePlace: '',
         birthPlace: '',
-        nationality: '汉族',
+        // 民族 / 病史可靠程度原来是 '汉族' / '可靠'。它们会让空记录直接写出
+        // 「民族：汉族」「病史可靠程度：可靠」——两个学生根本没问过的结论。
+        // 病历必须「避免任何臆断或虚构」，所以默认值清空，由 buildBasicInfo 写「／」。
+        nationality: '',
         occupation: '',
         workUnit: '',
         // 通讯地址
@@ -2451,9 +3086,13 @@ const SCHEMA = (() => {
         phone: '',
         // 病历号/住院号（评分表第2页「询问患者…病历号…」1分；第6页一般项目 2分）
         recordNo: '',
+        // 床号：《诊断学》第10版「每张记录用纸均须完整填写眉栏（病人姓名、住院号、
+        // 科别、床号）及页码，以避免与其他病人混淆」。此前 schema 里根本没有这一栏，
+        // 用户选了科室、住了几床，病历正文里完全不体现，属于静默丢信息。
+        bedNo: '',
         admitDate: '',
         recordDate: todayStr(),
-        reliability: '可靠',
+        reliability: '',
         informant: '',
         chiefComplaint: '',
         chiefComplaintDuration: '',
@@ -2476,7 +3115,11 @@ const SCHEMA = (() => {
       ros: {},
       // 既往史
       pmh: {
-        health: '良好',          // 平素健康状况
+        // 平素健康状况：原来默认 '良好'，于是空记录会生成「既往健康状况：平素良好」。
+        // 《诊断学》第10版：病历必须客观真实地反映病情，「避免任何臆断或虚构」——
+        // 学生没问过「平时身体怎么样」，工具就不能替他写「良好」。改成空串，
+        // 由 buildPMH 在用户没填时输出「／」占位。
+        health: '',
         diseaseChecks: {},       // { '高血压': true }
         diseaseOther: '',
         diseaseDetail: '',       // 慢性病详情（手写优先于勾选；generator 与 hints 均读取）
@@ -2504,20 +3147,32 @@ const SCHEMA = (() => {
         growth: '',              // 生长发育史（儿科）
         residence: '',
         travel: '',
-        smoking: '无',           // 无 / 有 / 已戒
+        smoking: '',             // 无 / 有 / 已戒（原默认 '无'，会让空记录凭空生成「吸烟史：无」）
         smokingAmount: '',
-        drinking: '无',
+        drinking: '',            // 原默认 '无'，同上
         drinkingAmount: '',
         drugs: '',
         environment: '',
-        habits: ''
+        habits: '',
+        // 冶游史：《诊断学》第10版 个人史「……职业与工作条件及有无工业毒物、粉尘、
+        // 放射性物质接触史，有无冶游史」。此前 schema 与界面都没有这一栏，属于
+        // 教材点名要求、工具却采集不到的缺项（grep「冶游」全项目零命中）。
+        sexualHistory: '',
+        // 职业与工作条件：教材同一句里点名，和 basic.occupation（职业名称）不是一回事
+        // ——这里记的是工作环境、是否接触毒物粉尘放射线。
+        occupationEnv: ''
       },
       // 婚姻史
       marriage: {
         // 留空表示「跟一般项目一致」；填了才覆盖，避免两处默认值打架
         status: '',
         age: '',
-        spouseHealth: ''
+        spouseHealth: '',
+        // 教材《诊断学》第10版 第六篇·病历书写：
+        //   「婚姻史包括婚姻状况，结婚年龄，配偶健康状况、性生活情况、夫妻关系等。」
+        // 这两项是教材点名要写的，但过去 schema 里没有。
+        sexLife: '',
+        relation: ''
       },
       // 月经史
       menstruation: {
@@ -2526,16 +3181,28 @@ const SCHEMA = (() => {
         cycle: '',
         duration: '',
         quantity: '',
+        // 《诊断学》第10版 月经史「并记录月经量、颜色，有无血块、痛经、白带等情况」。
+        // quantity 原先已有，color/clot/leukorrhea 三项此前缺失，采集不到也写不出。
+        color: '',
+        clot: '',
+        leukorrhea: '',
         lmp: '',
         menopauseAge: '',
-        dysmenorrhea: '无'
+        // 原默认 '无'，导致空记录输出「无痛经。」——又是凭空虚构（见缺陷1）。
+        dysmenorrhea: ''
       },
       // 生育史
       childbirth: {
         applicable: '',
+        // 教材要求的四项式：「足月分娩数-早产数-流产或人流数-存活数」
+        fullTerm: '',
+        premature: '',
+        abortion: '',
+        alive: '',
+        // 旧字段：孕次/产次。保留是为了不破坏已存的病历，
+        // 生成时四项式齐全就以四项式为准，否则回退到「孕X产Y」。
         gravida: '',
         para: '',
-        abortion: '',
         details: '',
         lastBirth: '',
         contraception: ''
@@ -2547,10 +3214,18 @@ const SCHEMA = (() => {
         deceased: '',
         // 两系三代遗传疾病史（评分表第2页家族史 5 分 = 类似病情 2.5 + 两系三代 2.5）
         threeGeneration: '',
-        similarDisease: ''
+        similarDisease: '',
+        // 教材：「家族中有无结核、肝炎、性病等传染性疾病」，
+        // 与「遗传性疾病」是两个独立问题，不能合并成一句。
+        infectionHistory: ''
       },
       // 体格检查
       pe: {
+        // 勾选制：本次实际检查了哪些项。{ [组键]: { [项键]: bool } }
+        // ⚠️ 语义（本轮修改）：没勾 = 本次没查 = 病历里一个字都不写。
+        // 不再「缺省时通用查体视为已勾」——那样等于工具替学生认定「查过且正常」，
+        // 属于虚构。旧存档里已经写过字的项仍自动视为已勾（peChecked 第②级）。
+        checked: {},
         vitals: {},
         general: {},
         skin: {},
@@ -2564,14 +3239,21 @@ const SCHEMA = (() => {
       },
       // 辅助检查
       auxiliary: {
-        items: [ { name: '', result: '' } ]
+        // 每项：{ name 项目名, result 结果, date 检查日期, hospital 检查机构, no 检查号 }
+        // 《诊断学》第10版 辅助检查「应分类按检查时间顺序记录检查结果，如系在其他
+        // 医疗机构所做检查，应当写明该机构名称及检查号」——原先只有 name/result
+        // 两个字段，外院名称和检查号无处可填。
+        items: [ { name: '', result: '', date: '', hospital: '', no: '' } ]
       },
       // 病历摘要
       summary: '',
       // 初步诊断
       diagnosis: {
         confirmed: [],     // 已确认诊断（字符串数组，顺序即主次）
-        newLine: ''
+        newLine: '',
+        // 医师签名。《诊断学》第10版 第六篇：「书写入院记录的医师在初步诊断的
+        // 右下角签全名」。留空则不输出——不代填、不默认，签谁的名只有本人知道。
+        signature: ''
       },
 
       /* -------------------------------------------------------------------
@@ -2732,6 +3414,80 @@ const SCHEMA = (() => {
     return false;
   }
 
+  /* ---------------------- 查体项「是否本次检查了」 ---------------------- */
+
+  /**
+   * 一个查体项到底做没做——这是「勾选制」的唯一真相。
+   *
+   * 为什么要这个：教材第十章要求「重点体格检查」按病情取舍，不是每个病人都
+   * 从头查到脚。见习时在消化内科只查腹部、在呼吸内科只查肺，都是正常的。
+   * 但病历里绝不能把没查的项目写成正常——那等于伪造体征。
+   * 所以没勾的项**一个字都不写**，勾了没填的才补正常描述。
+   *
+   * 判定顺序（缺省值的取舍是刻意设计，不要「统一」成一条）：
+   *   1) 用户显式勾过 / 取消过 → 听用户的；
+   *   2) 这一项里已经有学生自己写的文字 → 视为查过。旧存档里写过的体征
+   *      不能因为改造而凭空消失，这是最深的一条底线；
+   *   3) 专科查体 special_* → 不勾；
+   *   4) 通用查体里 parent 下的子项 → 不勾（父项已经概括，子项要主动勾）；
+   *   5) 其余一律**不勾**。
+   *
+   * ⚠️ 2026-10 本轮改动：原来还有一级「通用查体里有默认正常描述的 → 默认已勾」。
+   * 那一级的作用是让空记录直接长出一整段「发育正常，营养中等……双肺呼吸音清……」
+   * 的通用查体——用户一个字没填，病历就宣称「查过且正常」，这是虚构，
+   * 也是本项目最严重的缺陷。现按用户决定（「改成默认全不勾，我勾了才算查过」）
+   * 整级删除：没勾 = 本次没查 = 病历里不出现该项。
+   * 代价是填写工作量上升（详见本轮报告），但宁可空着，也不能编。
+   *
+   * @param {object} record 整份病历（不是 pe 子树）
+   * @param {string} groupKey 组键，专科形如 'special_digestive'
+   * @param {string} itemKey 项键
+   * @returns {boolean}
+   */
+  function peChecked(record, groupKey, itemKey) {
+    const pe = (record || {}).pe || {};
+    const ck = pe.checked || {};
+    const g = ck[groupKey];
+    const raw = g && typeof g === 'object' ? g[itemKey] : undefined;
+    if (raw === true || raw === false) return raw;
+    // 学生已经写了字 → 一定是查过的
+    const store = pe[groupKey];
+    const val = store && typeof store === 'object' ? store[itemKey] : undefined;
+    if (val !== undefined && val !== null && String(val).trim() !== '') return true;
+    if (String(groupKey).startsWith('special_')) return false;
+    const item = findPEItem(groupKey + '.' + itemKey);
+    if (!item) return false;
+    if (item.parent) return false;              // 父项已经概括，子项要主动勾
+    // 原第 5 级 `return String(item.default||'').trim() !== ''`（有默认正常描述就
+    // 当已查）本轮删除。现在走到这里的都是「用户没勾、也没写过字」的项，
+    // 一定是没查 —— 不许替学生认定正常。
+    return false;
+  }
+
+  /**
+   * 写入勾选状态。直接改 record.pe.checked，返回值是同一个 record（便于链式调用）。
+   */
+  function setPeChecked(record, groupKey, itemKey, on) {
+    if (!record) return record;
+    const pe = record.pe || (record.pe = {});
+    const checked = pe.checked || (pe.checked = {});
+    const g = checked[groupKey] || (checked[groupKey] = {});
+    g[itemKey] = !!on;
+    return record;
+  }
+
+  /**
+   * 勾了但没写具体所见时，病历里自动补的那句话。
+   *
+   * 优先用 normal（「胆囊未触及，Murphy征阴性」这类子项的规范正常描述），
+   * 再退回 default。两项都没声明就返回 ''——此时病历里不会出现这一项，
+   * 不会出现「查了但什么都没写」的空条目。
+   */
+  function peNormalText(item) {
+    if (!item) return '';
+    return String(item.normal || item.default || '').trim();
+  }
+
   return {
     GENDERS, MARITAL, OCCUPATIONS, NATIONALITY, RELIABILITY, DURATION_UNITS,
     ROS, COMMON_PMH, ALLERGENS, ALLERGY_REACTIONS, FAMILY_DISEASES,
@@ -2739,7 +3495,9 @@ const SCHEMA = (() => {
     emptyRecord, todayStr,
     // 查体项查询辅助
     PE_INDEX, findPEItem, childPEItems, peItemFilled, parentSupersededByChild,
-    peValueIsDefault
+    peValueIsDefault,
+    // 勾选制（本次检查了哪些项）
+    peChecked, setPeChecked, peNormalText
   };
 })();
 
@@ -2818,11 +3576,49 @@ const RECORD_CORE = (() => {
     // 旧键 → 新键（当前版本尚未拆分，先留空作为扩展位）
   };
 
+  /**
+   * 中文科室名 / 常见简称 → 科室键。
+   *
+   * 这不是「旧版本遗留」，而是实打实会遇到的：学生在别处记的病历把科室写成
+   * 「消化内科」，导入后 normalizeDeptKey 找不到这个键就静默回退到 'general'，
+   * 结果整段专科查体凭空消失，还不给任何提示。宁可多认几种写法。
+   */
+  const DEPT_NAME_ALIASES = {
+    通用: 'general', 全科: 'general', 通用全科: 'general',
+    呼吸内科: 'respiratory', 呼吸科: 'respiratory', 呼吸: 'respiratory',
+    消化内科: 'digestive', 消化科: 'digestive', 消化: 'digestive',
+    心血管内科: 'cardiology', 心内科: 'cardiology', 心内: 'cardiology', 循环内科: 'cardiology',
+    内分泌科: 'endocrinology', 内分泌: 'endocrinology', 内分泌代谢科: 'endocrinology',
+    肾内科: 'nephrology', 肾脏内科: 'nephrology', 肾内: 'nephrology', 肾病科: 'nephrology',
+    血液内科: 'hematology', 血液科: 'hematology', 血液: 'hematology', 血内: 'hematology',
+    神经内科: 'neurology', 神内科: 'neurology', 神内: 'neurology', 神经科: 'neurology',
+    外科: 'surgery', 普外科: 'surgery', 普外: 'surgery', 骨科: 'surgery', 泌尿外科: 'surgery',
+    神经外科: 'surgery', 心胸外科: 'surgery', 肝胆外科: 'surgery', 胃肠外科: 'surgery',
+    产科: 'obstetrics', 妇产科: 'obstetrics',
+    妇科: 'gynecology', 妇瘤科: 'gynecology',
+    儿科: 'pediatrics', 小儿内科: 'pediatrics', 新生儿科: 'pediatrics', 小儿科: 'pediatrics',
+    急诊: 'emergency', ICU: 'emergency', 重症医学科: 'emergency',
+    急诊ICU: 'emergency', 急诊科: 'emergency', 重症监护室: 'emergency',
+  };
+
+  // 英文/缩写大小写不敏感：DIGESTIVE、Digestive、icu 都应认
+  const DEPT_NAME_ALIASES_LC = {};
+  Object.keys(DEPT_NAME_ALIASES).forEach(k => {
+    DEPT_NAME_ALIASES_LC[k.toLowerCase()] = DEPT_NAME_ALIASES[k];
+  });
+
   /** 把任意科室键规范成当前存在的科室键 */
   function normalizeDeptKey(key, validKeys) {
     const k = isText(key) ? key.trim() : '';
     if (validKeys.includes(k)) return k;
     if (DEPT_ALIASES[k] && validKeys.includes(DEPT_ALIASES[k])) return DEPT_ALIASES[k];
+    // 中文科室名 / 常见简称 / 大小写不同的英文键 —— 都先认一遍再回退
+    const lc = k.toLowerCase();
+    // 大小写变体：DIGESTIVE / Digestive 应该等同于 digestive
+    const exactKey = validKeys.find(v => String(v).toLowerCase() === lc);
+    if (exactKey) return exactKey;
+    const byName = DEPT_NAME_ALIASES[k] || DEPT_NAME_ALIASES_LC[lc];
+    if (byName && validKeys.includes(byName)) return byName;
     // 未知科室（如导入别的版本的数据）回退到通用，避免生成时报错
     return 'general';
   }
@@ -3061,7 +3857,7 @@ const RECORD_CORE = (() => {
 
   /* ---------------------- 设置 ---------------------- */
 
-  const SETTINGS_DEFAULTS = { rosMode: 'detail', fontScale: 1 };
+  const SETTINGS_DEFAULTS = { rosMode: 'detail', fontScale: 1, lastStep: '' };
 
   function normalizeSettings(raw) {
     const out = { ...SETTINGS_DEFAULTS };
@@ -3070,6 +3866,9 @@ const RECORD_CORE = (() => {
       const fs = Number(raw.fontScale);
       // 字号缩放限制在合理区间，防止界面被撑坏
       if (Number.isFinite(fs) && fs >= 0.8 && fs <= 1.4) out.fontScale = Math.round(fs * 100) / 100;
+      // 上次停留的步骤键。刷新后回到原处，不要每次都从「基本情况」重新点 7 下。
+      // 只收字符串，具体是哪一步由 app 校验（不认识的键会被忽略，退回第一步）。
+      if (typeof raw.lastStep === 'string') out.lastStep = raw.lastStep;
     }
     return out;
   }
@@ -5633,7 +6432,7 @@ const CHECKER = (() => {
 
 </script>
 <script>
-﻿/* ===========================================================================
+/* ===========================================================================
  * 大病历生成器 —— 核心生成逻辑（纯函数，可在 Node 中单测）
  * 输入：record（见 schema.emptyRecord）
  * 输出：{ text, sections, warnings, summaryDraft }
@@ -5653,6 +6452,36 @@ const GENERATOR = (() => {
       .filter(Boolean)
       .map(p => p + '。')
       .join(sep);
+  }
+
+  /**
+   * 把若干分句用逗号串成一句连贯的话，用户原文自己写了句号的另起一句。
+   *
+   * 《诊断学》第10版要求现病史「应当按时间顺序书写……应结合问诊内容，经整理分析后，
+   * 围绕主诉进行描写」——是「一段话」，不是「一条字段一句」。旧实现每个结构化字段
+   * 各占一句，输出「患者3天前。中上腹持续性隐痛，进食后加重。服奥美拉唑可缓解。」，
+   * 其中「患者3天前。」是断句错误的残句，读起来不像病历（已复现）。
+   * 这里按「同一件事的分句用逗号连起来」处理，同时尊重用户自己写的句号。
+   *
+   * @param {string[]} parts 分句（各字段原文，可为空串）
+   * @returns {string[]} 句子数组，每项末尾不带标点
+   */
+  function joinClauses(parts) {
+    const sentences = [];
+    let cur = [];
+    parts.forEach(p => {
+      const t = stripTail(p);
+      if (!t) return;
+      t.split(/。/).map(s => stripTail(s)).filter(Boolean).forEach((unit, i) => {
+        if (i > 0) {
+          if (cur.length) sentences.push(cur);
+          cur = [];
+        }
+        cur.push(unit);
+      });
+    });
+    if (cur.length) sentences.push(cur);
+    return sentences.map(cs => cs.join('，')).filter(Boolean);
   }
 
   /** 拼短语，用顿号连接 */
@@ -5772,38 +6601,143 @@ const GENERATOR = (() => {
     return /[岁月天周时]/.test(raw) ? raw : raw + '岁';
   }
 
+  /** 中文数字转数值（年龄常见写法「十四」「二十三」「一百」够用即可） */
+  function cnNumber(text) {
+    const D = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+    let total = 0;
+    let cur = 0;
+    for (const ch of String(text || '')) {
+      if (D[ch]) cur = D[ch];
+      else if (ch === '十') { total += (cur || 1) * 10; cur = 0; }
+      else if (ch === '百') { total += (cur || 1) * 100; cur = 0; }
+    }
+    return total + cur;
+  }
+
+  /**
+   * 年龄换算成周岁数，供「患儿 / 患者」这类按年龄判断的地方使用。
+   *
+   * 「7月」「3天」「28周」这类儿科写法按 0 岁处理；取不出来返回 NaN，
+   * 由调用方按成人兜底（不猜）。
+   *
+   * @param {object} basic record.basic
+   * @returns {number} 周岁；无法判断时为 NaN
+   */
+  function ageYears(basic) {
+    const raw = stripTail((basic || {}).age);
+    if (!raw) return NaN;
+    if (!/岁/.test(raw) && /[天日周月时]/.test(raw)) return 0;
+    const ar = raw.match(/[0-9０-９]+(?:\.[0-9]+)?/);
+    if (ar) return parseFloat(ar[0].replace(/[０-９]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xfee0)));
+    const cn = raw.match(/[一二三四五六七八九十百]+/);
+    if (cn) return cnNumber(cn[0]);
+    return NaN;
+  }
+
+  /**
+   * 病历主语：按年龄判断，不按科室。
+   *
+   * 旧实现写死 `department === 'pediatrics' ? '患儿' : '患者'`，于是 70 岁病人
+   * 只要挂在儿科就输出「患儿，男，70岁」——主语和年龄自相矛盾（已复现）。
+   * 儿科收 14 岁以上的青少年也很常见，年龄才是唯一可靠的判据。
+   *
+   * @param {object} basic record.basic
+   * @returns {string} '患儿' 或 '患者'
+   */
+  function subjectOf(basic) {
+    return ageYears(basic) < 14 ? '患儿' : '患者';
+  }
+
+  /**
+   * 缺项占位符。
+   *
+   * 《诊断学》第10版 病历书写：「所有表格项都应详细填写，无内容者画"/"或"—"」，
+   * 一般项目更是明确「需逐项填写，不可空缺」。但工具**不能替学生编内容**——
+   * 于是「没填」必须和「填了」在正文里区分得出来：项目名照写，值写「／」。
+   *
+   * 用全角「／」（U+FF0F）而不是半角 `/`：中文病历里全角更整齐，也不会在
+   * 「BP /mmHg」这种地方和半角斜杠混淆。
+   */
+  const PH = '／';
+
+  /** 取文本值，空则返回占位符 */
+  const filledOrPH = v => stripTail(v) || PH;
+
   /**
    * 一般项目。
    *
    * 按病历书写规范一行一项（见用户提供的模板），不再挤成一句。
+   *
+   * ⚠️ 本轮改动（缺陷2/缺陷3）：
+   *   1) 每一项都**固定输出**，没填就写「／」。原来全是 `if (x) lines.push(...)`，
+   *      空记录只剩民族/记录日期/可靠程度三行——教材要求「需逐项填写，不可空缺」，
+   *      整项消失比写「／」更糟：看病历的人分不清是「没问」还是「漏印」。
+   *   2) 新增「科别」「床号」两栏。教材：「每张记录用纸均须完整填写眉栏
+   *      （病人姓名、住院号、科别、床号）及页码，以避免与其他病人混淆」。
+   *      此前 schema 里连字段都没有，用户选了科室、住了几床，正文里完全不体现。
+   *
+   * @param {object} r record
+   * @returns {string} 多行文本
    */
   function buildBasicInfo(r) {
     const b = r.basic || {};
     const lines = [];
     const age = ageWithUnit(b);
 
-    if (b.name) lines.push(`姓名：${b.name}`);
-    if (stripTail(b.recordNo)) lines.push(`住院号：${stripTail(b.recordNo)}`);
-    if (b.gender) lines.push(`性别：${b.gender}`);
-    if (age) lines.push(`年龄：${age}`);
-    lines.push(`民族：${stripTail(b.nationality) || SCHEMA.NATIONALITY}`);
-    if (b.nativePlace) lines.push(`籍贯：${b.nativePlace}`);
-    if (b.birthPlace) lines.push(`出生地：${b.birthPlace}`);
+    // 科别：从 DEPARTMENTS 查中文名，绝不把内部 key（digestive）写进病历。
+    const dept = SCHEMA.DEPARTMENTS.find(d => d.key === b.department);
+    const deptName = dept ? dept.name : '';
+
+    lines.push(`姓名：${filledOrPH(b.name)}`);
+    lines.push(`性别：${filledOrPH(b.gender)}`);
+    lines.push(`年龄：${filledOrPH(age)}`);
+    lines.push(`科别：${filledOrPH(deptName)}`);
+    lines.push(`床号：${filledOrPH(b.bedNo)}`);
+    lines.push(`住院号：${filledOrPH(b.recordNo)}`);
+    // 民族/病史可靠程度原来是 schema 里的默认值（'汉族' / '可靠'），
+    // 空记录会直接写成「民族：汉族」「病史可靠程度：可靠」——学生没问过民族、
+    // 也没判断过病史可靠性，工具不能替他下结论。默认值已清空，这里写「／」。
+    lines.push(`民族：${filledOrPH(b.nationality)}`);
+    lines.push(`籍贯：${filledOrPH(b.nativePlace)}`);
+    lines.push(`出生地：${filledOrPH(b.birthPlace)}`);
     const marital = (r.marriage || {}).status || b.marital;
-    if (marital) lines.push(`婚姻：${marital}`);
-    if (b.occupation) lines.push(`职业：${b.occupation}`);
-    if (b.workUnit) lines.push(`工作单位：${b.workUnit}`);
-    if (b.address) lines.push(`通讯地址：${b.address}`);
-    if (b.phone) lines.push(`电话号码：${b.phone}`);
-    if (b.admitDate) lines.push(`入院日期：${b.admitDate}`);
-    if (b.recordDate) lines.push(`记录日期：${b.recordDate}`);
-    const who = b.informant || (b.name ? `患者本人（${b.name}）` : '');
-    if (who) lines.push(`病史陈述者：${who}`);
-    if (b.reliability) lines.push(`病史可靠程度：${b.reliability}`);
+    lines.push(`婚姻：${filledOrPH(marital)}`);
+    lines.push(`职业：${filledOrPH(b.occupation)}`);
+    lines.push(`工作单位：${filledOrPH(b.workUnit)}`);
+    lines.push(`通讯地址：${filledOrPH(b.address)}`);
+    lines.push(`电话号码：${filledOrPH(b.phone)}`);
+    lines.push(`入院日期：${filledOrPH(b.admitDate)}`);
+    lines.push(`记录日期：${filledOrPH(b.recordDate)}`);
+    // 病史陈述者：成人默认「患者本人」。14 岁以下患儿说不清自己的病史，
+    // 按《诊断学》第10版问诊要求应由家属代述；但「母亲/父亲/祖父」这类具体关系
+    // 系统无从得知，编造等于伪造病历，所以未填写时只写「家属」。
+    // ⚠️ 这段主语/代述逻辑归 narrative 同事维护，本轮保持原样不动；
+    //    只在最终为空时补占位符，保证一行不缺。
+    const informant = stripTail(b.informant);
+    const isChildInformant = ageYears(b) < 14;
+    const who = informant || (isChildInformant ? '家属' : (b.name ? `患者本人（${b.name}）` : ''));
+    lines.push(`病史陈述者：${filledOrPH(who)}`);
+    lines.push(`病史可靠程度：${filledOrPH(b.reliability)}`);
     return lines.join('\n');
   }
 
   /* ---------------------------- 主诉 ---------------------------- */
+
+  /**
+   * 一段文字里有没有「持续时间」——数字/中文数字 + 时间单位。
+   *
+   * 缺陷H4 用：主诉正文已经写了「反复上腹痛3年」，只是没在「持续时间」输入框里
+   * 再抄一遍时，validate 不该报「缺少持续时间」。
+   * 认的形态：3天 / 3天余 / 三年 / 半个月 / 1周多 / 2小时 / 十余年 / 数日。
+   *
+   * @param {string} text
+   * @returns {boolean}
+   */
+  function hasDurationInText(text) {
+    const t = stripTail(text);
+    if (!t) return false;
+    return /[0-9０-９一二三四五六七八九十百千万两半十几数余]+(?:个)?(?:天|日|周|星期|月|年|小时|分钟|h|min)/.test(t);
+  }
 
   function buildChiefComplaint(r) {
     const b = r.basic || {};
@@ -5817,8 +6751,10 @@ const GENERATOR = (() => {
     if (!/[天日周月年小时分]/.test(dur)) dur += unit;
     // 主诉正文里已包含该时长（"停经34周" + 34周）时不再重复
     if (cc.includes(dur)) return `${cc}。`;
-    // 主诉以某个时间结束（"发现血压升高1周"），又单独填了时长时，直接以主诉为准
-    if (/[0-9一二三四五六七八九十]+(天|日|周|月|年|小时|分钟)$/.test(cc)) return `${cc}。`;
+    // 主诉以某个时间结束（"发现血压升高1周"），又单独填了时长时，直接以主诉为准。
+    // 末尾允许带「余/多/左右/来」等约数词——旧正则只认数字结尾，
+    // 「反复上腹痛三年余」+ 时长「3年」会拼成「反复上腹痛三年余3年。」（已复现）。
+    if (/[0-9一二三四五六七八九十百]+(天|日|周|月|年|小时|分钟)(?:余|多|左右|来)?$/.test(cc)) return `${cc}。`;
     return `${cc}${dur}。`;
   }
 
@@ -5827,6 +6763,64 @@ const GENERATOR = (() => {
   const HPI_DEFAULTS = {
     generalCondition: '发病以来，精神、食欲、睡眠可，大小便正常，体重无明显变化'
   };
+
+  /**
+   * 现病史末句「发病以来一般情况」该写什么。
+   *
+   * ⚠️ 指令B 已复现：空记录时 buildHPI 仍凭空写
+   * 「患者发病以来，精神、食欲、睡眠可，大小便正常，体重无明显变化。」，
+   * 摘要又复述一遍。学生一个字都没填，程序却断言病人吃喝睡大小便体重全都正常，
+   * 正是《诊断学》第10版禁止的「臆断或虚构」（「无内容者画"/"或"—"」）。
+   *
+   * 规则：
+   *   ① 用户自己填了就按原话写（不加工）；
+   *   ② 没填时，只有本次现病史本身已有实质内容（起病、症状、诊疗经过…），
+   *      才用默认句式兜底——此时这一段是真实病人，默认句起到
+   *      「这一项必须问」的提示作用；
+   *   ③ 现病史为空 → 返回空串，由 generate() 统一补「／」占位，
+   *      绝不替病人写「一切正常」。
+   *
+   * ⚠️ 判据里**不再包含主诉**（已复现的缺陷B1）：只填「上腹痛3天」、hpi 全空时，
+   * 旧判据 `hasHistory || hasCC` 把主诉当成「问过现病史」的证据，于是凭空写出
+   * 「发病以来，精神、食欲、睡眠可，大小便正常，体重无明显变化」。
+   * 主诉有内容 ≠ 问过食欲睡眠体重；这句话只有在学生真的写了现病史时才作为
+   * 「这一项该问」的提示存在。只填主诉时 buildHPI 返回空串，正文由 generate() 补「／」。
+   *
+   * 注意：起病时间只有一个光秃秃的时间短语（「3天前」）不算实质内容，见 buildHPI。
+   *
+   * @param {object} r record
+   * @returns {string} 一句话（不带句号），空串表示不写
+   */
+  function hpiGeneralSentence(r) {
+    const h = r.hpi || {};
+    const own = stripTail(h.generalCondition);
+    if (own) return own;
+    const fields = ['onset', 'cause', 'symptoms', 'relief', 'evolution',
+      'accompanying', 'negativeDiscriminating', 'treatment', 'extra'];
+    const hasHistory = fields.some(k => {
+      const v = stripTail(h[k]);
+      // 只有「3天前」这类裸时间短语，不足以证明问过一般情况（缺陷B1/H6）
+      return v && !isBareOnsetPhrase(v);
+    });
+    return hasHistory ? HPI_DEFAULTS.generalCondition : '';
+  }
+
+  /**
+   * 是不是一个「光秃秃的时间短语」——没有症状、没有谓语。
+   *
+   * 缺陷H6 已复现：学生在起病时间里只写「3天前」，旧实现拼出
+   * 「患者3天前。」（主语+时间，没有谓语），后面再接一般情况句，读起来是断句错误。
+   * 这里只认「数字/约数 + 时间单位 + 前后缀」这种纯时间片段；
+   * 「3天前出现咳嗽」含症状，不属于裸时间短语。
+   *
+   * @param {string} text
+   * @returns {boolean}
+   */
+  function isBareOnsetPhrase(text) {
+    const t = stripTail(text);
+    if (!t) return false;
+    return /^(?:约|大约|近|距今|迄今)?[0-9０-９一二三四五六七八九十百千万两半十几数余]+(?:个)?(?:天|日|周|星期|月|年|小时|分钟|h|min)(?:余|多|来|左右|之后|以后|前|以前)?$/.test(t);
+  }
 
   /**
    * 根据结构化字段组装现病史。
@@ -5865,18 +6859,38 @@ const GENERATOR = (() => {
     if (neg) seg.push(neg);
 
     if (stripTail(h.treatment)) seg.push(stripTail(h.treatment));
-    const gc = stripTail(h.generalCondition) || HPI_DEFAULTS.generalCondition;
-    if (gc) seg.push(gc);
-    // 与本病无关但仍需治疗的其他疾病（第6页现病史末项）
+
+    // 与本病无关但仍需治疗的其他疾病（第6页现病史末项）。
+    // 《诊断学》第10版：「与本次疾病虽无密切关系，但仍需治疗的其他疾病情况，
+    // 应在现病史后另起一行描述」——它是独立的一句，不能混进病史主体。
     const other = stripTail((r.pmh || {}).otherTreatDiseases);
-    if (other) seg.push(`另有${other}，需继续治疗`);
-    if (stripTail(h.extra)) seg.push(stripTail(h.extra));
-    if (!seg.length) return '';
-    let text = joinSentences(seg);
-    // 开头不写主语时补上；已含"患者/孕妇/患儿"等主语则不再重复
+    // 发病后一般情况（精神、食欲、睡眠、大小便、体重）：教材同样单列一句。
+    // 旧实现在这里无条件回落默认值，空记录就会凭空断言「精神食欲睡眠可，
+    // 大小便正常，体重无明显变化」——见 hpiGeneralSentence 的说明。
+    const gc = hpiGeneralSentence(r);
+
+    // 病史主体用逗号连成 1～3 句连贯叙述。
+    // 旧实现每个结构化字段各占一句，输出「患者3天前。中上腹持续性隐痛，进食后加重。」
+    // ——「患者3天前。」是断句错误的残句（已复现）。《诊断学》第10版要求现病史
+    // 「按时间顺序书写……经整理分析后，围绕主诉进行描写」，是连贯叙述而非字段罗列。
+    //
+    // ⚠️ 缺陷H6（已复现）：起病时间只写了「3天前」时，seg 里就只剩这一个裸时间短语，
+    // joinClauses 拼出「患者3天前。」——主语+时间，没有谓语，后面还直接接一般情况句。
+    // 处理：整段病史主体只有一个裸时间短语时，把这句丢掉（不写残句）。
+    let bodySeg = seg;
+    if (seg.length === 1 && isBareOnsetPhrase(seg[0])) bodySeg = [];
+    const sentences = joinClauses(bodySeg);
+    const tail = [];
+    if (gc) tail.push(gc);
+    if (other) tail.push(`另有${other}，需继续治疗`);
+    if (stripTail(h.extra)) tail.push(stripTail(h.extra));
+    if (!sentences.length && !tail.length) return '';
+    let text = joinSentences(sentences.concat(tail));
+
+    // 开头不写主语时补上；已含"患者/孕妇/患儿"等主语则不再重复。
+    // 主语按年龄判（见 subjectOf）：旧实现按科室判，70 岁挂儿科会写成「患儿，男，70岁」。
     if (!/^(患者|患儿|产妇|孕妇|本人|家属|该)/.test(text)) {
-      const child = r.basic && r.basic.department === 'pediatrics';
-      text = (child ? '患儿' : '患者') + text;
+      text = subjectOf(r.basic || {}) + text;
     }
     return text;
   }
@@ -5901,32 +6915,76 @@ const GENERATOR = (() => {
 
   /* ---------------------------- 系统回顾 ---------------------------- */
 
+  /**
+   * 收集系统回顾数据，区分**三态**。
+   *
+   * 数据结构：r.ros = { [系统key]: { [症状key]: { checked, negative, time, detail } } }
+   *
+   *   checked:true   → 阳性，写症状本身（可带时间、补充描述）
+   *   negative:true  → 学生明确点了「阴性」，可以写「无X」
+   *   两者都没有     → **未问**，一个字都不写
+   *
+   * ⚠️ 这是本轮最关键的修复（缺陷1第2条）。旧实现是二态：
+   *   `if (v.checked) positives.push(...) else negatives.push(...)`
+   * 于是「没勾」被当成「阴性」，空记录直接生成 8 行共 91 个症状的「无X、Y、Z」。
+   * 学生根本没过问诊，工具却替他写了 91 个「否认」。这是伪造病历，
+   * 《诊断学》第10版要求「客观地、真实地反映病情……避免任何臆断或虚构」。
+   *
+   * 阴性从哪来？只能是学生在界面上显式点「阴性」（写入 negative:true），
+   * 或者用「全部标记为阴性」按钮一次性标记。默认状态是**未问**。
+   *
+   * @param {object} r record
+   * @returns {Array<{key:string,name:string,positives:string[],negatives:string[],asked:boolean}>}
+   */
   function collectROS(r) {
-    const res = []; // [{ name, positives:[], negatives:[] }]
+    const res = []; // [{ name, positives:[], negatives:[], asked }]
     SCHEMA.ROS.forEach(sys => {
       const store = (r.ros || {})[sys.key] || {};
       const positives = [];
       const negatives = [];
+      let asked = false;
       sys.symptoms.forEach(sym => {
         const v = store[sym.key] || {};
         if (v.checked) {
+          asked = true;
           let s = sym.label;
           if (v.time) s += v.time;
           if (v.detail) s += '，' + v.detail;
           positives.push(s);
-        } else {
+        } else if (v.negative) {
+          asked = true;
           negatives.push(sym.label);
         }
+        // 既没勾阳性、也没标阴性 = 没问过 → 既不进 positives 也不进 negatives
       });
-      res.push({ key: sys.key, name: sys.name, positives, negatives });
+      res.push({ key: sys.key, name: sys.name, positives, negatives, asked });
     });
     return res;
   }
 
+  /**
+   * 生成系统回顾。
+   *
+   * 逐系统成行，三种情形：
+   *   ① 有阳性 → 「呼吸系统：咳嗽3天；无咯血、呼吸困难。」（只否定与阳性不冲突的）
+   *   ② 无阳性但学生标过阴性 → 「呼吸系统：无咳嗽、咳痰。」
+   *   ③ 整系统一个字没问过 → **整行不输出**（既不写「无」，也不写占位符：
+   *      系统回顾 8 个系统全列成「／」会变成 8 行噪音，而这里「不写」
+   *      与「问了且阴性」在语义上并不冲突——问诊本来就可以按病情取舍）。
+   *
+   * @param {object} r record
+   * @param {string} mode 'detail' | 'brief'
+   * @returns {string}
+   */
   function buildROS(r, mode) {
     const data = collectROS(r);
     const allPositives = data.some(d => d.positives.length > 0);
-    if (!allPositives && mode === 'brief') return '各系统回顾未见阳性症状。';
+    const anyAsked = data.some(d => d.asked);
+    // 简洁模式：没有任何阳性时不再罗列阴性清单，但必须说明是「未问」还是「阴性」，
+    // 不能像旧实现那样断言「各系统回顾未见阳性症状」——没问过就无从「未见」。
+    if (!allPositives && mode === 'brief') {
+      return anyAsked ? '各系统回顾未见阳性症状。' : '';
+    }
     const lines = [];
     data.forEach(d => {
       if (d.positives.length) {
@@ -5936,9 +6994,10 @@ const GENERATOR = (() => {
         const line = `${d.name}：${d.positives.join('；')}` +
           (negs.length ? `；无${joinList(negs)}` : '') + '。';
         lines.push(line);
-      } else if (mode !== 'brief') {
+      } else if (d.negatives.length && mode !== 'brief') {
         lines.push(`${d.name}：无${joinList(d.negatives)}。`);
       }
+      // 没有阳性也没有标记阴性 = 未问 → 该行不出现
     });
     return lines.join('\n');
   }
@@ -5951,31 +7010,62 @@ const GENERATOR = (() => {
    * 按模板逐项成行：既往健康状况、疾病史、传染病史、预防接种史、过敏史、
    * 手术史、外伤史、输血史、中毒史、长期用药、与本病相关病史、其它。
    * 分项书写便于带教老师逐条核对，也符合病历书写规范。
+   *
+   * ⚠️ 本轮改动（缺陷1第1条）：**每一项都固定成行，没填的写「／」。**
+   * 旧实现里每个子项都有一个硬编码的默认否定句——「平素体健」「否认高血压、糖尿病、
+   * 冠心病等慢性病史」「否认肝炎、结核、伤寒等传染病史」「按计划预防接种」
+   * 「否认食物、药物过敏史」「否认手术史」「否认外伤史」「否认输血史」「否认中毒史」
+   * 「否认长期用药史」。空记录因此直接产出 10 行「否认」。
+   *
+   * 这是本项目最严重的问题：学生连问都没问，工具替他向带教老师保证「病人否认」。
+   * 《诊断学》第10版：「病历必须客观地、真实地反映病情和诊疗经过，避免任何臆断或虚构」。
+   * 现在这些否定句只能来自用户实际输入（textarea 里自己写的字），或者用户点了
+   * 界面上明确的「无」选项（如 pmh.allergy === '无'）。
+   *
+   * @param {object} r record
+   * @returns {string}
    */
   function buildPMH(r) {
     const p = r.pmh || {};
     const lines = [];
 
-    // 1) 既往健康状况
-    lines.push(`既往健康状况：${stripTail(p.health) ? '平素' + stripTail(p.health) : '平素体健'}`);
+    // 1) 既往健康状况：填了「良好」写「平素良好」，没填写「／」。
+    //    旧实现没填时写「平素体健」，同样是替学生下结论。
+    //    学生自己写「既往体健」时不能再冠一次「平素」，否则变成「平素既往体健」。
+    const health = stripTail(p.health);
+    lines.push(`既往健康状况：${health ? (/^(平素|既往)/.test(health) ? health : `平素${health}`) : PH}`);
 
-    // 2) 疾病史：手写详情优先，其次勾选，最后默认否认
+    // 2) 疾病史：手写详情优先，其次勾选；都没有就写「／」而不是「否认…」。
+    //
+    // ⚠️ 缺陷4（已复现）：学生把「高血压3年」填在「与本病无关但仍需治疗的其他疾病」
+    // 时，旧实现一边在现病史写「另有高血压3年，需继续治疗」，一边在既往史写
+    // 「否认高血压、糖尿病、冠心病等慢性病史」——同一份病历里否定句和肯定句并存。
+    // 《诊断学》第10版：「与本次疾病虽无密切关系，但仍需治疗的其他疾病情况，
+    // 应在现病史后另起一行描述」——它既然是「已患的病」，就应该并入疾病史，
+    // 而不是留在「其它」里与疾病史各行其是。
     const checked = Object.keys(p.diseaseChecks || {}).filter(k => p.diseaseChecks[k] && k !== '其他');
     const other = stripTail(p.diseaseOther);
     const detail = stripTail(p.diseaseDetail);
+    const treat = stripTail(p.otherTreatDiseases);
+    const known = checked.concat(other ? [other] : []);
     let disease;
     if (detail) disease = detail;
-    else if (checked.length || other) disease = `既往患${joinList(checked.concat(other ? [other] : []))}`;
-    else disease = '否认高血压、糖尿病、冠心病等慢性病史';
+    else if (known.length || treat) {
+      // treat 往往带病程（「高血压3年」），勾选项只有病名（「高血压」）。
+      // 两者同时存在时保留信息更全的 treat，避免写成「高血压、高血压3年」。
+      const rest = treat ? known.filter(k => !treat.includes(k)) : known;
+      disease = `既往患${joinList(rest.concat(treat ? [treat] : []))}`;
+    } else disease = PH;
     lines.push(`疾病史：${disease}`);
 
-    // 3) 传染病史
-    lines.push(`传染病史：${stripTail(p.infection) || '否认肝炎、结核、伤寒等传染病史'}`);
+    // 3) 传染病史  4) 预防接种史
+    lines.push(`传染病史：${filledOrPH(p.infection)}`);
+    lines.push(`预防接种史：${filledOrPH(p.vaccine)}`);
 
-    // 4) 预防接种史
-    lines.push(`预防接种史：${stripTail(p.vaccine) || '按计划预防接种'}`);
-
-    // 5) 过敏史
+    // 5) 过敏史：
+    //    '有' → 按勾选/手写描述组装；
+    //    '无' → 学生明确点过「无」，这时写「否认食物、药物过敏史」才是诚实的；
+    //    未选 → 「／」，不许替学生否认。
     if (p.allergy === '有') {
       const allergens = Object.keys(p.allergenChecks || {}).filter(k => p.allergenChecks[k] && k !== '其他');
       if (p.allergenOther) allergens.push(p.allergenOther);
@@ -5986,35 +7076,55 @@ const GENERATOR = (() => {
       if (reactionText) s += `，表现为${reactionText}`;
       else if (reactions.length) s += `，表现为${joinList(reactions)}`;
       lines.push(`过敏史：${s}`);
-    } else {
+    } else if (p.allergy === '无') {
       lines.push('过敏史：否认食物、药物过敏史');
+    } else {
+      lines.push(`过敏史：${PH}`);
     }
 
     // 6) 手术史  7) 外伤史  8) 输血史  9) 中毒史
-    lines.push(`手术史：${stripTail(p.surgery) || '否认手术史'}`);
-    lines.push(`外伤史：${stripTail(p.trauma) || '否认外伤史'}`);
-    lines.push(`输血史：${stripTail(p.transfusion) || '否认输血史'}`);
-    lines.push(`中毒史：${stripTail(p.poisoning) || '否认中毒史'}`);
+    lines.push(`手术史：${filledOrPH(p.surgery)}`);
+    lines.push(`外伤史：${filledOrPH(p.trauma)}`);
+    lines.push(`输血史：${filledOrPH(p.transfusion)}`);
+    lines.push(`中毒史：${filledOrPH(p.poisoning)}`);
 
     // 10) 长期用药
-    lines.push(`长期用药：${stripTail(p.longTermMeds) || '否认长期用药史'}`);
+    lines.push(`长期用药：${filledOrPH(p.longTermMeds)}`);
 
-    // 11) 与本病相关病史
+    // 11) 与本病相关病史：只有这一项是「可选行」——它是补充性质，
+    //     不像上面那些是教材规定的固定栏目，没内容时整行不出现不算缺项。
     if (stripTail(p.relatedHistory)) lines.push(`与本病相关病史：${stripTail(p.relatedHistory)}`);
 
-    // 12) 其它（其他需治疗的疾病 + 补充说明）
-    const extras = [stripTail(p.otherTreatDiseases), stripTail(p.special)].filter(Boolean);
-    if (extras.length) lines.push(`其它：${extras.join('；')}`);
+    // 12) 其它（补充说明）
+    //     「其他需治疗的疾病」已经并入上面的疾病史（见缺陷4），这里只留补充说明，
+    //     否则同一句话会在既往史里出现两遍。
+    if (stripTail(p.special)) lines.push(`其它：${stripTail(p.special)}`);
 
     return lines.join('\n');
   }
 
   /* ---------------------------- 个人史 ---------------------------- */
 
+  /**
+   * 个人史。
+   *
+   * ⚠️ 本轮改动（缺陷1 + 缺陷4）：
+   *   1) 吸烟/饮酒：schema 默认值已清空（原来默认 '无'，空记录凭空输出「吸烟史：无」）。
+   *      现在只有用户点了「无 / 有 / 已戒」才成行，没选就写「／」。
+   *   2) 毒物接触史：旧实现没填时硬写「否认毒物、粉尘及放射性物质接触史」→ 改「／」。
+   *      同理，学生没问就别替他否认。
+   *   3) 新增两项教材点名要求、此前全项目缺失的栏目：冶游史、职业与工作条件。
+   *      《诊断学》第10版 个人史：「记录出生地及长期居留地，生活习惯及有无烟、酒、
+   *      药物等嗜好，职业与工作条件及有无工业毒物、粉尘、放射性物质接触史，有无冶游史。」
+   *
+   * 母孕史/出生史/喂养史/生长发育史/疫区接触史属于补充栏目，没内容整行不出现。
+   */
   function buildPersonal(r) {
     const p = r.personal || {};
     const seg = [];
-    // 母孕史 / 出生史 / 喂养史 / 生长发育史：儿科病历必写，成人可留空
+    // 母孕史 / 出生史 / 喂养史 / 生长发育史：儿科病历必写，成人可留空。
+    // 只写真的填了内容的项——成人留空时这几行不出现，不会在病历里留下
+    // 一串「母孕史：／」（那对成人病历毫无意义）。
     if (stripTail(p.maternal)) seg.push(`母孕史：${stripTail(p.maternal)}`);
     if (stripTail(p.birth)) seg.push(`出生史：${stripTail(p.birth)}`);
     if (stripTail(p.feeding)) seg.push(`喂养史：${stripTail(p.feeding)}`);
@@ -6026,23 +7136,45 @@ const GENERATOR = (() => {
       seg.push(`居住史：${stripTail(p.residence)}`);
     }
     if (stripTail(p.travel)) seg.push(`疫区接触史：近期${stripTail(p.travel)}`);
-    // 吸烟
-    if (p.smoking === '有') {
+    // 吸烟：三态都可能来自用户选择；没选（''）写占位符，不能默认成「无」。
+    // 旧代码 `else if (p.smoking === '无' || p.smoking)` 会把任何回答（含空串以外的杂值）
+    // 一律写成「无」，本次收紧成严格三态。
+    //
+    // 缺陷M4（已复现）：旧版 schema 里 smoking 是**自由文本**，老存档里存的是
+    // 「吸烟20年，每日10支」这种整句。严格三态只看 '有/已戒/无'，这类老数据全都落到
+    // else 分支，变成「吸烟史：／」——用户亲手写的内容被静默丢弃。
+    // 现在：认出枚举值（含「吸烟/不吸烟/已戒烟」这类同义写法）就按三态写，
+    // 认不出的非空值一律当自由文本原样保留（原话里已经有「吸烟」字样就不再冠项目名，
+    // 避免写成「吸烟史：吸烟20年」）。
+    const smoke = stripTail(p.smoking);
+    if (smoke === '有' || smoke === '吸烟') {
       seg.push(`吸烟史：有${p.smokingAmount ? '，' + stripTail(p.smokingAmount) : ''}`);
-    } else if (p.smoking === '已戒') {
+    } else if (smoke === '已戒' || smoke === '已戒烟' || smoke === '戒烟') {
       seg.push(`吸烟史：已戒烟${p.smokingAmount ? '，' + stripTail(p.smokingAmount) : ''}`);
-    } else if (p.smoking === '无' || p.smoking) {
+    } else if (smoke === '无' || smoke === '不吸烟') {
       seg.push('吸烟史：无');
+    } else if (smoke) {
+      seg.push(/吸烟|抽烟|戒烟|香烟|烟草/.test(smoke) ? smoke : `吸烟史：${smoke}`);
+    } else {
+      seg.push(`吸烟史：${PH}`);
     }
-    if (p.drinking === '有') {
+    const drink = stripTail(p.drinking);
+    if (drink === '有' || drink === '饮酒') {
       seg.push(`饮酒史：有${p.drinkingAmount ? '，' + stripTail(p.drinkingAmount) : ''}`);
-    } else if (p.drinking === '已戒') {
+    } else if (drink === '已戒' || drink === '已戒酒' || drink === '戒酒') {
       seg.push(`饮酒史：已戒酒${p.drinkingAmount ? '，' + stripTail(p.drinkingAmount) : ''}`);
-    } else if (p.drinking === '无' || p.drinking) {
+    } else if (drink === '无' || drink === '不饮酒') {
       seg.push('饮酒史：无');
+    } else if (drink) {
+      seg.push(/饮酒|喝酒|酗酒|戒酒|白酒|啤酒|黄酒|红酒/.test(drink) ? drink : `饮酒史：${drink}`);
+    } else {
+      seg.push(`饮酒史：${PH}`);
     }
-    if (stripTail(p.drugs)) seg.push(`毒物接触史：${stripTail(p.drugs)}`);
-    else seg.push('毒物接触史：否认毒物、粉尘及放射性物质接触史');
+    // 职业与工作条件（教材点名要求，此前字段缺失）
+    seg.push(`职业与工作条件：${filledOrPH(p.occupationEnv)}`);
+    // 冶游史（教材点名要求，此前全项目 grep 零命中）
+    seg.push(`冶游史：${filledOrPH(p.sexualHistory)}`);
+    seg.push(`毒物接触史：${filledOrPH(p.drugs)}`);
     if (stripTail(p.environment)) seg.push(stripTail(p.environment));
     if (stripTail(p.habits)) seg.push(stripTail(p.habits));
     return seg.join('\n');
@@ -6058,7 +7190,29 @@ const GENERATOR = (() => {
     if (!s) return '';
     if (m.age) s += `，${m.age}岁结婚`;
     if (m.spouseHealth) s += `，${stripTail(m.spouseHealth)}`;
+    appendMarriageExtra(m, part => { s += `，${part}`; });
     return s + '。';
+  }
+
+  /**
+   * 婚姻史里教材点名、但容易漏采的两项：性生活情况、夫妻关系。
+   *
+   * 《诊断学》第10版 第六篇·病历书写：「婚姻史包括婚姻状况，结婚年龄，
+   * 配偶健康状况、性生活情况、夫妻关系等。」这两项属于隐私，用户不填就不出现，
+   * 绝不代填、绝不默认成「正常」——问没问只有填的人知道。
+   */
+  function appendMarriageExtra(m, push) {
+    // 用户可能只写值（「正常」），也可能写整句（「性生活正常，夫妻关系和睦」）。
+    // 已经有标签的就不再重复加，避免出现「性生活性生活正常」。
+    const withLabel = (label, raw) => {
+      const v = stripTail(raw);
+      if (!v) return '';
+      return v.startsWith(label) ? v : label + v;
+    };
+    const sex = withLabel('性生活', m.sexLife);
+    if (sex) push(sex);
+    const rel = withLabel('夫妻关系', m.relation);
+    if (rel) push(rel);
   }
 
   /**
@@ -6076,6 +7230,7 @@ const GENERATOR = (() => {
     let s = status;
     if (m.age) s += `，${m.age}岁结婚`;
     if (m.spouseHealth) s += `，配偶${stripTail(m.spouseHealth)}`;
+    appendMarriageExtra(m, part => { s += `，${part}`; });
     return s + '。';
   }
 
@@ -6088,23 +7243,45 @@ const GENERATOR = (() => {
     const cb = buildChildbirth(r);
     if (cb) parts.push(cb.replace(/^生育史：/, '').replace(/。$/, ''));
     if (!parts.length) {
-      // 男性或无月经史者：明确写「无」，避免整节消失后被误认为漏采
-      return b.gender === '女' ? '' : '无。';
+      // ⚠️ 缺陷2：旧实现在这里返回「无。」（男性）或空串（女性）。
+      // 「无。」既不是用户写的内容，也不构成任何有效信息（男性本来就没有月经史，
+      // 生育史却可能实打实存在），属于典型的凭空成文；空串则让整节消失。
+      // 现在统一返回占位符，由 generate 拼成「【月经与生育史】／」。
+      return PH;
     }
     return parts.join('，') + '。';
   }
 
-  /** 兼容旧调用：婚姻 + 月经 + 生育合成一句 */
+  /**
+   * 兼容旧调用：婚姻 + 月经 + 生育合成一句。
+   *
+   * 只被导出给旧调用方 / 测试用，正文里两节是分开写的。
+   * 注意占位符：buildMenstruationChildbirth 现在无内容时返回「／」，
+   * 不能再给它补句号拼成「未婚，／。」这种怪句子。
+   */
   function buildMarriageChildbirth(r) {
     const parts = [];
     const mar = buildMarriageHistory(r);
     if (mar) parts.push(mar.replace(/。$/, ''));
     const mc = buildMenstruationChildbirth(r);
-    if (mc && mc !== '无。') parts.push(mc.replace(/。$/, ''));
-    if (!parts.length) return '';
+    if (mc && mc !== '无。' && mc !== PH) parts.push(mc.replace(/。$/, ''));
+    if (!parts.length) return PH;
+    // 只有占位符时原样返回，不加句号
+    if (parts.length === 1 && parts[0] === PH) return PH;
     return parts.join('，') + '。';
   }
 
+  /**
+   * 月经史。
+   *
+   * ⚠️ 本轮改动（缺陷5）：
+   *   1) 新增月经量以外的三个教材点名项：颜色、有无血块、白带。
+   *      《诊断学》第10版：「并记录月经量、颜色，有无血块、痛经、白带等情况。」
+   *   2) 旧实现里 `else if (m.dysmenorrhea === '无') parts.push('无痛经')` 之所以会
+   *      凭空冒出「无痛经」，是因为 schema 的默认值就是 '无'——用户根本没回答过。
+   *      现在 schema 默认改成空串，只有用户真的点了「有/无」才写。
+   *   3) 完全没填时返回空串，由上层（generate）补「／」占位，不再凭空一句「无痛经。」
+   */
   function buildMenstruation(r) {
     const m = r.menstruation || {};
     const b = r.basic || {};
@@ -6117,8 +7294,13 @@ const GENERATOR = (() => {
     if (m.cycle) parts.push(`周期${m.cycle}天`);
     if (m.duration) parts.push(`经期${m.duration}天`);
     if (m.quantity) parts.push(`经量${m.quantity}`);
-    if (m.dysmenorrhea && m.dysmenorrhea !== '无') parts.push('有痛经');
+    // 颜色 / 血块 / 白带：教材点名要求，有填才写（缺陷5第1、2条）
+    if (stripTail(m.color)) parts.push(`经血${stripTail(m.color)}`);
+    if (stripTail(m.clot)) parts.push(`血块：${stripTail(m.clot)}`);
+    // 痛经：三态。没回答过（空串）一个字都不写，绝不默认「无痛经」。
+    if (m.dysmenorrhea === '有') parts.push('有痛经');
     else if (m.dysmenorrhea === '无') parts.push('无痛经');
+    if (stripTail(m.leukorrhea)) parts.push(`白带：${stripTail(m.leukorrhea)}`);
     if (m.menopauseAge) parts.push(`${m.menopauseAge}岁绝经`);
     if (m.lmp) parts.push(`末次月经${m.lmp}`);
     if (m.extra) parts.push(stripTail(m.extra));
@@ -6129,14 +7311,32 @@ const GENERATOR = (() => {
   function buildChildbirth(r) {
     const c = r.childbirth || {};
     const b = r.basic || {};
+    // 缺陷M1（已复现）：男性记录里残留着 childbirth 数据（旧存档、切换性别、误填）时，
+    // 旧实现照样输出「生育史：2-0-0-2。」——男性没有生育史，这是凭空成文。
+    // 生育史只对女性成立；性别未填（还没选）时同样不写，避免先写成「2-0-0-2」
+    // 再因为选了性别而消失，让用户以为程序吃数据。
+    if (b.gender !== '女') return '';
     const parts = [];
-    if (c.gravida) parts.push(`孕${c.gravida}产${c.para || '0'}`);
-    if (c.abortion) parts.push(`流产${c.abortion}次`);
+    // 教材《诊断学》第10版 第六篇·病历书写：
+    //   「生育史按下列顺序写明：足月分娩数-早产数-流产或人流数-存活数，并记录避孕措施。」
+    // 为什么触发条件不含 abortion：abortion 这个键同时属于旧写法（孕X产Y，流产Z次）
+    // 和四项式（第三位），它在旧存档里几乎必然有值。若让它触发四项式，
+    // 一份只有「孕2产1，流产1次」的老病历会被改写成「0-0-1-0」，信息反而丢了。
+    // 所以只由 fullTerm/premature/alive 这三个「新字段」触发，它们的出现即代表用户在用四项式。
+    const triggers = ['fullTerm', 'premature', 'alive'];
+    const hasQuad = triggers.some(k => String(c[k] || '').trim() !== '');
+    if (hasQuad) {
+      const n = k => String(c[k] || '').trim() || '0';
+      parts.push(`${n('fullTerm')}-${n('premature')}-${n('abortion')}-${n('alive')}`);
+    } else if (c.gravida) {
+      // 旧存档兼容：没填四项式时仍按「孕X产Y」写，不能因为升级把已有内容丢了。
+      parts.push(`孕${c.gravida}产${c.para || '0'}`);
+      if (c.abortion) parts.push(`流产${c.abortion}次`);
+    }
     if (c.details) parts.push(stripTail(c.details));
     if (c.lastBirth) parts.push(`末次分娩${stripTail(c.lastBirth)}`);
-    if (c.contraception) parts.push(`避孕方式：${stripTail(c.contraception)}`);
+    if (c.contraception) parts.push(`避孕措施：${stripTail(c.contraception)}`);
     if (!parts.length) {
-      if (b.gender === '男') return '';
       if (c.applicable === '无') return '无生育史。';
       return '';
     }
@@ -6144,6 +7344,29 @@ const GENERATOR = (() => {
   }
 
   /* ---------------------------- 家族史 ---------------------------- */
+
+  /**
+   * 家族史一行：**保留项目名**。
+   *
+   * 缺陷H2（已复现）：三项都填「无」时，旧实现直接输出 `seg.push(infect)`，
+   * 家庭史变成「无。无。无。」——考官看不出这三个「无」分别回答的是哪一问，
+   * 得分点（类似疾病史、传染性疾病史、两系三代遗传性疾病史）在纸面上全部消失。
+   * 按「所有表格项都应详细填写，无内容者画"/"或"—"」的同一条原则，项目名必须留。
+   *
+   * 唯一例外：用户原话里已经带着这一项的名字（「家族中无类似疾病患者」），
+   * 再冠一次会写成「家族中类似疾病史：家族中无类似疾病患者」，读起来像机器拼接；
+   * 此时项目名本来就在，原样输出即可。
+   *
+   * @param {string} label 项目名（教材原词）
+   * @param {RegExp} already 用户原话里已含项目名时的识别正则
+   * @param {string} value 用户填的内容
+   * @returns {string}
+   */
+  function familyLine(label, already, value) {
+    const v = stripTail(value);
+    if (!v) return `${label}：／`;
+    return already.test(v) ? v : `${label}：${v}`;
+  }
 
   /**
    * 家族史。
@@ -6155,17 +7378,45 @@ const GENERATOR = (() => {
     const f = r.family || {};
     const checked = Object.keys(f.diseaseChecks || {}).filter(k => f.diseaseChecks[k]);
     const seg = [];
-    if (f.deceased) seg.push(stripTail(f.deceased));
+    const deceased = stripTail(f.deceased);
+    // 健康状况（含已故亲属的死因与年龄）单独成句。
+    // 它非空时下面的「类似疾病史」占位句会被抑制（见缺陷3的注释）。
+    if (deceased) seg.push(deceased);
 
     // ① 与本病相似的病情（手写优先，勾选兜底）
+    //
+    // ⚠️ 缺陷3（已复现）：用户在「父母、兄弟姐妹健康状况」里写了
+    // 「父亲因胃癌去世，65岁」，旧实现紧接着输出「家族中无类似疾病患者」——
+    // 上一句是胃癌家族史、下一句否认家族类似疾病，同一段里自相矛盾。
+    // 《诊断学》第10版 家族史：「父母、兄弟、姐妹及子女的健康情况，有无与病人
+    // 类似的疾病。如已死亡，应记录死亡原因及年龄。」——「健康状况」这一栏
+    // 本身就已经回答了「有无类似疾病」，它填了就不该再补一句否定。
     const similar = stripTail(f.similarDisease);
-    if (similar) seg.push(similar);
+    if (similar) seg.push(familyLine('家族中类似疾病史', /类似疾病|相似疾病/, similar));
     else if (checked.length) seg.push(`家族中${joinList(checked)}病史`);
-    else seg.push('家族中无类似疾病患者');
+    // 只有健康状况一栏是空的，才需要单独写「类似疾病」这一栏。
+    // 没填时不写「家族中无类似疾病患者」——那是替病人否定，属臆断/虚构
+    // （《诊断学》第10版：「病历必须客观地、真实地反映病情……避免任何臆断或虚构」；
+    // 「无内容者画"/"或"—"」）。改为占位符，但保留「类似疾病」四个字，
+    // 让考官看到这一栏被问过（评分表第2页的得分点正是「与本病相似的病情」）。
+    else if (!deceased) seg.push('家族中类似疾病史：／');
 
-    // ② 两系三代遗传性疾病史（手写优先，未填给标准阴性表述）
+    // ② 家族传染病史。《诊断学》第10版原文：
+    //    「家族中有无结核、肝炎、性病等传染性疾病」——这与遗传病是两个独立问题。
+    //    用户不填时旧实现写「家族中否认结核、肝炎、性病等传染性疾病史」，
+    //    同样是替病人否定；改为占位符，但保留「结核、肝炎、性病等传染性疾病」
+    //    这段教材原文，因为考官就是按这句找得分点。
+    const infect = stripTail(f.infectionHistory);
+    seg.push(infect
+      ? familyLine('家族中结核、肝炎、性病等传染性疾病史', /传染性疾病|传染病史/, infect)
+      : '家族中结核、肝炎、性病等传染性疾病史：／');
+
+    // ③ 两系三代遗传性疾病史（手写优先；未填给占位符，
+    //    但「两系三代」字样必须出现——评分表第2页 2.5 分就看这四个字）
     const three = stripTail(f.threeGeneration);
-    seg.push(three || '两系三代否认遗传性疾病史');
+    seg.push(three
+      ? familyLine('两系三代遗传性疾病史', /遗传性疾病|遗传病|两系三代/, three)
+      : '两系三代遗传性疾病史：／');
 
     if (stripTail(f.other)) seg.push(stripTail(f.other));
     return joinSentences(seg);
@@ -6177,23 +7428,42 @@ const GENERATOR = (() => {
     return v === undefined || v === null || v === '' ? '' : String(v).trim();
   }
 
+  /**
+   * 生命体征行。
+   *
+   * ⚠️ 本轮改动（缺陷2第4条）：旧实现「有一项才输出一行」，空记录时整行不存在，
+   * 于是体格检查直接从「一般状况：…」开始，缺了教材要求的首行。
+   * 《诊断学》第10版 体格检查书写顺序第一行就是
+   * 「体温 ℃ 脉搏 次/分 呼吸 次/分 血压 /mmHg 身高 cm 体重 kg」。
+   * 现在这 6 项固定成行，没填的写「／」占位，项目名与单位都保留。
+   * 头围/胸围/腹围是儿科与腹部专科的补充项，没填时不出现在这一行里（不做占位，避免噪音）。
+   */
   function buildVitals(r) {
     const v = (r.pe || {}).vitals || {};
-    const parts = [];
-    if (vitalValue(v.temperature)) parts.push(`T ${vitalValue(v.temperature)}℃`);
-    if (vitalValue(v.pulse)) parts.push(`P ${vitalValue(v.pulse)}次/分`);
-    if (vitalValue(v.respiration)) parts.push(`R ${vitalValue(v.respiration)}次/分`);
-    if (vitalValue(v.sbp) || vitalValue(v.dbp)) {
-      parts.push(`BP ${vitalValue(v.sbp) || '—'}/${vitalValue(v.dbp) || '—'}mmHg`);
-    }
-    if (vitalValue(v.height)) parts.push(`身高 ${vitalValue(v.height)}cm`);
-    if (vitalValue(v.weight)) parts.push(`体重 ${vitalValue(v.weight)}kg`);
+    // 缺项统一写成「／」，与一般项目、既往史的占位符保持同一个字符（全角斜杠）。
+    const val = k => vitalValue(v[k]) || PH;
+    const parts = [
+      `T ${val('temperature')}℃`,
+      `P ${val('pulse')}次/分`,
+      `R ${val('respiration')}次/分`,
+      // 血压中间用半角 / 分隔收缩压与舒张压，这是病历书写惯例；
+      // 未填时两侧都是「／」，呈现为「BP ／/／mmHg」。
+      `BP ${vitalValue(v.sbp) || PH}/${vitalValue(v.dbp) || PH}mmHg`,
+      `身高 ${val('height')}cm`,
+      `体重 ${val('weight')}kg`
+    ];
     if (vitalValue(v.headCirc)) parts.push(`头围 ${vitalValue(v.headCirc)}cm`);
     if (vitalValue(v.chestCirc)) parts.push(`胸围 ${vitalValue(v.chestCirc)}cm`);
-    return parts.length ? parts.join('，') + '。' : '';
+    if (vitalValue(v.abdCirc)) parts.push(`腹围 ${vitalValue(v.abdCirc)}cm`);
+    return parts.join('，') + '。';
   }
 
-  /** 某个查体条目的当前值：用户填的优先，否则用默认 */
+  /**
+   * 某个查体条目的当前值：用户填的优先，否则用默认。
+   *
+   * 注意：这个函数**不管勾没勾**。勾选过滤在 peEntries()/buildPE() 里做，
+   * 因为 hints 需要用「原值」判断阳性体征（没勾的项不算阳性，见 hints.js）。
+   */
   function peValue(r, groupKey, item) {
     const g = ((r.pe || {})[groupKey]) || {};
     const raw = g[item.key];
@@ -6207,20 +7477,29 @@ const GENERATOR = (() => {
   /**
    * 一组查体里，哪些条目应该参与输出。
    *
-   *  abdomen.abdPalpation 这类「父项 + 子项」结构：子项一旦被填写，父项必须让位，
-   * 否则病历里会同时出现「全腹无压痛」和「右下腹浅触诊压痛」两种互相打架的描述。
-   * 这里统一用 schema 导出的 parentSupersededByChild 判断，不在 generator 里
-   * 再散落一套自己的规则。
+   *  1) 没勾选的项一律不参与（勾选制：没查的不能写成正常，见 SCHEMA.peChecked）；
+   *  2) 勾了但没写具体所见 → 补该项的规范正常描述（peNormalText）；
+   *  3) abdomen.abdPalpation 这类「父项 + 子项」结构：子项一旦被填写，父项必须让位，
+   *     否则病历里会同时出现「全腹无压痛」和「右下腹浅触诊压痛」两种互相打架的描述。
+   *     这里统一用 schema 导出的 parentSupersededByChild 判断，不在 generator 里
+   *     再散落一套自己的规则。
    *
    * @returns {Array<{item:object, value:string}>} 只保留有值（要输出）的条目
    */
   function peEntries(r, groupKey, items) {
     const store = (r.pe || {})[groupKey] || {};
     return items
+      // 没勾 = 这一次没查，不能出现在病历里
+      .filter(it => SCHEMA.peChecked(r, groupKey, it.key))
       // 父项被已填写的子项接管时，整项跳过
       .filter(it => !(SCHEMA.childPEItems(groupKey, it.key).length &&
         SCHEMA.parentSupersededByChild(store, groupKey, it.key)))
-      .map(it => ({ item: it, value: stripTail(peValue(r, groupKey, it)) }))
+      .map(it => {
+        const own = stripTail(peValue(r, groupKey, it));
+        // 勾了却没写所见 → 用规范正常描述兜底；连正常描述都没有就跳过
+        const value = own || stripTail(SCHEMA.peNormalText(it));
+        return { item: it, value };
+      })
       .filter(e => e.value);
   }
 
@@ -6252,7 +7531,10 @@ const GENERATOR = (() => {
 
     if (!blocked.length) {
       const texts = dedupeTexts(plain);
-      return [`${group.name}：${texts.join('。')}。`];
+      // 一般状况这类组在教材里是**一整句逗号连写**（组上带 joinWith: '，'），
+      // 其余组仍是句号分隔。分隔符由 schema 决定，这里不写死组名。
+      const glue = group.joinWith || '。';
+      return [`${group.name}：${texts.join(glue)}。`];
     }
 
     const lines = [];
@@ -6306,9 +7588,50 @@ const GENERATOR = (() => {
     (dept.special || []).forEach(spKey => {
       const sp = SCHEMA.PE_SPECIAL[spKey];
       if (!sp) return;
-      let texts = dedupeTexts(sp.items.map(it => stripTail(peValue(r, 'special_' + spKey, it))));
-      if (!texts.length) return;
-      out.push(`${sp.name}：${texts.join('。')}。`);
+      const storeKey = 'special_' + spKey;
+      // 勾选制：只写这次真查过的项；一个都没勾就整段不出现
+      const store = (r.pe || {})[storeKey] || {};
+      const checkedItems = sp.items.filter(it => SCHEMA.peChecked(r, storeKey, it.key));
+      // 汇总项让位：
+      // 专科清单里有一批历史遗留的汇总项（respExtra / gynExtra1 之类），内容已被后来的
+      // 明细项完整覆盖。学生点「全选」时两边都会写，同一句话出现两遍。
+      // 判据三条全满足才跳过：①声明了 summaryOf ②它列的明细项全都勾了 ③它自己没被改写。
+      // 第三条是底线：学生亲手填的字，一个字都不许因为「去重」丢掉。
+      const keepItems = checkedItems.filter(it => {
+        const subs = it.summaryOf;
+        if (!Array.isArray(subs) || !subs.length) return true;
+        if (String(store[it.key] || '').trim()) return true;
+        return !subs.every(k => SCHEMA.peChecked(r, storeKey, k));
+      });
+      const vals = keepItems
+        .map(it => stripTail(peValue(r, storeKey, it)) || stripTail(SCHEMA.peNormalText(it)));
+      // 教材「前面体格检查中的相应项目不必重复书写」：
+      // 通用查体已写过的就别再写一遍。
+      //
+      // 按**整项**比对，不按分句删——
+      // 分句级删除会留下缺主语的残句：「子宫前倾前屈，正常大小，质中，活动度好，无压痛」
+      // 前半句被通用查体占掉后，剩下的「质中，活动度好」单独成句，读病历的人根本不知道
+      // 说的是子宫。残句比重复严重得多：重复只是啰嗦，残句是信息损坏。
+      //
+      // 判据：这一项的所有分句都已在前面出现过（含本科室前面几项），整项跳过；
+      // 只要还有一个新分句，就整项照写——宁可重复半个分句，也不切出残句。
+      const seen = out.join('\n');
+      const acc = [seen];
+      const own = [];
+      vals.forEach(v => {
+        const allSeen = splitClauses(v).every(c => acc.some(s => s.includes(c)));
+        if (allSeen) return;
+        own.push(v);
+        acc.push(v);
+      });
+      if (!own.length) {
+        // 勾了，但这一科每一项的每个分句都已经在通用查体里写过一遍。
+        // 教材对这种情形的处理办法是明写的：「只写见××科情况」。
+        // 静默什么都不写会让学生以为勾选没生效，给一句指向比空着好。
+        if (checkedItems.length) out.push(`${sp.name}：见前述体格检查。`);
+        return;
+      }
+      out.push(`${sp.name}：${own.join('。')}。`);
     });
 
     const focus = buildFocusPE(r);
@@ -6319,6 +7642,76 @@ const GENERATOR = (() => {
   /** 去掉完全重复的条目（如「外生殖器」与「肛门」都写「未见异常」） */
   function dedupeTexts(texts) {
     return texts.filter((t, i) => t && texts.indexOf(t) === i);
+  }
+
+  /** 把一段查体描述切成最小分句，用于判断「这句是不是已经在别处写过了」。 */
+  function splitClauses(text) {
+    return String(text || '').split(/[，,；;。]/).map(s => s.trim()).filter(Boolean);
+  }
+
+  /**
+   * 按**分句**去重（缺陷H1，已复现）。
+   *
+   * 通用腹部触诊写「上腹部压痛」，消化专科查体 giTenderness 也写「上腹部压痛」，
+   * 摘要就成了「查体：上腹部压痛，上腹部压痛」，诊断依据里同样重复一遍。
+   * abnormalPE 按条目返回，条目内部的 `text` 已经是分句拼接的结果，跨条目重复它看不见。
+   *
+   * 只在**拼摘要/诊断依据字符串时**按分句去重，不动 abnormalPE 的返回结构
+   * （buildPE 里必须按整项判重，见那里的注释：分句级删除会留下缺主语的残句）。
+   * 这里拼出来的是逗号罗列的体征清单，分句本身就是完整短语，切碎不会产生残句。
+   *
+   * @param {string[]} list 若干段查体描述
+   * @returns {string[]} 分句数组（顺序按首次出现，已归一化去重）
+   */
+  function dedupeClauses(list) {
+    const seen = [];
+    const out = [];
+    (list || []).forEach(t => {
+      splitClauses(t).forEach(c => {
+        const key = squash(c);
+        if (!key || seen.includes(key)) return;
+        seen.push(key);
+        out.push(c);
+      });
+    });
+    return out;
+  }
+
+  /**
+   * 这次到底查没查体（缺陷B2/B3 的判据）。
+   *
+   * 摘要与首次病程录 O 段原来无条件写「查体未见明显阳性体征」/「未见与诊断相关的
+   * 阳性体征」——空记录、只填主诉时也是如此，等于替学生宣布查体阴性。学生一个查体
+   * 项都没勾，这两句话就是《诊断学》第10版禁止的「臆断或虚构」。
+   *
+   * 判据（与 schema 的勾选制一致）：`r.pe` 下除 `vitals`（生命体征另算）、`checked`
+   * 之外的任何一组里，只要有任何一个**非空/真值**（用户勾了并落了值，或者专科项
+   * 写了字），就算查过体；`pe.checked` 里任一项为 true 也算。
+   *
+   * @param {object} r record
+   * @returns {boolean}
+   */
+  function anyPEExamined(r) {
+    const pe = (r || {}).pe || {};
+    const examined = Object.keys(pe)
+      .filter(k => k !== 'vitals' && k !== 'checked')
+      .some(k => {
+        const g = pe[k];
+        if (!g || typeof g !== 'object') return false;
+        return Object.keys(g).some(itemKey => {
+          const v = g[itemKey];
+          if (v === true) return true;
+          if (v === false || v === undefined || v === null) return false;
+          return String(v).trim() !== '';
+        });
+      });
+    if (examined) return true;
+    const ck = pe.checked || {};
+    return Object.keys(ck).some(g => {
+      const row = ck[g];
+      return !!row && typeof row === 'object' &&
+        Object.keys(row).some(itemKey => row[itemKey] === true);
+    });
   }
 
   /**
@@ -6360,7 +7753,10 @@ const GENERATOR = (() => {
         return;
       }
 
-      // 只写用户真正填过的项，默认值不写进"重点查体"（否则等于把没查的也列成重点）
+      // 只写用户真正填过的项，默认值不写进"重点查体"（否则等于把没查的也列成重点）；
+      // 同时必须是通过勾选的项——把没勾（这次没查）的项列进重点查体是自相矛盾的。
+      // app.js 在「加入重点查体」时会自动置为已勾，所以正常流程不会互相打架。
+      if (!SCHEMA.peChecked(r, groupKey, itemKey)) return;
       const filled = typeof SCHEMA.peItemFilled === 'function'
         ? SCHEMA.peItemFilled(store, item)
         : !!String(store[itemKey] || '').trim();
@@ -6419,7 +7815,7 @@ const GENERATOR = (() => {
       /^心界不大$/, /^心律齐$/, /^律齐$/
     ];
     // 公认的「正常」表述
-    const NORMAL_PHRASE = /(营养良好|营养中等|营养一般|发育正常|发育良好|神志清楚|精神一般|精神可|自动体位|面容自然|查体合作|皮肤弹性良好|毛发分布均匀|气管居中|颈软|腹平软|脊柱生理弯曲存在|生理反射存在|肌力正常|肌力5级|肌力Ⅴ级|双肺呼吸音清|呼吸音清|前囟平软|愈合良好)/;
+    const NORMAL_PHRASE = /(营养良好|营养中等|营养一般|发育正常|发育良好|神志清楚|精神一般|精神可|自主体位|自动体位|面容自然|查体合作|皮肤弹性良好|毛发分布均匀|气管居中|颈软|腹平软|脊柱生理弯曲存在|生理反射存在|肌力正常|肌力5级|肌力Ⅴ级|双肺呼吸音清|呼吸音清|前囟平软|愈合良好)/;
 
     /** 单个片段是否明确是阴性/正常 */
     const isNegativeClause = c =>
@@ -6476,7 +7872,9 @@ const GENERATOR = (() => {
       const sp = SCHEMA.PE_SPECIAL[spKey];
       if (!sp) return;
       sp.items.forEach(it => {
-        const val = stripTail(peValue(r, 'special_' + spKey, it));
+        // 没勾的专科项这次没查，不能参与阳性体征筛选
+        if (!SCHEMA.peChecked(r, 'special_' + spKey, it.key)) return;
+        const val = stripTail(peValue(r, 'special_' + spKey, it)) || stripTail(SCHEMA.peNormalText(it));
         if (!isPositiveFinding(it, val)) return;
         res.push({ group: sp.name, label: it.label, text: it.__positive, key: it.key });
       });
@@ -6486,19 +7884,76 @@ const GENERATOR = (() => {
 
   /* ---------------------------- 辅助检查 ---------------------------- */
 
-  /** 规整后的辅助检查列表（名称与结果都已 trim，丢掉全空行） */
+  /**
+   * 规整后的辅助检查列表。
+   *
+   * ⚠️ 本轮改动（缺陷6）：
+   *   1) 每项新增 date（检查日期）、hospital（检查机构）、no（检查号）三个字段。
+   *      《诊断学》第10版：「辅助检查……应分类按检查时间顺序记录检查结果，
+   *      如系在其他医疗机构所做检查，应当写明该机构名称及检查号。」
+   *   2) **按检查日期升序排列**；没填日期的保持用户输入顺序，排在所有有日期的条目之后。
+   *      dates 用 YYYY-MM-DD（input type=date），字符串比较即时间比较，不必 new Date。
+   *   3) 旧存档兼容：core.deepMerge 对数组是直接取用户值、不逐元素合并，
+   *      所以老存档的 items 元素里压根没有这三个键——一律 String(x||'') 防御式取值，
+   *      缺字段时既要保证不崩，也要保证输出与改动前一致。
+   *
+   * @param {object} r record
+   * @returns {Array<{name:string,result:string,date:string,hospital:string,no:string}>}
+   */
   function auxItems(r) {
-    return (((r.auxiliary || {}).items) || [])
-      .map(it => ({ name: stripTail((it || {}).name), result: stripTail((it || {}).result) }))
+    const raw = (((r.auxiliary || {}).items) || [])
+      .map(it => {
+        const o = it || {};
+        return {
+          name: stripTail(o.name),
+          result: stripTail(o.result),
+          date: String(o.date || '').trim(),
+          hospital: stripTail(o.hospital),
+          no: String(o.no || '').trim()
+        };
+      })
+      // 只保留真正写了检查项目/结果的条目；空行（含只剩日期的行）不输出
       .filter(it => it.name || it.result);
+
+    // 按检查时间升序：有日期的排前面并排序，没日期的按原顺序跟在后面。
+    // 排序必须是稳定语义，所以用「带原始下标的副本」而不能直接 sort 原数组。
+    const dated = [];
+    const undated = [];
+    raw.forEach((it, i) => {
+      if (it.date) dated.push({ it, i });
+      else undated.push({ it, i });
+    });
+    dated.sort((a, b) => (a.it.date === b.it.date ? a.i - b.i : (a.it.date < b.it.date ? -1 : 1)));
+    return dated.concat(undated).map(x => x.it);
   }
 
+  /**
+   * 辅助检查一节。
+   *
+   * 每条的写法：
+   *   「2026-10-01 外院病理号 H12345 血常规：WBC 12×10^9/L。」
+   * 即 日期 → 机构 → 检查号 → 项目名：结果。
+   * 机构与检查号通常成对出现，但用户只写其一也照写，不强绑。
+   * 三个新字段都没填时，输出与改动前完全一致（「血常规：WBC 12×10^9/L。」）。
+   */
   function buildAuxiliary(r) {
     const items = auxItems(r);
+    // 空节保留原来的「暂缺。」而不是改成「／」：
+    // 辅助检查整节为空时，「暂缺」本身就是病历里的规范写法（医生也这么写），
+    // 不构成编造；而它的 hint 与既有测试都按「暂缺」写，改成「／」只有风险没有收益。
     if (!items.length) return '暂缺。';
     return items.map(it => {
-      if (it.name && it.result) return `${it.name}：${it.result}。`;
-      return (it.name || it.result) + '。';
+      const head = [];
+      if (it.date) head.push(it.date);
+      if (it.hospital) head.push(it.hospital);
+      if (it.no) head.push(`检查号 ${it.no}`);
+      // 只填了项目名、没填结果时写「／」占位：原来会输出
+      // 「2026-10-20 温州市人民医院 血常规。」——读起来像已经做过而且没异常，
+      // 实际上恰恰是漏填了最要紧的那一半。
+      const body = it.name && it.result
+        ? `${it.name}：${it.result}。`
+        : (it.name ? `${it.name}：${PH}。` : `${it.result}。`);
+      return head.length ? head.join(' ') + ' ' + body : body;
     }).join('\n');
   }
 
@@ -6510,6 +7965,61 @@ const GENERATOR = (() => {
     return draftSummary(r);
   }
 
+  /**
+   * 摘要里的「病史要点」。
+   *
+   * 《诊断学》第10版 病历摘要：「简明扼要、高度概述病史要点，体格检查、实验室及
+   * 其他辅助检查的重要阳性和具有重要鉴别意义的阴性结果。」
+   *
+   * 旧实现是 `hpi.split(/。/).slice(0, 2)`——只取现病史前两句，两个毛病都已复现：
+   *   ① 具有鉴别意义的阴性通常写在病史后半段，被整段丢掉
+   *      （用户填了「无体重下降」，摘要里搜不到）；
+   *   ② 现病史逐字段成句时，前两句常是残句，摘要跟着残。
+   * 现在按「阳性要点（1～2 句）+ 显式阴性鉴别（1 句）」组织；
+   * 「发病以来精神食欲…」一般情况和「另有高血压需继续治疗」不进摘要——
+   * 摘要要的是与本次诊断相关的要点，这两句既不体现特点，也挤占篇幅。
+   *
+   * 用户手写整段现病史（mode === 'manual'）时不做任何加工，只截前两句。
+   *
+   * @param {object} r record
+   * @param {string} hpi buildHPI(r) 的结果（已做过字段间去重）
+   * @returns {string[]} 句子数组，每项末尾不带标点
+   */
+  function summaryHistory(r, hpi) {
+    const h = r.hpi || {};
+    const sentences = String(hpi || '').split(/。/).map(s => s.trim()).filter(Boolean);
+    if (h.mode === 'manual') return sentences.slice(0, 2);
+
+    // 摘掉「一般情况」与「其他需治疗疾病」两句（教材里它们不属于摘要要点）。
+    // 一般情况句改用 hpiGeneralSentence 取，空记录时它返回空串，
+    // 不会把一句根本不存在的「发病以来…」当成要剔除的句子。
+    const gc = hpiGeneralSentence(r);
+    const other = stripTail((r.pmh || {}).otherTreatDiseases);
+    // 现病史只有一句「发病以来，精神…」时，buildHPI 会把主语「患者」冠在它前面，
+    // 于是同一句话有两种写法。比对时统一剥掉句首主语，否则摘要会把它再复述一遍
+    // （已复现：只填主诉时摘要输出「…来院。患者发病以来，精神、食欲、睡眠可…」）。
+    const SUBJ = /^(患者|患儿|产妇|孕妇|本人|家属|该)/;
+    const core = s => squash(String(s || '').replace(SUBJ, ''));
+    const skip = [gc, other ? `另有${other}，需继续治疗` : ''].map(core).filter(Boolean);
+    const out = sentences.filter(s => !skip.includes(core(s))).slice(0, 2);
+
+    // 显式保留有鉴别意义的阴性：未被上面要点覆盖的项补成一句
+    const neg = stripTail(h.negativeDiscriminating);
+    if (neg) {
+      const covered = squash(out.join(''));
+      const NEG = /^(无|未|否认|没有|未见)/;
+      const rest = neg.split(/[、，,]/).map(s => stripTail(s)).filter(Boolean)
+        // 只看「核心词」有没有写过：「无发热」的核心是「发热」
+        .filter(c => !covered.includes(squash(c.replace(NEG, ''))));
+      if (rest.length) {
+        // 只剩后半段时补回否定词，否则「消瘦。」会被读成阳性表现
+        const head = (neg.match(NEG) || ['无'])[0];
+        out.push(NEG.test(rest[0]) ? rest.join('、') : head + rest.join('、'));
+      }
+    }
+    return out;
+  }
+
   /** 自动生成病历摘要初稿 */
   function draftSummary(r) {
     const b = r.basic || {};
@@ -6518,17 +8028,22 @@ const GENERATOR = (() => {
     // 1) 患者身份 + 主诉（直接复用主诉生成逻辑，避免时长重复追加）
     const who = [b.gender, ageWithUnit(b)].filter(Boolean).join('，');
     const ccFull = stripTail(buildChiefComplaint(r));  // 已含时长和句号
-    const isChild = b.department === 'pediatrics';
-    const subj = isChild ? '患儿' : '患者';
-    let head = who ? `${subj}，${who}` : subj;
-    if (ccFull) head += `，因“${ccFull}”来院`;
-    seg.push(head);
+    // 主语按年龄判（subjectOf）：旧实现按科室判，儿科收 70 岁病人会写成「患儿，男，70岁」
+    const subj = subjectOf(b);
+    // 只有「患者」两个字的开头没有信息量，会生成「患者。」这种残句——干脆不写，
+    // 让别人看得出这一段还是空的，比读到一个半截句子强。
+    if (who || ccFull) {
+      let head = who ? `${subj}，${who}` : subj;
+      // 没有性别年龄时「患者」后面不该再跟逗号，否则读成「患者，因“腹痛3天”来院」
+      if (ccFull) head += who ? `，因“${ccFull}”来院` : `因“${ccFull}”来院`;
+      seg.push(head);
+    }
 
-    // 2) 现病史要点（取前两句，避免摘要过长）
+    // 2) 现病史要点（含显式阴性鉴别，见 summaryHistory）
     const hpi = buildHPI(r);
     if (hpi) {
-      const sentences = hpi.split(/。/).map(s => s.trim()).filter(Boolean);
-      seg.push(sentences.slice(0, 2).join('。'));
+      const points = summaryHistory(r, hpi);
+      if (points.length) seg.push(points.join('。'));
     }
 
     // 3) 主要阳性体征（生命体征异常 + 查体异常）
@@ -6545,12 +8060,17 @@ const GENERATOR = (() => {
     if (!isNaN(sbp) && (sbp >= 140 || sbp < 90)) abnormalVitals.push(`BP ${v.sbp || '—'}/${v.dbp || '—'}mmHg`);
     const peAll = abnormalVitals.concat(abn.map(a => a.text).filter(Boolean));
     // 心率去重：查体描述里已经写了「心率108次/分」时，不要再pushed一个「P 108次/分」
-    const dedup = peAll.filter((txt, i) => {
+    const dedup = dedupeClauses(peAll.filter((txt, i) => {
       if (!/^P \d+次\/分$/.test(txt)) return true;
       const num = txt.match(/\d+/)[0];
       return !peAll.some((other, j) => j !== i && /心率/.test(other) && other.includes(num));
-    });
-    seg.push(dedup.length ? `查体：${dedup.join('，')}` : '查体未见明显阳性体征');
+    }));
+    // 缺陷B2（已复现）：空记录、只填主诉时这里照样写「查体未见明显阳性体征」，
+    // 而整份病历一个查体项都没勾——这是替学生宣布查体阴性，属凭空成文。
+    // 三种情形：查到了阳性体征照旧罗列；查过体但没异常才写阴性；没查体就整段不提。
+    if (dedup.length) seg.push(`查体：${dedup.join('，')}`);
+    else if (anyPEExamined(r)) seg.push('查体未见明显阳性体征');
+    // else：这段整体不 push —— 摘要里不提查体，比写一句假的阴性强。
 
     // 4) 辅助检查
     const aux = ((r.auxiliary || {}).items || []).filter(it => stripTail(it.name) || stripTail(it.result));
@@ -6566,10 +8086,85 @@ const GENERATOR = (() => {
 
   /* ---------------------------- 初步诊断 ---------------------------- */
 
+  /**
+   * 初步诊断的书写查对。
+   *
+   * 只查「格式对不对」，绝不判断「诊断对不对」——那是带教老师的事。
+   * 依据《诊断学》第10版 第六篇·病历书写「诊断」一节：
+   *   · 分清主次：主要疾病在前，次要疾病在后，并发症列于有关主病之后，伴发病最后；
+   *   · 一时难以确定的，病名后加「？」；
+   *   · 查不清病因的，可写「某症状待查」，并在其后注明一两个可能性较大的病名，
+   *     如「发热待查，肠结核？」；
+   *   · 医师在初步诊断右下角签全名。
+   */
+  const PENDING_WORDS = ['待查', '待诊', '待排', '原因待查', '性质待查'];
+
+  function warnDiagnosisOrder(r, w) {
+    const d = r.diagnosis || {};
+    const list = (d.confirmed || []).map(s => stripTail(s)).filter(Boolean);
+    if (!list.length) return;
+
+    // ① 「待查/待诊」后面必须跟可能性较大的病名，否则这条诊断等于没写方向
+    const bare = list.filter(s => {
+      const hasPending = PENDING_WORDS.some(k => s.includes(k));
+      if (!hasPending) return false;
+      // 「发热待查，肠结核？」这种写法里已经有候选病名（逗号后 + 问号）
+      return !/[，,]\s*\S+？?\s*$/.test(s) && !s.includes('？');
+    });
+    if (bare.length) {
+      w.push(`【初步诊断】「${bare.join('」「')}」是待查类诊断，按其书写要求应在其后注明一两个可能性较大或待排除的病名，如"发热待查，肠结核？"。`);
+    }
+
+    // ② 主次顺序：症状待查排在第一、后面却有明确诊断时，多半是顺序反了
+    const firstPending = PENDING_WORDS.some(k => list[0].includes(k));
+    const laterSolid = list.slice(1).filter(s => !PENDING_WORDS.some(k => s.includes(k)));
+    if (firstPending && laterSolid.length) {
+      w.push(`【初步诊断】第 1 条是待查类诊断，后面却有明确诊断（${laterSolid.length} 条）。请确认主次：主要疾病应排在前面，待查放在明确诊断之后通常更合适。`);
+    }
+
+    // ③ 「？」占位符：教材要求用中文问号，且只在病名末尾
+    const badMark = list.filter(s => /[?]/.test(s));
+    if (badMark.length) {
+      w.push(`【初步诊断】「${badMark.join('」「')}」里用了英文问号，病历里应写成中文「？」。`);
+    }
+    const midMark = list.filter(s => /？.+[^\s]/.test(s) && !/[，,]\s*\S+？/.test(s));
+    if (midMark.length) {
+      w.push(`【初步诊断】「${midMark.join('」「')}」的问号不在病名末尾，待定标记应写在诊断名称之后，如"肠结核？"。`);
+    }
+
+    // ④ 医师签名（教材：初步诊断右下角签全名）。只提醒一次，不阻断生成。
+    if (!stripTail(d.signature)) {
+      w.push('【初步诊断】末尾还没有医师签名。入院记录要求书写者在初步诊断右下角签全名。');
+    }
+  }
+
+
+  /**
+   * 初步诊断。
+   *
+   * 《诊断学》第10版 第六篇·病历书写：
+   *   「诊断名称应确切，分清主次，按顺序排列，主要疾病在前，次要疾病在后，
+   *     并发症列于有关主病之后，伴发病排列在最后。诊断应尽可能包括病因诊断、
+   *     病理解剖诊断和功能诊断。对一时难以确定诊断的疾病，可在病名后加"？"。
+   *     一时既查不清病因也难以判定在形态和功能方面改变的疾病，可暂以某症状待诊
+   *     或待查作为诊断，并应在其后注明一两个可能性较大或待排除疾病的病名，
+   *     如"发热待查，肠结核？"。」
+   *   「书写入院记录的医师在初步诊断的右下角签全名。」
+   *
+   * 这是全篇最容易出错的地方，也是最不该由程序替用户做主的地方——
+   * 哪个是主病、哪个是并发症，只有接诊的人知道。所以这里只做两件事：
+   *   ① 原样保留用户排好的顺序（列表顺序即主次顺序），逐条编号；
+   *   ② 把签名行补上（教材要求，但很容易忘）。
+   * 排序是否合规、该不该加"？"，交给 checker 提示，不在这里猜。
+   */
   function buildDiagnosis(r) {
-    const list = ((r.diagnosis || {}).confirmed || []).map(s => stripTail(s)).filter(Boolean);
-    if (!list.length) return '待补充。';
-    return list.map((s, i) => `${i + 1}. ${s}`).join('\n');
+    const d = r.diagnosis || {};
+    const list = (d.confirmed || []).map(s => stripTail(s)).filter(Boolean);
+    const sign = stripTail(d.signature);
+    if (!list.length) return sign ? `待补充。\n\n医师签名：${sign}` : '待补充。';
+    const body = list.map((s, i) => `${i + 1}. ${s}`).join('\n');
+    // 签名放在初步诊断右下角，空两行留出手写位置
+    return sign ? `${body}\n\n医师签名：${sign}` : body;
   }
 
   /* ===================================================================
@@ -6632,7 +8227,9 @@ const GENERATOR = (() => {
     const h = r.hpi || {};
     const seg = [];
     const who = [b.gender, ageWithUnit(b)].filter(Boolean).join('，');
-    const subj = b.department === 'pediatrics' ? '患儿' : '患者';
+    // 主语按年龄判（subjectOf）：与 draftSummary 保持一致，
+    // 旧实现两处都按科室判，儿科 70 岁病人会写成「患儿，男，70岁」（已复现）。
+    const subj = subjectOf(b);
     let head = who ? `${subj}，${who}` : subj;
     const cc = stripTail(buildChiefComplaint(r));
     if (cc) head += `，因“${cc}”入院`;
@@ -6647,7 +8244,7 @@ const GENERATOR = (() => {
 
     // 阳性体征与辅助检查各留一句，细节放到 O 段，避免 S/O 两段重复
     const abn = abnormalPE(r);
-    if (abn.length) seg.push(`查体：${abn.slice(0, 3).map(a => a.text).join('，')}`);
+    if (abn.length) seg.push(`查体：${dedupeClauses(abn.slice(0, 3).map(a => a.text)).join('，')}`);
     const aux = auxItems(r);
     if (aux.length) {
       seg.push(`辅助检查：${aux.slice(0, 2).map(it =>
@@ -6671,8 +8268,11 @@ const GENERATOR = (() => {
     if (!isNaN(sbp) && (sbp >= 140 || sbp < 90)) {
       parts.push(`BP ${v.sbp || '—'}/${v.dbp || '—'}mmHg`);
     }
-    const texts = parts.concat(abn.map(a => a.text).filter(Boolean));
-    if (!texts.length) return '未见与诊断相关的阳性体征';
+    const texts = dedupeClauses(parts.concat(abn.map(a => a.text).filter(Boolean)));
+    // 缺陷B3（已复现）：一个查体项都没勾时，这里原本写「未见与诊断相关的阳性体征」，
+    // 等于替学生下了阴性结论。没查过体就只留项目名（调用处已带「体格检查：」前缀，
+    // 返回「／」读作「1. 体格检查：／」），不替学生宣布查体阴性。
+    if (!texts.length) return anyPEExamined(r) ? '未见与诊断相关的阳性体征' : PH;
     return texts.join('，');
   }
 
@@ -6710,7 +8310,9 @@ const GENERATOR = (() => {
       ? {
         diagnosis: d,
         history: hpiText,
-        pe: abn.length ? abn.slice(0, 2).map(a => a.text).join('，') : '',
+        // 缺陷H1（已复现）：通用腹部触诊与专科 giTenderness 常写同一句，
+        // 诊断依据就成了「上腹部压痛，上腹部压痛」。这里按分句去重（dedupeClauses）。
+        pe: abn.length ? dedupeClauses(abn.slice(0, 2).map(a => a.text)).join('，') : '',
         aux: aux.length ? `${aux[0].name}${aux[0].result}` : ''
       }
       : { diagnosis: d, history: '', pe: '', aux: '' });
@@ -7010,6 +8612,19 @@ const GENERATOR = (() => {
 
   /**
    * 生成大病历全文
+   *
+   * ⚠️ 本轮改动（缺陷2第2、3条）：旧实现是 `if (!body) return;`——某一节生成结果为空，
+   * 连【节标题】带内容整节蒸发。学生看不出「本来就没有这一节」还是「漏印了」，
+   * 反映到带教老师那边就是一份缺项的入院记录。
+   * 《诊断学》第10版：「所有表格项都应详细填写，无内容者画"/"或"—"」。
+   *
+   * 现在 14 节标题恒在，正文为空时写占位符「／」。
+   * 这样既满足「不可空缺」，也让用户一眼看到自己还有哪几节没填。
+   *
+   * 注意：sections 里存的也是占位符而非空串，所以 app.js 的「复制某节」
+   * 列表（GENERATOR.SECTION_ORDER.filter(n => res.sections[n])）会列出全部 14 节，
+   * 与正文保持一致，不会出现"正文有、复制列表里没有"的错位。
+   *
    * @param {object} r record
    * @param {object} opts { rosMode: 'detail'|'brief' }
    */
@@ -7033,8 +8648,9 @@ const GENERATOR = (() => {
 
     const lines = [];
     SECTION_ORDER.forEach(name => {
-      const body = sections[name];
-      if (!body) return;
+      // 空节不再整节消失：标题照出，正文补「／」占位。
+      const body = sections[name] || PH;
+      sections[name] = body;
       lines.push(`【${name}】`);
       lines.push(body);
       lines.push('');
@@ -7087,6 +8703,242 @@ const GENERATOR = (() => {
     '妊娠期高血压', '子痫', '宫外孕', '异位妊娠', '盆腔炎'
   ];
 
+  /**
+   * 通用查体与专科查体对同一体征给出互相矛盾的描述时，列出提示。
+   *
+   * 为什么需要（缺陷5 的残留部分）：用户把「消化内科专科查体：压痛点」填成
+   * 「中上腹压痛，无反跳痛」，通用腹部触诊却还是系统默认的
+   * 「腹平软，全腹无压痛、反跳痛」——同一份病历里既「全腹无压痛」又「中上腹压痛」，
+   * 肠鸣音也一处 4 次/分、一处 3 次/分（均已复现）。
+   *
+   * 处理原则：
+   *   1) 判据必须是「通用项取的是系统默认值」。通用项一旦是用户自己手填的，
+   *      那就是用户自己的判断，程序不置一词——既不删也不提示。
+   *   2) 不擅自删改任何一方。查体阳性所见是学生亲手查到的，
+   *      删掉默认值等于替他做决定；改他的描述更不行。所以只提醒「请确认以哪一份为准」。
+   *   3) 宁可漏报不可误报：只有「同一个体征词」且「否定/肯定相反」或
+   *      「同一项数值不同」才算冲突，纯措辞差异不管。
+   *
+   * @param {object} r record
+   * @returns {string[]} 每条一句话的中文提醒
+   */
+  function peConflicts(r) {
+    const deptKey = (r.basic || {}).department || 'general';
+    const dept = SCHEMA.DEPARTMENTS.find(d => d.key === deptKey) || SCHEMA.DEPARTMENTS[0];
+    const res = [];
+    const seenKey = new Set();
+
+    // 只收集「用户没写、取的是 schema 默认值」且这次确实输出的通用项。
+    const generalDefaults = [];
+    SCHEMA.PE_COMMON.forEach(group => {
+      const items = group.items.filter(it => !it.depts || it.depts.includes(deptKey));
+      items.forEach(it => {
+        if (!SCHEMA.peChecked(r, group.key, it.key)) return;
+        // 用户亲手写过的项直接跳过——那不是系统默认值
+        if (stripTail(((r.pe || {})[group.key] || {})[it.key])) return;
+        const val = stripTail(peValue(r, group.key, it));
+        if (!val) return;
+        if (!SCHEMA.peValueIsDefault(it, val)) return;
+        generalDefaults.push({ group: group.name, label: it.label, val });
+      });
+    });
+    if (!generalDefaults.length) return res;
+
+    // 同一体征可能出现在多个部位/多个专科项里，按这个表配对。
+    //
+    // 这里刻意不放单字「肝」「脾」：它们会命中「肝颈静脉回流征」「肝浊音界」之类的
+    // 复合词，把不相干的项配到一起。要配就写全一点。
+    const CONFLICT_KEYS = [
+      '压痛', '反跳痛', '肠鸣音', '浊音', '震颤', '包块', '杂音', '啰音', '水肿',
+      '肝肋下', '脾肋下', '肝大', '脾大', '肝区叩击痛', '肾区叩击痛',
+    ];
+    /**
+     * 从一句话里认出它说的部位。
+     *
+     * 加这个是因为终审判出的假冲突：头颅查体默认写「无压痛及包块」，
+     * 专科又写了「中上腹压痛」，两者都含「压痛」但根本不是同一个地方，
+     * 一报就是「同一体征前后矛盾」——报得越多，学生越会整体无视提醒。
+     */
+    const REGIONS = [
+      ['头颅', /头颅|头部|额部|颞部|枕部|头顶/],
+      ['颈部', /颈部|颈前|颈侧|甲状腺|颈静脉|颈动脉|气管/],
+      ['胸部', /胸壁|胸廓|前胸|乳房|双乳/],
+      ['心脏', /心前区|心尖|心界|心音|心脏|瓣膜/],
+      ['肺部', /双肺|肺下界|胸膜|呼吸音|语颤|语音共振/],
+      ['腹部', /腹部|腹壁|全腹|上腹|下腹|中腹|脐周|脐部|麦氏点|胆囊点|季肋|肝区|脾区|腹水|移动性浊音/],
+      ['腰背部', /腰部|腰背|背部|脊柱|胸椎|腰椎|骶部/],
+      ['四肢', /四肢|上肢|下肢|双足|足背|手指|关节|膝|踝/],
+      ['会阴', /外阴|阴道|宫颈|子宫|附件|直肠|肛门|会阴/],
+      ['皮肤', /皮肤|皮疹|黏膜|巩膜/],
+    ];
+    const regionsOf = clause => REGIONS.filter(([, re]) => re.test(clause)).map(([n]) => n);
+    // 只用当前分句认部位是不够的：「头颅大小、形态正常，无压痛及包块」切出来以后，
+    // 「无压痛及包块」那一段自己没提部位，认不出来就只能照旧比对，假冲突又回来了。
+    // 所以两边都带上项目自己的上下文（组名 + 项目名）一起认。
+    const differentSite = (aText, bText) => {
+      const ra = regionsOf(aText);
+      const rb = regionsOf(bText);
+      if (!ra.length || !rb.length) return false;   // 有一边说不上部位，仍按原逻辑比对
+      return !ra.some(x => rb.includes(x));
+    };
+    // 只按逗号/分号/句号切，不按顿号切：「全腹无压痛、反跳痛」里的「反跳痛」
+    // 是被前面那个「无」管着的，切碎了就会把「反跳痛」当成独立阳性。
+    const splitAll = t => String(t || '').split(/[，,；;。]/).map(s => s.trim()).filter(Boolean);
+    const numOf = c => (c.match(/(\d+)\s*次\s*\/?\s*分/) || [])[1];
+    const NEG_WORD = /(无|未见|未触及|未闻及|未引出|未扪及|否认|没有|正常|阴性|不)/;
+    const SEG = /[、，,；;。：:]/;
+    /**
+     * 这个分句里的 key 是否被否定了。
+     *
+     * 不能只看句首：「全腹无压痛、反跳痛」以「全腹」开头，句首不是否定词，
+     * 但「压痛」确实被「无」否掉了。所以取 key 前面那一小段（到上一个顿号/逗号为止）
+     * 里有没有否定词；key 后面紧跟着「阴性/未触及」这类后缀也算否定。
+     */
+    const negated = (clause, key) => {
+      const idx = clause.indexOf(key);
+      if (idx < 0) return false;
+      // 取 key 之前最后一个分隔符之后的那一小段（「全腹无压痛、反跳痛」里的「无压痛」）
+      const head = clause.slice(0, idx).split(SEG).pop() || '';
+      if (NEG_WORD.test(head)) return true;
+      // 否定词也可能落在体征名词之后：肝脾未及、Murphy征阴性、肠鸣音正常
+      // 「正常」也算一种否定：写「肠鸣音正常」而专科写「肠鸣音活跃」就是矛盾。
+      const tail = clause.slice(idx + key.length, idx + key.length + 5);
+      return /^(阴性|正常|未触及|未闻及|未引出|未及)/.test(tail);
+    };
+
+    (dept.special || []).forEach(spKey => {
+      const sp = SCHEMA.PE_SPECIAL[spKey];
+      if (!sp) return;
+      const store = ((r.pe || {})['special_' + spKey]) || {};
+      sp.items.forEach(it => {
+        const raw = stripTail(store[it.key]);
+        if (!raw) return;                       // 专科侧也必须是用户亲手写的
+        splitAll(raw).forEach(spClause => {
+          CONFLICT_KEYS.forEach(k => {
+            if (!spClause.includes(k)) return;
+            generalDefaults.forEach(g => {
+              splitAll(g.val).forEach(gClause => {
+                if (!gClause.includes(k)) return;
+                // 「同一个体征 + 说法相反」或「同一个体征 + 数值不同」才算冲突。
+                // 用 negated 而不是看句首：默认值「全腹无压痛、反跳痛」以「全腹」开头，
+                // 只看句首会把阴性误判成阳性，提示就会变成假冲突。
+                const opposite = negated(gClause, k) !== negated(spClause, k);
+                const numG = numOf(gClause);
+                const numS = numOf(spClause);
+                const numDiff = !!(numG && numS && numG !== numS);
+                if (!opposite && !numDiff) return;
+                // 说两个地方就别配对：头颅「无压痛及包块」和「中上腹压痛」都含「压痛」，
+                // 但不是同一个体征，报出来只是噪音。
+                // 带上组名和项目名再认部位，因为切出来的分句本身常常没提部位。
+                if (differentSite(`${g.group}${g.label}：${gClause}`, `${sp.name}${it.label}：${spClause}`)) return;
+                // 同一对「通用项 × 专科段」只提示一次，避免一大串雷同条目
+                const id = `${g.group}|${g.label}|${sp.name}`;
+                if (seenKey.has(id)) return;
+                seenKey.add(id);
+                res.push(`【体格检查】${g.group}「${g.label}」取的是系统默认描述「${gClause}」，`
+                  + `而${sp.name}写的是「${spClause}」，同一体征前后矛盾，请确认以哪一份为准（程序不替你删改）。`);
+              });
+            });
+          });
+        });
+      });
+    });
+    return res;
+  }
+
+  /**
+   * 生命体征/一般项目的取值范围检查。
+   *
+   * 这些数字最终会一个不漏地进病历正文，而 validate 以前一位都不看：
+   * T 368℃、P 780次/分、BP 80/130 都能原样写进「体格检查」，
+   * 70 岁的人挂儿科也照生成儿科个人史。这些不需要医学知识就能判断，
+   * 属于「写了肯定不对」而不是「写得对不对要看病人」——所以只报错不修改。
+   */
+  const VITAL_RANGE = {
+    temperature: [34, 43, '体温'],
+    pulse: [20, 250, '脉搏'],
+    respiration: [5, 80, '呼吸'],
+    sbp: [50, 300, '收缩压'],
+    dbp: [20, 200, '舒张压'],
+    height: [30, 250, '身高'],
+    weight: [1, 300, '体重'],
+    abdCirc: [20, 200, '腹围'],
+    headCirc: [20, 70, '头围'],
+    chestCirc: [20, 120, '胸围'],
+  };
+
+  function checkVitals(r, w) {
+    const v = ((r.pe || {}).vitals) || {};
+    Object.keys(VITAL_RANGE).forEach(k => {
+      const [lo, hi, label] = VITAL_RANGE[k];
+      const raw = String(v[k] === undefined || v[k] === null ? '' : v[k]).trim();
+      if (!raw) return;
+      if (!/^-?\d+(\.\d+)?$/.test(raw)) {
+        w.push(`【生命体征】${label}填的是「${raw}」，不是数字，请核对。`);
+        return;
+      }
+      const n = Number(raw);
+      if (n < lo || n > hi) {
+        w.push(`【生命体征】${label} ${raw} 超出可信范围（${lo}～${hi}），请核对是否多打或少打了一位。`);
+      }
+    });
+    // 收缩压必须高于舒张压：写反了是最常见的手误，两个数都在范围内时查不出来
+    const sbp = Number(String(v.sbp === undefined ? '' : v.sbp).trim());
+    const dbp = Number(String(v.dbp === undefined ? '' : v.dbp).trim());
+    if (sbp && dbp && Number.isFinite(sbp) && Number.isFinite(dbp) && sbp <= dbp) {
+      w.push(`【生命体征】收缩压 ${sbp} 不高于舒张压 ${dbp}，两者可能写反了。`);
+    }
+  }
+
+  /** 日期必须是 YYYY-MM-DD 且真实存在；顺序上入院不晚于记录、出院不早于入院 */
+  function checkDates(r, w) {
+    const b = r.basic || {};
+    const okDate = s => {
+      const t = stripTail(s);
+      if (!t) return null;
+      const m = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+      if (!m) {
+        w.push(`【日期】「${t}」不是 YYYY-MM-DD 格式，请核对。`);
+        return null;
+      }
+      const y = Number(m[1]);
+      const mo = Number(m[2]);
+      const d = Number(m[3]);
+      const dt = new Date(Date.UTC(y, mo - 1, d));
+      if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) {
+        w.push(`【日期】「${t}」不是一个真实存在的日期，请核对。`);
+        return null;
+      }
+      // 补零后再比较，否则 '2026-9-1' 这类写法按字符串比会排错
+      return `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    };
+    const admit = okDate(b.admitDate);
+    const record = okDate(b.recordDate);
+    const discharge = okDate((r.discharge || {}).dischargeDate);
+    if (admit && record && record < admit) {
+      w.push(`【日期】记录日期 ${record} 早于入院日期 ${admit}，请核对。`);
+    }
+    if (admit && discharge && discharge < admit) {
+      w.push(`【日期】出院日期 ${discharge} 早于入院日期 ${admit}，请核对。`);
+    }
+  }
+
+  /** 科室与年龄是否对得上：儿科接成人、成人科接 14 岁以下都值得问一句 */
+  function checkDeptAge(r, w) {
+    const b = r.basic || {};
+    const m = String(b.age === undefined ? '' : b.age).match(/\d+/);
+    if (!m) return;
+    const age = Number(m[0]);
+    if (!Number.isFinite(age) || age <= 0) return;
+    const dept = b.department;
+    const name = (SCHEMA.DEPARTMENTS.find(d => d.key === dept) || {}).name || '';
+    if (dept === 'pediatrics' && age >= 14) {
+      w.push(`【一般项目】科室是${name}，但年龄 ${age} 岁，请确认是否选错科室（儿科一般指 14 岁以下）。`);
+    } else if (dept && dept !== 'pediatrics' && dept !== 'emergency' && age < 14) {
+      w.push(`【一般项目】年龄 ${age} 岁，科室却是${name}；14 岁以下建议选儿科。`);
+    }
+  }
+
   function validate(r) {
     const w = [];
     const b = r.basic || {};
@@ -7100,21 +8952,60 @@ const GENERATOR = (() => {
       if (cc.length > 20) w.push(`【主诉】文字偏长（${cc.length}字），一般要求不超过20字，只写症状+时间、不写诊断。`);
       const hit = DIAG_WORDS.filter(dw => cc.includes(dw));
       if (hit.length) w.push(`【主诉】疑似包含诊断性词语（${hit.join('、')}），主诉应写症状，建议改为症状描述。`);
-      if (!stripTail(b.chiefComplaintDuration)) w.push('【主诉】缺少持续时间。');
+      // 缺陷H4（已复现）：学生在主诉正文里直接写了「反复上腹痛3年」，
+      // 只是没再去下面的「持续时间」输入框里重复填一遍，旧判据只看那个输入框，
+      // 于是照样报「缺少持续时间」。持续时间本来就在正文里，重复填才奇怪。
+      // 现在先看正文：正文里已经出现「数字+时间单位」（含中文数字、半个月之类）就不报。
+      if (!stripTail(b.chiefComplaintDuration) && !hasDurationInText(buildChiefComplaint(r))) {
+        w.push('【主诉】缺少持续时间。');
+      }
     }
     if (!(buildHPI(r) || '').trim()) w.push('【现病史】未填写。');
-    // 系统回顾：只有完全没动过才提醒
+    // 系统回顾：只有完全没动过才提醒。
+    // ⚠️ 措辞随本轮语义改动（缺陷1第2条）：旧文案「默认为阴性，勾选阳性症状即可」
+    // 已经不成立——现在没勾不等于阴性，没问过就是未问，一个字都不写。
+    // 同时把「标阴性」这条路径也认进来（v.negative），否则用户全点阴性还会被反复提醒。
     const rosTouched = Object.keys(r.ros || {}).some(sysKey =>
-      Object.values(r.ros[sysKey] || {}).some(v => v && (v.checked || v.detail || v.time))
+      Object.values(r.ros[sysKey] || {}).some(v => v && (v.checked || v.negative || v.detail || v.time))
     );
     if (!rosTouched) {
-      w.push('【系统回顾】尚未勾选，建议逐系统过一遍（默认为阴性，勾选阳性症状即可）。');
+      w.push('【系统回顾】尚未问诊。未点选的症状不会写进病历；过一遍问诊后，阳性点红、明确阴性的点「阴性」。');
+    }
+    // 【婚姻史】静默丢失（缺陷2第3条）：
+    // 这一节以前 `if (!status) return ''`，空就整节消失，而 validate 里没有任何一项检查它，
+    // 用户完全不知道自己漏了婚姻史。现在正文有占位符，同时这里补一条提醒。
+    if (!stripTail((r.marriage || {}).status) && !stripTail((r.basic || {}).marital)) {
+      w.push('【婚姻史】未填写。');
+    }
+    // 【个人史】冶游史属隐私项，不填不算缺项，但完全没填个人史时要提示（缺陷4）
+    const per = r.personal || {};
+    if (!stripTail(per.residence) && !stripTail(per.travel) && !per.smoking && !per.drinking &&
+        !stripTail(per.occupationEnv) && !stripTail(per.sexualHistory) && !stripTail(per.drugs)) {
+      w.push('【个人史】未填写（至少需要居住情况、烟酒嗜好、职业与工作条件、冶游史）。');
     }
     const abn = abnormalPE(r);
     if (!abn.length && !Object.keys((r.pe || {}).vitals || {}).length) {
       w.push('【体格检查】未录入异常或生命体征。');
     }
+    // 缺陷B4（已复现）：心脏听诊的默认描述里带具体数值（「心率78次/分」），
+    // 学生勾了这一项却没改数字，病历里就会出现「心脏听诊：心率78次/分」与
+    // 「P 88次/分」并存，两条数字互相矛盾，而 validate 一条提醒都不给。
+    // 程序不替学生改数字（改了就是编造），只把矛盾指出来让他自己核对。
+    const pulseRaw = String((((r.pe || {}).vitals) || {}).pulse || '').match(/\d+/);
+    if (pulseRaw) {
+      const hr = (buildPE(r) || '').match(/心率\s*(\d+)\s*次\/分/);
+      if (hr && hr[1] !== pulseRaw[0]) {
+        w.push(`【体格检查】心脏听诊写的心率 ${hr[1]} 次/分 与生命体征 P ${pulseRaw[0]} 次/分 不一致，请核对。`);
+      }
+    }
+    // 通用查体（系统默认值）与专科查体互相否定时只提醒、不改正文，见 peConflicts。
+    peConflicts(r).forEach(msg => w.push(msg));
+    // 数值、日期、科室与年龄——这三类不需要看病人就能判断「写错了」
+    checkVitals(r, w);
+    checkDates(r, w);
+    checkDeptAge(r, w);
     if (!((r.diagnosis || {}).confirmed || []).length) w.push('【初步诊断】未填写，可参考"诊断提示"。');
+    else warnDiagnosisOrder(r, w);
     if (!stripTail(r.summary || '')) {
       w.push('【摘要】目前为自动生成的初稿，请核对并润色后再定稿。');
     }
@@ -7240,9 +9131,9 @@ const HINTS = (() => {
     {
       id: 'tb', name: '肺结核',
       depts: ['respiratory', 'general'],
-      must: ['ros:general.nightSweat','ros:general.weightLoss','ros:resp.hemoptysis','pmh:肺结核'],
+      must: ['ros:resp.nightSweat','ros:endocrine.weightLoss','ros:resp.hemoptysis','pmh:肺结核'],
       need: 2,
-      match: ['ros:general.nightSweat', 'ros:general.weightLoss', 'ros:general.fever',
+      match: ['ros:resp.nightSweat', 'ros:endocrine.weightLoss', 'ros:resp.fever',
         'ros:resp.hemoptysis', 'cc:咯血', 'pmh:肺结核'],
       hint: '低热盗汗、消瘦、咳嗽超过2周或咯血，需排除肺结核。',
       note: '可补充：胸片/胸部CT、痰抗酸杆菌涂片+培养、结核菌素试验/γ干扰素释放试验、痰GeneXpert。'
@@ -7355,7 +9246,7 @@ const HINTS = (() => {
       depts: ['surgery', 'emergency', 'general'],
       must: ['pe:abdomen.abdPalpation'],
       need: 2,
-      match: ['cc:转移性右下腹痛', 'ros:general.fever', 'vital:tempUp',
+      match: ['cc:转移性右下腹痛', 'ros:resp.fever', 'vital:tempUp',
         'pev:abdomen.abdPalpation=右下腹压痛、反跳痛', 'pev:abdomen.abdPalpation=全腹压痛、反跳痛，腹肌紧张'],
       hint: '转移性右下腹痛伴右下腹固定压痛/反跳痛，需考虑急性阑尾炎。',
       note: '可补充：血常规、腹部超声或CT、尿常规；育龄女性加做尿妊娠试验。'
@@ -7408,7 +9299,7 @@ const HINTS = (() => {
       depts: ['nephrology', 'general', 'emergency', 'gynecology'],
       must: ['ros:gu.dysuria','pe:abdomen.abdPercussion'],
       need: 2,
-      match: ['ros:gu.dysuria', 'vital:tempUp', 'ros:general.fever',
+      match: ['ros:gu.dysuria', 'vital:tempUp', 'ros:resp.fever',
         'pev:abdomen.abdPercussion=双肾区叩击痛'],
       hint: '尿频尿急尿痛伴发热或肾区叩击痛，需考虑泌尿系感染。',
       note: '可补充：尿常规、尿培养+药敏、血常规、泌尿系超声。'
@@ -7429,7 +9320,7 @@ const HINTS = (() => {
       depts: ['endocrinology', 'general', 'cardiology', 'nephrology', 'neurology'],
       must: ['ros:endocrine.polydipsia','ros:endocrine.polyuriaEndo','pmh:糖尿病'],
       need: 2,
-      match: ['ros:endocrine.polydipsia', 'ros:endocrine.polyuriaEndo', 'ros:general.weightLoss',
+      match: ['ros:endocrine.polydipsia', 'ros:endocrine.polyuriaEndo', 'ros:endocrine.weightLoss',
         'pmh:糖尿病', 'vital:bmiHigh'],
       hint: '多饮多尿多食伴体重下降，需考虑糖尿病。',
       note: '可补充：空腹血糖、HbA1c、OGTT、尿酮体、血脂、眼底及神经病变筛查。'
@@ -7448,7 +9339,7 @@ const HINTS = (() => {
       depts: ['endocrinology', 'cardiology', 'general'],
       must: ['ros:endocrine.heatIntolerance','pe:neck.thyroid'],
       need: 2,
-      match: ['ros:endocrine.heatIntolerance', 'ros:general.weightLoss', 'ros:cardio.palpitation',
+      match: ['ros:endocrine.heatIntolerance', 'ros:endocrine.weightLoss', 'ros:cardio.palpitation',
         'pev:neck.thyroid=甲状腺Ⅰ度肿大', 'pev:neck.thyroid=甲状腺Ⅱ度肿大', 'pev:neck.thyroid=甲状腺Ⅲ度肿大'],
       hint: '怕热多汗、心悸、消瘦伴甲状腺肿大，需考虑甲状腺功能亢进症。',
       note: '可补充：FT3/FT4/TSH、TRAb、甲状腺超声、心电图。'
@@ -7458,7 +9349,7 @@ const HINTS = (() => {
       depts: ['endocrinology', 'general'],
       must: ['ros:endocrine.coldIntolerance','pe:neck.thyroid'],
       need: 2,
-      match: ['ros:endocrine.coldIntolerance', 'ros:general.fatigue', 'ros:general.weightGain',
+      match: ['ros:endocrine.coldIntolerance', 'ros:hemat.fatigue', 'ros:endocrine.weightGain',
         'pev:neck.thyroid=甲状腺Ⅰ度肿大', 'pev:neck.thyroid=甲状腺Ⅱ度肿大'],
       hint: '怕冷、乏力、体重增加、皮肤干燥，需考虑甲状腺功能减退症。',
       note: '可补充：FT3/FT4/TSH、甲状腺抗体、血脂、心电图。'
@@ -7479,7 +9370,7 @@ const HINTS = (() => {
       depts: ['hematology', 'general', 'digestive', 'gynecology', 'pediatrics'],
       must: ['ros:hemat.anemia','pe:skin.color','aux:血红蛋白'],
       need: 1,
-      match: ['ros:hemat.anemia', 'pev:skin.color=皮肤黏膜苍白', 'ros:general.fatigue', 'aux:血红蛋白'],
+      match: ['ros:hemat.anemia', 'pev:skin.color=皮肤黏膜苍白', 'ros:hemat.fatigue', 'aux:血红蛋白'],
       hint: '乏力、面色苍白，需考虑贫血，并进一步明确病因（缺铁性/巨幼细胞性/失血性等）。',
       note: '可补充：血常规+网织红细胞、铁代谢、叶酸/B12、大便隐血、必要时胃肠镜及妇科评估。'
     },
@@ -7510,7 +9401,7 @@ const HINTS = (() => {
       must: ['ros:nervous.weakness','ros:nervous.speech','ros:nervous.numbness','pe:special_neurology.neuroExtra3'],
       need: 2,
       match: ['ros:nervous.weakness', 'ros:nervous.speech', 'ros:nervous.numbness', 'vital:bpUp',
-        'ros:head.headache', 'pmh:脑卒中',
+        'ros:nervous.headache', 'pmh:脑卒中',
         'pev:special_neurology.neuroExtra3=偏瘫', 'pev:special_neurology.neuroExtra3=四肢肌力4级'],
       hint: '突发偏侧肢体无力/麻木、言语不清，需警惕脑卒中。',
       note: '可补充：头颅CT（先除外出血）→MRI/DWI、NIHSS 评分、血糖血脂、心电监测；注意静脉溶栓时间窗。'
@@ -7518,9 +9409,9 @@ const HINTS = (() => {
     {
       id: 'meningitis', name: '中枢神经系统感染',
       depts: ['neurology', 'pediatrics', 'emergency'],
-      must: ['ros:head.headache','pe:neck.neckResist','pe:nervousPE.nerve'],
+      must: ['ros:nervous.headache','pe:neck.neckResist','pe:nervousPE.nerve'],
       need: 2,
-      match: ['vital:tempUp', 'ros:head.headache', 'ros:nervous.seizure',
+      match: ['vital:tempUp', 'ros:nervous.headache', 'ros:nervous.seizure',
         'pev:neck.neckResist=颈抵抗阳性', 'pev:nervousPE.nerve=脑膜刺激征阳性',
         'pev:nervousPE.nerve=病理反射阳性'],
       hint: '发热、头痛、呕吐伴颈抵抗或脑膜刺激征，需考虑中枢神经系统感染。',
@@ -7539,9 +9430,9 @@ const HINTS = (() => {
     {
       id: 'vertigo', name: '眩晕 / 前庭疾病',
       depts: ['neurology', 'general'],
-      must: ['ros:head.vertigo','ros:head.tinnitus'],
+      must: ['ros:nervous.vertigo','ros:nervous.tinnitus'],
       need: 1,
-      match: ['ros:head.vertigo', 'ros:head.dizziness', 'ros:head.tinnitus'],
+      match: ['ros:nervous.vertigo', 'ros:nervous.dizziness', 'ros:nervous.tinnitus'],
       hint: '眩晕伴耳鸣或听力下降，需考虑前庭周围性病变，注意排除中枢性眩晕。',
       note: '可补充：Dix-Hallpike 试验、听力检查、头颅MRI、必要时前庭功能检查。'
     },
@@ -7612,9 +9503,9 @@ const HINTS = (() => {
     {
       id: 'preeclampsia', name: '妊娠期高血压疾病 / 子痫前期',
       depts: ['obstetrics'],
-      must: ['aux:尿蛋白','ros:head.visionBlur','ros:head.headache','ros:head.visualBlur'],
+      must: ['aux:尿蛋白','ros:nervous.visualBlur','ros:nervous.headache','ros:nervous.visualBlur'],
       need: 2,
-      match: ['vital:bpUp', 'ros:head.headache', 'aux:尿蛋白', 'ros:head.visualBlur'],
+      match: ['vital:bpUp', 'ros:nervous.headache', 'aux:尿蛋白', 'ros:nervous.visualBlur'],
       hint: '妊娠20周后血压升高伴蛋白尿或头痛、视物模糊，需警惕子痫前期。',
       note: '可补充：尿蛋白定量、肝肾功能、凝血功能、血小板、胎儿超声及胎心监护。'
     },
@@ -7634,7 +9525,7 @@ const HINTS = (() => {
       depts: ['pediatrics'],
       must: ['age:child','pe:chest.lungAuscultation'],
       need: 3,
-      match: ['vital:tempUp', 'ros:resp.cough', 'ros:resp.hyperpnea', 'ros:resp.dyspnea',
+      match: ['vital:tempUp', 'ros:resp.cough', 'ros:resp.dyspnea',
         'ros:resp.sputum',
         'pev:chest.lungAuscultation=双肺可闻及湿性啰音', 'pev:chest.lungAuscultation=右下肺可闻及湿性啰音'],
       hint: '患儿发热、咳嗽、气促，肺部闻及固定湿啰音，需考虑小儿肺炎。',
@@ -7665,7 +9556,7 @@ const HINTS = (() => {
       depts: ['emergency', 'general', 'respiratory', 'digestive', 'surgery'],
       must: ['vital:tempUp','vital:tempDown','pmh:糖尿病'],
       need: 3,
-      match: ['vital:tempUp', 'vital:tachy', 'vital:tachypnea', 'ros:general.chills',
+      match: ['vital:tempUp', 'vital:tachy', 'vital:tachypnea', 'ros:resp.chills',
         'pev:general.conscious=神志清楚，精神差'],
       hint: '感染灶 + 心率增快、呼吸急促、意识改变，需警惕脓毒症（qSOFA）。',
       note: '可补充：血培养（抗菌药物使用前）、乳酸、血常规+CRP+PCT、器官功能评估、液体复苏评估。'
@@ -7704,6 +9595,14 @@ const HINTS = (() => {
     'abdomen.abdPalpDeep': ['abdomen.abdPalpation'],
     'abdomen.liverPalpation': ['abdomen.abdPalpation'],
     'abdomen.spleenPalpation': ['abdomen.abdPalpation'],
+    // 触诊补充 4 子项（教材《诊断学》第10版腹部触诊书写清单里的胆囊/肾/膀胱/液波震颤）
+    // 同属「腹部触诊」这一大类，阳性同样说明触诊查出了问题
+    'abdomen.gallbladderPalpation': ['abdomen.abdPalpation'],
+    'abdomen.kidneyPalpation': ['abdomen.abdPalpation'],
+    'abdomen.bladderPalpation': ['abdomen.abdPalpation'],
+    'abdomen.fluidThrill': ['abdomen.abdPalpation'],
+    // 振水音是听诊项目（教材归在腹部听诊），映射到 abdAuscultation 而不是触诊
+    'abdomen.succussionSplash': ['abdomen.abdAuscultation'],
     // 神经反射 4 子项 → 聚合父项 nerve
     'nervousPE.tendonReflex': ['nervousPE.nerve'],
     'nervousPE.brudzinski': ['nervousPE.nerve'],
@@ -7856,6 +9755,9 @@ const HINTS = (() => {
 
     (SCHEMA.PE_COMMON || []).forEach(g => {
       g.items.forEach(it => {
+        // 勾选制：这次没查的项不能参与任何记分。取消勾选 ≠ 检查正常，
+        // 它只是「没查」——不写进病历，也不该给出诊断提示。
+        if (SCHEMA.peChecked && !SCHEMA.peChecked(r, g.key, it.key)) return;
         const val = (GENERATOR.peValue ? GENERATOR.peValue(r, g.key, it) : '') || '';
         if (!val) return;
         if (SCHEMA.peValueIsDefault ? SCHEMA.peValueIsDefault(it, val) : (it.default && val === it.default)) return;
@@ -7876,6 +9778,8 @@ const HINTS = (() => {
     const dept = (SCHEMA.DEPARTMENTS || []).find(d => d.key === deptKey);
     ((dept && dept.special) || []).forEach(sp => {
       (((SCHEMA.PE_SPECIAL[sp] || {}).items) || []).forEach(it => {
+        // 同上：专科项默认未勾，没勾就是这次没查，不计分、不提示
+        if (SCHEMA.peChecked && !SCHEMA.peChecked(r, 'special_' + sp, it.key)) return;
         const val = (GENERATOR.peValue ? GENERATOR.peValue(r, 'special_' + sp, it) : '') || '';
         if (!val) return;
         if (SCHEMA.peValueIsDefault ? SCHEMA.peValueIsDefault(it, val) : (it.default && val === it.default)) return;
@@ -8257,7 +10161,7 @@ const APP = (() => {
           placeholder: '58 或 7月 / 3天',
           hint: '成人直接写数字（自动补「岁」）；婴儿写「7月」「3天」这类，不要再加「岁」。'
         })}
-        ${input('民族', 'basic.nationality', { placeholder: '汉族' })}
+        ${input('民族', 'basic.nationality', { placeholder: '汉族', hint: '不填则病历里写「／」。' })}
         ${seg('婚姻', 'basic.marital', SCHEMA.MARITAL)}
         ${input('职业', 'basic.occupation', { placeholder: '退休 / 农民 / 工人…' })}
         ${input('工作单位', 'basic.workUnit', { placeholder: '无 / ××公司' })}
@@ -8272,10 +10176,22 @@ const APP = (() => {
           placeholder: '如：01234567',
           hint: '出院记录的一般情况也会用到。'
         })}
+        ${input('床号', 'basic.bedNo', {
+          placeholder: '如：32 / 12-3',
+          hint: '教材要求每张记录用纸的眉栏（姓名、住院号、科别、床号）都填全；不填则病历里写「／」。'
+        })}
         ${input('入院日期', 'basic.admitDate', { type: 'date' })}
         ${input('记录日期', 'basic.recordDate', { type: 'date' })}
-        ${input('病史陈述者', 'basic.informant', { placeholder: '留空则默认患者本人；儿科写「母亲」' })}
-        ${select('病史可靠程度', 'basic.reliability', SCHEMA.RELIABILITY)}
+        ${input('病史陈述者', 'basic.informant', {
+          placeholder: '如：患者本人；儿科写「母亲」',
+          hint: '14 岁以下留空自动写「家属」（不猜是父亲还是母亲）；成人留空写患者本人姓名。'
+        })}
+        ${/* 加空选项：schema 里 reliability 的默认值已清空（不能替学生判断病史可靠程度），
+             若这里不给空项，下拉框会「看起来选中了可靠」而实际存的是空值。 */ ''}
+        ${select('病史可靠程度', 'basic.reliability', SCHEMA.RELIABILITY, {
+          empty: '未评估',
+          hint: '不选＝没评估，病历里写「／」。'
+        })}
       </div>
 
       <div class="card">
@@ -8339,7 +10255,8 @@ const APP = (() => {
         })}
         ${textarea('一般情况（精神、食欲、睡眠、大小便、体重）', 'hpi.generalCondition', {
           rows: 2,
-          placeholder: '留空则默认：发病以来，精神、食欲、睡眠可，大小便正常，体重无明显变化'
+          placeholder: '如：发病以来精神、食欲、睡眠可，大小便正常，体重无明显变化',
+          hint: '只有现病史其它内容或主诉填了，留空才会自动补这句常规收尾；全空时代码不替你写——那是编造。'
         })}
         ${textarea('其他补充', 'hpi.extra', { rows: 2 })}
       </div>
@@ -8351,18 +10268,31 @@ const APP = (() => {
       const store = R.ros[sys.key] || {};
       return n + sys.symptoms.filter(s => (store[s.key] || {}).checked).length;
     }, 0);
+    // 明确标为阴性的症状数（缺陷1：三态里的「问了且阴性」，与「没问」分开计数）
+    const totalNeg = SCHEMA.ROS.reduce((n, sys) => {
+      const store = R.ros[sys.key] || {};
+      return n + sys.symptoms.filter(s => {
+        const v = store[s.key] || {};
+        return !v.checked && v.negative;
+      }).length;
+    }, 0);
+    const totalSym = SCHEMA.ROS.reduce((n, sys) => n + sys.symptoms.length, 0);
 
     let html = `
       <div class="card sticky-note">
         <div class="ros-head">
           <div>
             <strong>系统回顾</strong>
-            <div class="hint">默认全部为阴性；有症状的点一下变红，即记为阳性。</div>
+            <div class="hint">${/* 旧文案「默认全部为阴性」已经不成立：没勾不等于阴性。
+                  现在必须明说「不点就不写」，否则用户会以为留空也没关系（其实会写「／」）。 */ ''}
+              问过且没有的症状，点一下变<b>灰</b>记为阴性；有症状的点一下变<b>红</b>记为阳性。
+              <b>没点过 = 没问 = 病历里一个字都不写。</b>已标阴性 ${totalNeg}/${totalSym} 项。</div>
           </div>
           <div class="ros-count">已选阳性 <b>${totalPos}</b> 项</div>
         </div>
         <div class="btn-row">
           <button class="btn btn-ghost" data-act="rosAllNegative">全部标记为阴性</button>
+          <button class="btn btn-ghost" data-act="rosClearAll">全部清空为未问</button>
           <button class="btn btn-ghost" data-act="rosExpandAll">展开/收起全部</button>
         </div>
         <div class="ros-jump">
@@ -8380,11 +10310,22 @@ const APP = (() => {
     SCHEMA.ROS.forEach(sys => {
       const store = R.ros[sys.key] || {};
       const posCount = sys.symptoms.filter(s => (store[s.key] || {}).checked).length;
+      const negCount = sys.symptoms.filter(s => {
+        const v = store[s.key] || {};
+        return !v.checked && v.negative;
+      }).length;
       const chips = sys.symptoms.map(sym => {
         const v = store[sym.key] || {};
-        const on = v.checked ? ' on' : '';
-        return `<button type="button" class="chip chip-sym${on}" data-ros="${sys.key}" data-sym="${sym.key}">
-          ${esc(sym.label)}${v.checked ? ' ✓' : ''}
+        // 三态样式：阳性（红，复用既有 .chip-sym.on）、阴性（灰，行内样式）、未问（默认白）
+        // 阴性态的样式写成行内是有意的：style.css 不归本文件改，
+        // 不新造 .neg 类名，免得与其他人正在改的 CSS 撞车（撞了就是"点了没反应"的死按钮）。
+        const cls = v.checked ? ' on' : '';
+        const negStyle = (!v.checked && v.negative)
+          ? ' style="background:var(--gray-2);border-color:var(--gray-4);color:var(--gray-5);text-decoration:line-through;"'
+          : '';
+        const mark = v.checked ? ' ✓' : (v.negative ? ' −' : '');
+        return `<button type="button" class="chip chip-sym${cls}"${negStyle} data-ros="${sys.key}" data-sym="${sym.key}">
+          ${esc(sym.label)}${mark}
         </button>`;
       }).join('');
       // 默认展开含阳性项的系统，其余收起（避免一屏全是标题）
@@ -8392,7 +10333,11 @@ const APP = (() => {
         <summary>
           <span>${esc(sys.name)}</span>
           ${posCount ? `<span class="badge-pos">${posCount}</span>` : ''}
+          ${negCount ? `<span class="tag-off" data-negcount="${sys.key}">阴性 ${negCount}</span>` : ''}
         </summary>
+        <div class="btn-row">
+          <button class="btn btn-ghost btn-sm" data-rosneg="${sys.key}">本系统剩余项全部标为阴性</button>
+        </div>
         <div class="chips">${chips}</div>
         <div class="ros-detail" data-ros-detail="${sys.key}"></div>
       </details>`;
@@ -8426,7 +10371,12 @@ const APP = (() => {
     return `
       <div class="card">
         <div class="card-title">平素健康状况</div>
-        ${seg('健康状况', 'pmh.health', ['良好', '一般', '较差'])}
+        ${/* 原来 seg 没有空选项，一进页面就默认选中「良好」，于是即便学生没问，
+             病历也会生成「既往健康状况：平素良好」。加「未问」空选项后，
+             不选就是没问，病历里写「／」而不是替学生下结论。 */ ''}
+        ${seg('健康状况', 'pmh.health', [{ value: '', text: '未问' }, '良好', '一般', '较差'], {
+          hint: '不选＝没问过，病历里写「／」；选了才写「平素良好」等。'
+        })}
       </div>
 
       <div class="card">
@@ -8469,7 +10419,11 @@ const APP = (() => {
 
       <div class="card">
         <div class="card-title">过敏史</div>
-        ${seg('有无过敏史', 'pmh.allergy', ['无', '有'])}
+        ${/* 同 pmh.health：原来只有「无/有」两态，默认停在「无」，
+             等于工具替学生否认了过敏史。加空选项表示「没问」。 */ ''}
+        ${seg('有无过敏史', 'pmh.allergy', [{ value: '', text: '未问' }, '无', '有'], {
+          hint: '不选＝没问过，病历里写「／」；点「无」才会写成「否认食物、药物过敏史」。'
+        })}
         ${p.allergy === '有' ? `
           ${checks('过敏原', 'pmh.allergenChecks', SCHEMA.ALLERGENS)}
           ${input('其他过敏原', 'pmh.allergenOther')}
@@ -8491,17 +10445,26 @@ const APP = (() => {
   }
 
   function renderPersonal() {
+    // 母孕史/出生史/喂养史/生长发育史是儿科病历的项目。成人默认收起，
+    // 免得学生填了半天才发现这些东西根本不该出现在成人病历里；
+    // 老存档里已有内容时自动展开，不能让既有记录看不见。
+    const p = R.personal || {};
+    const hasGrowth = ['maternal', 'birth', 'feeding', 'growth'].some(k => String(p[k] || '').trim());
+    const ageNum = Number(String(R.basic.age || '').match(/\d+/));
+    const isChild = Number.isFinite(ageNum) && ageNum > 0 && ageNum < 14;
+    const growthOpen = hasGrowth || isChild;
     return `
-      <div class="card">
-        <div class="card-title">出生与成长 <span class="muted">儿科 / 妇产科必填</span></div>
+      <details class="card mini-details"${growthOpen ? ' open' : ''}>
+        <summary>出生与成长 <span class="muted">儿科填写，成人一般不写</span></summary>
         ${textarea('母孕史', 'personal.maternal', {
           rows: 2,
           placeholder: '如：母孕期体健，否认重大感染病史及特殊服药史，否认毒物、放射线接触史',
-          hint: '母亲怀孕期间的健康与用药情况。成人病历可留空。'
+          hint: '母亲怀孕期间的健康与用药情况。成人病历留空，病历里不会出现这一行。'
         })}
         ${textarea('出生史', 'personal.birth', {
           rows: 2,
-          placeholder: '如：G2P2，足月剖宫产，出生体重4.2kg，无产伤、窒息史'
+          placeholder: '如：G2P2，足月剖宫产，出生体重4.2kg，无产伤、窒息史',
+          hint: '出生方式、出生体重、有无产伤或窒息。成人留空即可。'
         })}
         ${textarea('喂养史', 'personal.feeding', {
           rows: 2,
@@ -8513,7 +10476,7 @@ const APP = (() => {
           placeholder: '如：3个月会抬头，6个月会坐，生长发育与正常同龄儿相同',
           hint: '儿科病历要求写明与同龄儿的比较。成人可留空。'
         })}
-      </div>
+      </details>
 
       <div class="card">
         <div class="card-title">居住与接触</div>
@@ -8523,11 +10486,16 @@ const APP = (() => {
 
       <div class="card">
         <div class="card-title">嗜好</div>
-        ${seg('吸烟', 'personal.smoking', ['无', '有', '已戒'])}
+        ${/* 加「未问」空选项：原默认停在「无」，空记录会凭空输出「吸烟史：无」。 */ ''}
+        ${seg('吸烟', 'personal.smoking', [{ value: '', text: '未问' }, '无', '有', '已戒'], {
+          hint: '不选＝没问过，病历里写「／」。'
+        })}
         ${input('吸烟情况', 'personal.smokingAmount', {
           placeholder: '如：吸烟30年，每日约20支，未戒烟'
         })}
-        ${seg('饮酒', 'personal.drinking', ['无', '有', '已戒'])}
+        ${seg('饮酒', 'personal.drinking', [{ value: '', text: '未问' }, '无', '有', '已戒'], {
+          hint: '不选＝没问过，病历里写「／」。'
+        })}
         ${input('饮酒情况', 'personal.drinkingAmount', {
           placeholder: '如：饮白酒约2两/日，已戒酒5年'
         })}
@@ -8535,6 +10503,18 @@ const APP = (() => {
 
       <div class="card">
         <div class="card-title">接触史</div>
+        ${/* 《诊断学》第10版 个人史：「职业与工作条件及有无工业毒物、粉尘、
+             放射性物质接触史，有无冶游史」——这两项教材点名要求，此前全项目缺失。 */ ''}
+        ${textarea('职业与工作条件', 'personal.occupationEnv', {
+          rows: 2,
+          placeholder: '如：从事煤矿井下作业12年，长期接触粉尘；否认放射性物质接触史',
+          hint: '教材要求记录工作环境及有无工业毒物、粉尘、放射性物质接触史。与「一般项目」里的职业名称不同；不填则病历里写「／」。'
+        })}
+        ${textarea('冶游史', 'personal.sexualHistory', {
+          rows: 2,
+          placeholder: '如：否认冶游史',
+          hint: '冶游史即不洁性接触史。敏感项，不填则病历里写「／」，工具不会替你写「否认」。'
+        })}
         ${textarea('毒物、粉尘、放射性物质接触史', 'personal.drugs', {
           rows: 2, placeholder: '如：否认毒物、粉尘及放射性物质接触史'
         })}
@@ -8550,9 +10530,20 @@ const APP = (() => {
     return `
       <div class="card">
         <div class="card-title">婚姻史</div>
-        ${seg('婚姻状况', 'marriage.status', SCHEMA.MARITAL)}
+        ${/* 缺陷2第3条：婚姻史以前没填就整节消失，validate 里也没有任何检查项，
+              属于完全静默的丢失。schema 的 marriage.status 本来默认就是 ''，
+              但 seg 没有空选项时界面会"看起来"一个都没选中，用户以为选过了。
+              加「未填」空选项，选中态与数据一致，点一下也能主动清空。 */ ''}
+        ${seg('婚姻状况', 'marriage.status', [{ value: '', text: '未填' }, ...SCHEMA.MARITAL], {
+          hint: '不选＝没问过，病历这一节写「／」，同时在质控提醒里提示。'
+        })}
         ${input('结婚年龄', 'marriage.age', { type: 'number', inputmode: 'numeric', placeholder: '25' })}
         ${input('配偶健康状况', 'marriage.spouseHealth', { placeholder: '如：配偶体健' })}
+        ${input('性生活情况', 'marriage.sexLife', {
+          placeholder: '如：正常',
+          hint: '《诊断学》婚姻史要求记录性生活情况与夫妻关系；属于隐私，不填就不会写进病历。'
+        })}
+        ${input('夫妻关系', 'marriage.relation', { placeholder: '如：和睦' })}
       </div>
 
       ${isFemale ? `
@@ -8576,26 +10567,46 @@ const APP = (() => {
             ${input('经期（天）', 'menstruation.duration', { type: 'number', inputmode: 'numeric' })}
             ${input('经量', 'menstruation.quantity', { placeholder: '中等' })}
           </div>
+          ${/* 《诊断学》第10版 月经史：「并记录月经量、颜色，有无血块、痛经、白带等情况」。
+               经量此前已有，颜色/血块/白带三项缺失，采集不到也就写不出来。 */ ''}
+          <div class="row2">
+            ${input('经血颜色', 'menstruation.color', { placeholder: '暗红' })}
+            ${input('血块', 'menstruation.clot', { placeholder: '无血块' })}
+          </div>
+          ${input('白带', 'menstruation.leukorrhea', { placeholder: '量中，色白，无异味' })}
           <div class="row2">
             ${input('绝经年龄', 'menstruation.menopauseAge', { type: 'number', inputmode: 'numeric' })}
             ${input('末次月经', 'menstruation.lmp', { placeholder: '2026-09-28' })}
           </div>
-          ${seg('痛经', 'menstruation.dysmenorrhea', ['无', '有'])}
+          ${/* 原来「痛经」只有无/有两态且默认「无」，空记录会凭空输出「无痛经。」。
+               加「未问」表示没问过，此时病历里不写痛经。 */ ''}
+          ${seg('痛经', 'menstruation.dysmenorrhea', [{ value: '', text: '未问' }, '无', '有'], {
+            hint: '不选＝没问过，病历里不出现「痛经」字样。'
+          })}
         </details>
       </div>
 
       <div class="card">
         <div class="card-title">生育史</div>
+        <div class="hint">按《诊断学》要求写成「足月分娩数-早产数-流产或人流数-存活数」，四项填任意一项即用此格式；一项都不填则回退到「孕次/产次」写法。</div>
         <div class="row2">
-          ${input('孕次', 'childbirth.gravida', { type: 'number', inputmode: 'numeric' })}
-          ${input('产次', 'childbirth.para', { type: 'number', inputmode: 'numeric' })}
+          ${input('足月分娩数', 'childbirth.fullTerm', { type: 'number', inputmode: 'numeric', placeholder: '1' })}
+          ${input('早产数', 'childbirth.premature', { type: 'number', inputmode: 'numeric', placeholder: '0' })}
         </div>
         <div class="row2">
-          ${input('流产次数', 'childbirth.abortion', { type: 'number', inputmode: 'numeric' })}
+          ${input('流产或人流数', 'childbirth.abortion', { type: 'number', inputmode: 'numeric', placeholder: '0' })}
+          ${input('存活数', 'childbirth.alive', { type: 'number', inputmode: 'numeric', placeholder: '1' })}
+        </div>
+        <details class="mini-details">
+          <summary>其他生育信息</summary>
+          <div class="row2">
+            ${input('孕次', 'childbirth.gravida', { type: 'number', inputmode: 'numeric' })}
+            ${input('产次', 'childbirth.para', { type: 'number', inputmode: 'numeric' })}
+          </div>
           ${input('末次分娩', 'childbirth.lastBirth', { placeholder: '2020年顺产一子' })}
-        </div>
-        ${textarea('分娩及子女情况', 'childbirth.details', { rows: 2, placeholder: '如：顺产1子，体健' })}
-        ${input('避孕方式', 'childbirth.contraception', { placeholder: '如：宫内节育器 / 无' })}
+          ${textarea('分娩及子女情况', 'childbirth.details', { rows: 2, placeholder: '如：顺产1子，体健' })}
+        </details>
+        ${input('避孕措施', 'childbirth.contraception', { placeholder: '如：宫内节育器 / 无' })}
       </div>
       ` : `
       <div class="card">
@@ -8615,19 +10626,24 @@ const APP = (() => {
         <div class="card-title">家族史</div>
         ${checks('家族中患有的疾病（可多选）', 'family.diseaseChecks', SCHEMA.FAMILY_DISEASES)}
         ${textarea('父母、兄弟姐妹健康状况', 'family.deceased', {
-          rows: 2, placeholder: '如：父母健在，兄弟1人均体健'
+          rows: 2, placeholder: '如：父母健在，兄弟1人均体健；如已死亡，写死亡原因及年龄'
         })}
         ${textarea('与本病相似的病情', 'family.similarDisease', {
           rows: 2,
-          placeholder: '留空则按上面的勾选写，没有类似病情写「家族中无类似疾病患者」',
-          hint: '评分表第2页家族史「与本病相似的病情」2.5 分。手写内容优先于勾选。'
+          placeholder: '如：父亲患高血压，母亲患2型糖尿病；或写「家族中无类似疾病患者」',
+          hint: '评分表第2页家族史「与本病相似的病情」2.5 分。手写内容优先于勾选；全空则病历里写「家族中类似疾病史：／」。'
+        })}
+        ${textarea('家族传染病史', 'family.infectionHistory', {
+          rows: 2,
+          placeholder: '如：否认结核、肝炎、性病等传染性疾病史',
+          hint: '《诊断学》家族史三个问题之一，与遗传性疾病分开记录。留空则写「／」，不替你写「否认」。'
         })}
         ${textarea('两系三代遗传性疾病史', 'family.threeGeneration', {
           rows: 2,
           placeholder: '留空则默认：两系三代否认遗传性疾病史',
           hint: '评分表第2页家族史「两系三代遗传性疾病史」2.5 分。'
         })}
-        ${textarea('其他补充（遗传病、传染病、死亡原因）', 'family.other', {
+        ${textarea('其他补充', 'family.other', {
           rows: 2, placeholder: '如：否认家族性遗传病及传染病史'
         })}
       </div>
@@ -8639,6 +10655,14 @@ const APP = (() => {
     const dept = SCHEMA.DEPARTMENTS.find(d => d.key === deptKey) || SCHEMA.DEPARTMENTS[0];
 
     let html = `
+      <div class="card sticky-note">
+        <div><strong>体格检查</strong></div>
+        <div class="hint">
+          <b>勾了才算查过。</b>没勾的项目＝本次没做，病历里不会出现，也不会替你写「正常」。
+          常规问诊会做的项目，可以用每张卡片里的「全选」，或点「常用描述」直接选一句（会自动勾上）。
+          生命体征没填的项，病历里写「／」。
+        </div>
+      </div>
       <div class="card">
         <div class="card-title">生命体征</div>
         <div class="grid3">
@@ -8669,40 +10693,15 @@ const APP = (() => {
     SCHEMA.PE_COMMON.forEach(group => {
       const items = group.items.filter(it => !it.depts || it.depts.includes(deptKey));
       if (!items.length) return;
-      const itemHtml = items.map(it => {
-        const cur = R.pe[group.key] && R.pe[group.key][it.key];
-        const val = cur !== undefined && cur !== null && String(cur) !== '' ? String(cur) : '';
-        const shown = val || it.default || '';
-        // 三种状态必须分开：
-        //   filled  —— 用户填过
-        //   default —— 没填，但 schema 有默认正常描述，留空会自动写进病历
-        //   blank   —— 没填也没默认（子项/实查项），必须自己填，否则病历里没这段
-        const state = val ? 'filled' : (it.default ? 'default' : 'blank');
-        const badge = state === 'filled'
-          ? '<span class="tag-done">已填</span>'
-          : (state === 'default'
-            ? '<span class="tag-auto">系统默认</span>'
-            : '<span class="tag-req">需填</span>');
-        const quick = (it.options || []).map(o =>
-          `<button type="button" class="chip small${shown === o ? ' on' : ''}"
-            data-pequick="${group.key}" data-pekey="${it.key}" data-val="${esc(o)}">${esc(o)}</button>`
-        ).join('');
-        return `<div class="pe-item is-${state}">
-          <div class="pe-label">${esc(it.label)}${badge}</div>
-          <textarea rows="2" class="pe-text" data-path="pe.${group.key}.${it.key}"
-            placeholder="${esc(it.default || '填写检查所见')}">${esc(shown)}</textarea>
-          ${state === 'default' ? '<div class="hint">自动补的正常描述，留空也能生成；核对过再改一个字即算已填。</div>' : ''}
-          ${state === 'blank' ? '<div class="hint">这一项没有默认值，留空则病历里不会出现这句。</div>' : ''}
-          <details class="pe-opts">
-            <summary>常用描述</summary>
-            <div class="chips">${quick}</div>
-          </details>
-        </div>`;
-      }).join('');
-      html += `<details class="card pe-group" id="pe-${group.key}" ${R.pe[group.key] && Object.values(R.pe[group.key] || {}).some(v => v) ? 'open' : ''}>
-        <summary>${esc(group.name)}</summary>
-        <div class="pe-body">${itemHtml}</div>
-      </details>`;
+      const itemHtml = items.map(it => peItemHtml(group.key, group.key, it)).join('');
+      html += peGroupCard({
+        id: `pe-${group.key}`,
+        name: group.name,
+        groupKey: group.key,
+        items,
+        itemHtml,
+        extra: ''
+      });
     });
 
     // 专科查体
@@ -8710,39 +10709,97 @@ const APP = (() => {
       const sp = SCHEMA.PE_SPECIAL[spKey];
       if (!sp) return;
       const storeKey = 'special_' + spKey;
-      const itemHtml = sp.items.map(it => {
-        const cur = (R.pe[storeKey] || {})[it.key];
-        const val = cur !== undefined && cur !== null && String(cur) !== '' ? String(cur) : '';
-        const shown = val || it.default || '';
-        const state = val ? 'filled' : (it.default ? 'default' : 'blank');
-        const badge = state === 'filled'
-          ? '<span class="tag-done">已填</span>'
-          : (state === 'default'
-            ? '<span class="tag-auto">系统默认</span>'
-            : '<span class="tag-req">需填</span>');
-        const quick = (it.options || []).map(o =>
-          `<button type="button" class="chip small${shown === o ? ' on' : ''}"
-            data-pequick="${storeKey}" data-pekey="${it.key}" data-val="${esc(o)}">${esc(o)}</button>`
-        ).join('');
-        return `<div class="pe-item is-${state}">
-          <div class="pe-label">${esc(it.label)}${badge}</div>
-          <textarea rows="2" class="pe-text" data-path="pe.${storeKey}.${it.key}"
-            placeholder="${esc(it.default || '填写检查所见')}">${esc(shown)}</textarea>
-          ${state === 'default' ? '<div class="hint">自动补的正常描述，留空也能生成；核对过再改一个字即算已填。</div>' : ''}
-          ${state === 'blank' ? '<div class="hint">这一项没有默认值，留空则病历里不会出现这句。</div>' : ''}
-          <details class="pe-opts">
-            <summary>常用描述</summary>
-            <div class="chips">${quick}</div>
-          </details>
-        </div>`;
-      }).join('');
-      html += `<details class="card pe-group pe-special" id="pe-special_${spKey}">
-        <summary>${esc(sp.name)}<span class="tag-dept">本科室</span></summary>
-        <div class="pe-body">${itemHtml}</div>
-      </details>`;
+      const itemHtml = sp.items.map(it => peItemHtml(storeKey, storeKey, it)).join('');
+      html += peGroupCard({
+        id: `pe-special_${spKey}`,
+        name: sp.name,
+        groupKey: storeKey,
+        items: sp.items,
+        itemHtml,
+        extra: '<span class="tag-dept">本科室</span>',
+        cls: ' pe-special'
+      });
     });
 
     return html;
+  }
+
+  /**
+   * 勾选制的核心交互文案：一个查体项要不要写进病历，由学生说了算。
+   *
+   * ⚠️ 本轮语义变更（缺陷1第4条）：**通用查体也改成默认不勾。**
+   * 旧设计是「通用查体每个病人都做 → 默认勾上，留空自动补正常描述」，
+   * 结果空记录直接生成「发育正常，营养中等，神志清楚…双肺呼吸音清…腹平软」整段正常描述，
+   * 学生一眼都没看过病人，工具已经替他写完了查体。
+   * 现在统一规则：**勾了才算查过，没勾＝本次没做＝病历里不出现**。
+   * 判定逻辑的唯一实现是 SCHEMA.peChecked（那里也已删掉「有默认描述就算已勾」那一级），
+   * 这里只负责呈现。
+   */
+  function peItemHtml(groupKey, containerKey, it) {
+    const cur = (R.pe[containerKey] || {})[it.key];
+    const val = cur !== undefined && cur !== null && String(cur) !== '' ? String(cur) : '';
+    const checked = SCHEMA.peChecked(R, groupKey, it.key);
+    const normalText = SCHEMA.peNormalText(it);
+    // 未勾选时**不预填**正常描述，输入框留空，只在 placeholder 里给提示。
+    // 原来无条件预填（shown = val || normalText）会造成两个问题：
+    //   ①界面上看着像"已经写了查体结果"，其实记录是空的；
+    //   ②学生误以为空白框里那行字是自己写的，直接生成。
+    // 已经手写的值（val）无论勾没勾都照常显示，不能把用户写过的东西藏起来。
+    const shown = val || (checked ? normalText : '');
+    // 四种状态：
+    //   off     —— 未勾选，本次没查，病历里完全不出现这一项
+    //   filled  —— 勾了且自己填了
+    //   default —— 勾了但没填，生成时自动补规范正常描述
+    //   blank   —— 勾了但没默认也没正常描述，必须自己填
+    const state = !checked ? 'off' : (val ? 'filled' : (normalText ? 'default' : 'blank'));
+    const badge = state === 'off'
+      ? '<span class="tag-off">未查</span>'
+      : (state === 'filled'
+        ? '<span class="tag-done">已填</span>'
+        : (state === 'default'
+          ? '<span class="tag-auto">系统默认</span>'
+          : '<span class="tag-req">需填</span>'));
+    const quick = (it.options || []).map(o =>
+      `<button type="button" class="chip small${shown === o ? ' on' : ''}"
+        data-pequick="${containerKey}" data-pekey="${it.key}" data-val="${esc(o)}">${esc(o)}</button>`
+    ).join('');
+    const hint = state === 'off'
+      ? `未勾选：本次没做这一项，病历里不会出现「${esc(it.label)}」。`
+      : (state === 'default'
+        ? '已勾选但没填具体所见，生成时自动写这句正常描述。'
+        : (state === 'blank'
+          ? '这一项没有默认描述，留空则病历里不会出现这句。'
+          : ''));    return `<div class="pe-item is-${state}" data-pe-group="${esc(groupKey)}" data-pe-key="${esc(it.key)}">
+      <div class="pe-label">
+        <label class="pe-check"><input type="checkbox" data-pecheck="${esc(groupKey)}" data-pekey="${esc(it.key)}"${checked ? ' checked' : ''}><span>本次检查</span></label>
+        ${esc(it.label)}${badge}
+      </div>
+      <div class="pe-input">
+        <textarea rows="2" class="pe-text" data-path="pe.${containerKey}.${it.key}"
+          placeholder="${esc(normalText || '填写检查所见')}">${esc(shown)}</textarea>
+        ${hint ? `<div class="hint pe-hint">${hint}</div>` : ''}
+        <details class="pe-opts">
+          <summary>常用描述</summary>
+          <div class="chips">${quick}</div>
+        </details>
+      </div>
+    </div>`;
+  }
+
+  /** 一张查体卡片：标题 + 「已勾 N/M」+ 全选/全不选 + 条目列表 */
+  function peGroupCard(opt) {
+    const items = opt.items || [];
+    const on = items.filter(it => SCHEMA.peChecked(R, opt.groupKey, it.key)).length;
+    const store = (R.pe[opt.containerKey || opt.groupKey] || {});
+    const open = Object.values(store).some(v => v) || (opt.cls || '').includes('pe-special');
+    return `<details class="card pe-group${opt.cls || ''}" id="${opt.id}" ${open ? 'open' : ''}>
+      <summary>${esc(opt.name)}${opt.extra || ''}<span class="pe-count" data-count-for="${esc(opt.groupKey)}">已勾 ${on}/${items.length}</span></summary>
+      <div class="btn-row pe-tools">
+        <button type="button" class="btn btn-ghost btn-sm" data-pall="1" data-pgroup="${esc(opt.groupKey)}">全选</button>
+        <button type="button" class="btn btn-ghost btn-sm" data-pall="0" data-pgroup="${esc(opt.groupKey)}">全不选</button>
+      </div>
+      <div class="pe-body">${opt.itemHtml}</div>
+    </details>`;
   }
 
   /**
@@ -8795,21 +10852,43 @@ const APP = (() => {
     `;
   }
 
+  /**
+   * 辅助检查录入。
+   *
+   * 《诊断学》第10版 辅助检查：「应分类按检查时间顺序记录检查结果，如系在其他
+   * 医疗机构所做检查，应当写明该机构名称及检查号」。原先每项只有「项目名 + 结果」
+   * 两个输入框，外院机构名和检查号无处可填，日期也没有，生成时只能按录入顺序排。
+   * 本轮每项补 date / hospital / no 三个输入框。
+   *
+   * 布局注意：`.aux-row` 在 style.css 里是 flex 且写了 `input:first-child` /
+   * `input:nth-child(2)` 的宽度比例，往里平铺新输入框会打乱这两条规则、412px 下溢出。
+   * 所以新增的输入框一律放到 `.aux-row` 之外的 `.row2` 或独立行里，不动既有结构。
+   */
   function renderAux() {
     const items = (R.auxiliary && R.auxiliary.items) || [{ name: '', result: '' }];
     const rows = items.map((it, i) => `
-      <div class="aux-row">
-        <input type="text" data-aux="name" data-idx="${i}" value="${esc(it.name || '')}"
-          placeholder="检查项目，如：血常规">
-        <input type="text" data-aux="result" data-idx="${i}" value="${esc(it.result || '')}"
-          placeholder="结果">
-        <button type="button" class="btn-del" data-auxdel="${i}">×</button>
+      <div class="aux-item">
+        <div class="aux-row">
+          <input type="text" data-aux="name" data-idx="${i}" value="${esc(it.name || '')}"
+            placeholder="检查项目，如：血常规">
+          <input type="text" data-aux="result" data-idx="${i}" value="${esc(it.result || '')}"
+            placeholder="结果">
+          <button type="button" class="btn-del" data-auxdel="${i}">×</button>
+        </div>
+        <div class="row2">
+          <input type="date" data-aux="date" data-idx="${i}" value="${esc(it.date || '')}"
+            title="检查日期：填了会按日期升序排列">
+          <input type="text" data-aux="hospital" data-idx="${i}" value="${esc(it.hospital || '')}"
+            placeholder="检查机构（外院必填）">
+        </div>
+        <input type="text" data-aux="no" data-idx="${i}" value="${esc(it.no || '')}"
+          placeholder="检查号（外院填写）">
       </div>
     `).join('');
     return `
       <div class="card">
         <div class="card-title">辅助检查</div>
-        <div class="hint">填写本次就诊已有的检查结果；没有可留空，生成时显示"暂缺"。</div>
+        <div class="hint">填写本次就诊已有的检查结果；没有就留空，生成时这一节写「暂缺」。填了日期会按时间先后排列，在外院做的检查请写明机构名称与检查号。</div>
         <div id="auxList">${rows}</div>
         <button class="btn btn-ghost" data-act="addAux">+ 添加一项</button>
       </div>
@@ -8857,11 +10936,16 @@ const APP = (() => {
 
       <div class="card">
         <div class="card-title">初步诊断</div>
+        <div class="hint">按主次顺序排列：主要疾病在前，次要疾病在后，并发症列于有关主病之后，伴发病最后。一时难以确定的在病名后加「？」，如「发热待查，肠结核？」。</div>
         <div id="diagList">${diagHtml || '<div class="empty">尚未添加诊断</div>'}</div>
         <div class="diag-add">
           <input type="text" id="diagNew" placeholder="输入诊断后点添加">
           <button class="btn" data-act="addDiag">添加</button>
         </div>
+        ${input('医师签名', 'diagnosis.signature', {
+          placeholder: '签全名，如：李四',
+          hint: '入院记录要求书写者在初步诊断右下角签全名；留空则病历里不出现签名行。'
+        })}
       </div>
 
       <div class="card">
@@ -9202,16 +11286,19 @@ const APP = (() => {
     const mustMissing = mustList.filter(isBlank).map(p => NAME[p] || p);
     const shouldMissing = shouldList.filter(isBlank).map(p => NAME[p] || p);
 
-    // 查体里有多少项还是「系统默认」没核对
+    // 查体里有多少项还没勾（没勾 = 本次没查 = 病历里不出现）
+    //
+    // ⚠️ 语义变更（本轮）：这里原来统计「没写字」的项，并声称它们「用系统默认」
+    // 自动补一句正常描述。现在通用查体默认全不勾（缺陷1），留空 ≠ 默认正常，
+    // 而是「没查、不写」。所以统计口径必须改成「没勾」，否则会继续误导学生。
     const deptKey = R.basic.department || 'general';
     const dept = SCHEMA.DEPARTMENTS.find(d => d.key === deptKey) || SCHEMA.DEPARTMENTS[0];
     let peTotal = 0;
-    let peDefault = 0;
+    let peUnchecked = 0;
     SCHEMA.PE_COMMON.forEach(g => {
       g.items.filter(it => !it.depts || it.depts.includes(deptKey)).forEach(it => {
         peTotal++;
-        const cur = (R.pe[g.key] || {})[it.key];
-        if (cur === undefined || cur === null || String(cur).trim() === '') peDefault++;
+        if (!SCHEMA.peChecked(R, g.key, it.key)) peUnchecked++;
       });
     });
     (dept.special || []).forEach(spKey => {
@@ -9219,8 +11306,7 @@ const APP = (() => {
       if (!sp) return;
       sp.items.forEach(it => {
         peTotal++;
-        const cur = (R.pe['special_' + spKey] || {})[it.key];
-        if (cur === undefined || cur === null || String(cur).trim() === '') peDefault++;
+        if (!SCHEMA.peChecked(R, 'special_' + spKey, it.key)) peUnchecked++;
       });
     });
 
@@ -9248,11 +11334,11 @@ const APP = (() => {
         </div>
 
         <div class="fs-row">
-          <div class="fs-head"><span class="tag-auto">可留空</span> 查体 ${peTotal} 项中 ${peDefault} 项用系统默认</div>
+          <div class="fs-head"><span class="tag-auto">可留空</span> 查体 ${peTotal} 项中 ${peTotal - peUnchecked} 项已勾选</div>
           <div class="hint">
-            这些项目留空时，工具会自动补一句常规的正常描述写进病历（例如「腹平软，全腹无压痛」）。
-            <b>你只需要改掉本例异常的那几项</b>，其余保持默认即可。
-            生成页的「评分自查」会把用到默认值的项单独标出来，方便核对。
+            <b>没勾的项 = 本次没查</b>，病历里一个字都不会写，工具不会替你补「未见异常」。
+            勾一项、写一句所见（或点「常用描述」选一个），病历里才会出现这一项。
+            生命体征同理：填了才写，没填就写「／」。
           </div>
         </div>
       </div>
@@ -9469,6 +11555,13 @@ const APP = (() => {
     return Number.isInteger(v) ? String(v) : v.toFixed(1);
   }
 
+  /** 步骤键 → 索引。认不出来（空串、旧键、改过步骤）一律回 0，不让页面白屏 */
+  function stepIndexOf(key) {
+    if (!key) return 0;
+    const i = STEPS.findIndex(s => s.key === key);
+    return i < 0 ? 0 : i;
+  }
+
   /** 跳到某个步骤（保持 render 的唯一步骤入口） */
   function gotoStep(key) {
     const i = STEPS.findIndex(s => s.key === key);
@@ -9535,6 +11628,15 @@ const APP = (() => {
 
     // 实时预览
     updateLivePreviews();
+
+    // 记住停在哪一步。刷新、切走再回来都会回到原处，
+    // 不必每次都从「基本情况」重新点 7 下。
+    // 生成页不记——它只是输出，回到编辑流程更有用。
+    if (cur.key !== 'output' && settings.lastStep !== cur.key) {
+      settings.lastStep = cur.key;
+      saveSettings();
+    }
+
     window.scrollTo({ top: 0, behavior: 'instant' });
   }
 
@@ -9572,41 +11674,71 @@ const APP = (() => {
   function refreshPeBadge(el) {
     const item = el.closest('.pe-item');
     if (!item) return;
-    const val = String(el.value || '').trim();
-    const placeholder = el.getAttribute('placeholder') || '';
-    const hasDefault = placeholder && placeholder !== '填写检查所见';
-    const state = val ? 'filled' : (hasDefault ? 'default' : 'blank');
-    item.classList.remove('is-filled', 'is-default', 'is-blank');
+    const groupKey = item.dataset.peGroup || '';
+    const itemKey = item.dataset.peKey || '';
+    if (!groupKey || !itemKey || !SCHEMA.findPEItem) return;
+    const it = SCHEMA.findPEItem(groupKey + '.' + itemKey);
+    if (!it) return;
+    // 读记录值，不读 el.value ——
+    // textarea 里预填着正常描述（shown = val || normalText），拿它当「用户填了」
+    // 会把「勾了但没填」错判成绿色「已填」，而整页重绘后又变回「系统默认」，
+    // 同一份数据两种显示。记录值是唯一真相。
+    const containerKey = el.dataset.path
+      ? el.dataset.path.split('.')[1]
+      : groupKey;
+    const raw = (R.pe[containerKey] || {})[itemKey];
+    const val = raw !== undefined && raw !== null ? String(raw).trim() : '';
+    const checked = SCHEMA.peChecked(R, groupKey, itemKey);
+    const normalText = SCHEMA.peNormalText(it);
+    const state = !checked ? 'off' : (val ? 'filled' : (normalText ? 'default' : 'blank'));
+    item.classList.remove('is-filled', 'is-default', 'is-blank', 'is-off');
     item.classList.add('is-' + state);
+
+    // 勾选框本身也要跟上（「全选 / 全不选」是整组改状态，不经过单个 input 事件，
+    // 不在这里同步的话，记录改了、框还画着旧的）
+    const cb = item.querySelector('input[data-pecheck]');
+    if (cb && cb.checked !== checked) cb.checked = checked;
 
     const label = item.querySelector('.pe-label');
     if (label) {
       // 去掉旧角标再插新的
-      label.querySelectorAll('.tag-done,.tag-auto,.tag-req').forEach(n => n.remove());
+      label.querySelectorAll('.tag-done,.tag-auto,.tag-req,.tag-off').forEach(n => n.remove());
       const span = document.createElement('span');
-      if (state === 'filled') { span.className = 'tag-done'; span.textContent = '已填'; }
+      if (state === 'off') { span.className = 'tag-off'; span.textContent = '未查'; }
+      else if (state === 'filled') { span.className = 'tag-done'; span.textContent = '已填'; }
       else if (state === 'default') { span.className = 'tag-auto'; span.textContent = '系统默认'; }
       else { span.className = 'tag-req'; span.textContent = '需填'; }
       label.appendChild(span);
     }
-    // 提示文案跟着状态切换
-    const oldHint = item.querySelector('.hint');
-    if (oldHint && (oldHint.textContent.includes('自动补的正常描述') || oldHint.textContent.includes('没有默认值'))) {
-      oldHint.remove();
+
+    // 提示文案跟着状态切换（只动我们自己加的那条，别碰别的 hint）
+    const hintBox = item.querySelector('.pe-hint');
+    if (hintBox) {
+      if (state === 'off') hintBox.textContent = `未勾选：本次没做这一项，病历里不会出现「${it.label}」。`;
+      else if (state === 'default') hintBox.textContent = '已勾选但没填具体所见，生成时自动写这句正常描述。';
+      else if (state === 'blank') hintBox.textContent = '这一项没有默认描述，留空则病历里不会出现这句。';
+      else hintBox.remove();
     }
-    if (state === 'default') {
-      const d = document.createElement('div');
-      d.className = 'hint';
-      d.textContent = '自动补的正常描述，留空也能生成；核对过再改一个字即算已填。';
-      const opts = item.querySelector('.pe-opts');
-      item.insertBefore(d, opts);
-    } else if (state === 'blank') {
-      const d = document.createElement('div');
-      d.className = 'hint';
-      d.textContent = '这一项没有默认值，留空则病历里不会出现这句。';
-      const opts = item.querySelector('.pe-opts');
-      item.insertBefore(d, opts);
+    refreshPeCount(groupKey);
+  }
+
+  /** 刷新某张查体卡片标题上的「已勾 N/M」 */
+  function refreshPeCount(groupKey) {
+    const box = document.querySelector(`[data-count-for="${groupKey}"]`);
+    if (!box) return;
+    const items = peItemsOf(groupKey);
+    const on = items.filter(it => SCHEMA.peChecked(R, groupKey, it.key)).length;
+    box.textContent = `已勾 ${on}/${items.length}`;
+  }
+
+  /** 按组键取查体项列表：普通组从 PE_COMMON 取，special_xxx 从 PE_SPECIAL 取 */
+  function peItemsOf(groupKey) {
+    if (String(groupKey).startsWith('special_')) {
+      const sp = SCHEMA.PE_SPECIAL[String(groupKey).slice('special_'.length)];
+      return (sp && sp.items) || [];
     }
+    const g = SCHEMA.PE_COMMON.find(x => x.key === groupKey);
+    return (g && g.items) || [];
   }
 
   function bindEvents() {
@@ -9629,7 +11761,8 @@ const APP = (() => {
       }
       if (t.dataset.aux) {
         const idx = parseInt(t.dataset.idx, 10);
-        R.auxiliary.items[idx] = R.auxiliary.items[idx] || { name: '', result: '' };
+        // 旧存档里这一项可能没有 date/hospital/no，缺什么补什么（只补空壳，不填值）。
+        R.auxiliary.items[idx] = R.auxiliary.items[idx] || { name: '', result: '', date: '', hospital: '', no: '' };
         R.auxiliary.items[idx][t.dataset.aux] = t.value;
         saveCurrent();
       }
@@ -9663,7 +11796,7 @@ const APP = (() => {
 
     // 点击事件（委托）
     document.addEventListener('click', e => {
-      const t = e.target.closest('[data-seg],[data-check],[data-ros],[data-pequick],[data-act],[data-addhint],[data-auxdel],[data-diagdel],[data-jump],[data-dismiss-alert],[data-view],[data-checkjump],[data-arrdel],[data-arrstrdel],[data-focusadd],[data-focusdel]');
+      const t = e.target.closest('[data-seg],[data-check],[data-ros],[data-rosneg],[data-pequick],[data-pecheck],[data-pall],[data-act],[data-addhint],[data-auxdel],[data-diagdel],[data-jump],[data-dismiss-alert],[data-view],[data-checkjump],[data-arrdel],[data-arrstrdel],[data-focusadd],[data-focusdel]');
       if (!t) return;
       const ds = t.dataset;
 
@@ -9685,6 +11818,13 @@ const APP = (() => {
         const f = R.focusPE || (R.focusPE = { keys: [], note: '' });
         if (!Array.isArray(f.keys)) f.keys = [];
         if (!f.keys.includes(ds.focusadd)) f.keys.push(ds.focusadd);
+        // 加入重点查体 = 明确要写进病历，顺手把它置为已勾选。
+        // 否则会出现「重点查体里列了这一项，正文说未查」的自相矛盾。
+        const ref = String(ds.focusadd);
+        const dot = ref.indexOf('.');
+        if (dot > 0 && SCHEMA.setPeChecked) {
+          SCHEMA.setPeChecked(R, ref.slice(0, dot), ref.slice(dot + 1), true);
+        }
         saveCurrent();
         render();
         return;
@@ -9754,22 +11894,47 @@ const APP = (() => {
         return;
       }
 
-      // 系统回顾阳性切换
+      // 系统回顾三态切换（缺陷1第2条的核心交互）
+      //
+      // 旧实现只有两态（勾=阳性，不勾=阴性），于是「没问过」必然被写成阴性。
+      // 现在每个症状按固定顺序循环：
+      //   未问 →（点一次）→ 阴性 →（再点）→ 阳性 →（再点）→ 未问
+      // 这个顺序保证「要写成阳性」也必须先经过一次阴性，反而更贴合问诊动作：
+      // 先确认病人没有这个症状，有的话才记成阳性。
       if (ds.ros !== undefined) {
         const store = R.ros[ds.ros] || (R.ros[ds.ros] = {});
-        const item = store[ds.sym] || (store[ds.sym] = { checked: false, time: '', detail: '' });
-        item.checked = !item.checked;
+        const item = store[ds.sym] || (store[ds.sym] = { checked: false, negative: false, time: '', detail: '' });
+        if (item.checked) {
+          // 阳性 → 未问
+          item.checked = false;
+          item.negative = false;
+        } else if (item.negative) {
+          // 阴性 → 阳性
+          item.negative = false;
+          item.checked = true;
+        } else {
+          // 未问 → 阴性
+          item.negative = true;
+          item.checked = false;
+        }
         saveCurrent();
         // 更新按钮外观与详情区
         const label = SCHEMA.ROS.find(s => s.key === ds.ros).symptoms.find(s => s.key === ds.sym).label;
-        t.classList.toggle('on', item.checked);
-        t.innerHTML = esc(label) + (item.checked ? ' ✓' : '');
+        t.classList.toggle('on', !!item.checked);
+        if (item.checked) {
+          t.setAttribute('style', '');
+        } else if (item.negative) {
+          t.setAttribute('style', 'background:var(--gray-2);border-color:var(--gray-4);color:var(--gray-5);text-decoration:line-through;');
+        } else {
+          t.setAttribute('style', '');
+        }
+        t.innerHTML = esc(label) + (item.checked ? ' ✓' : (item.negative ? ' −' : ''));
         const box = document.querySelector(`[data-ros-detail="${ds.ros}"]`);
         if (box) box.innerHTML = renderRosDetail(ds.ros);
         // 选中阳性时自动展开该系统
         const group = document.getElementById('ros-group-' + ds.ros);
         if (group) {
-          group.open = true;
+          if (item.checked) group.open = true;
           const badge = group.querySelector('.badge-pos');
           const summary = group.querySelector('summary');
           const posN = SCHEMA.ROS.find(s => s.key === ds.ros).symptoms
@@ -9779,6 +11944,20 @@ const APP = (() => {
             const span = document.createElement('span');
             span.className = 'badge-pos';
             span.textContent = posN;
+            summary.appendChild(span);
+          }
+          // 阴性计数角标
+          const negN = SCHEMA.ROS.find(s => s.key === ds.ros).symptoms
+            .filter(s => { const v = (R.ros[ds.ros] || {})[s.key] || {}; return !v.checked && v.negative; }).length;
+          const negBadge = summary.querySelector('[data-negcount]');
+          if (negBadge) {
+            negBadge.textContent = `阴性 ${negN}`;
+            negBadge.style.display = negN ? '' : 'none';
+          } else if (negN) {
+            const span = document.createElement('span');
+            span.className = 'tag-off';
+            span.setAttribute('data-negcount', ds.ros);
+            span.textContent = `阴性 ${negN}`;
             summary.appendChild(span);
           }
         }
@@ -9792,17 +11971,68 @@ const APP = (() => {
         return;
       }
 
+      // 单个系统的「剩余项全部标为阴性」：只标没问过的，已标阳性的保持阳性
+      if (ds.rosneg !== undefined) {
+        const sys = SCHEMA.ROS.find(s => s.key === ds.rosneg);
+        if (!sys) return;
+        const store = R.ros[ds.rosneg] || (R.ros[ds.rosneg] = {});
+        sys.symptoms.forEach(sym => {
+          const it = store[sym.key] || (store[sym.key] = { checked: false, negative: false, time: '', detail: '' });
+          if (!it.checked) it.negative = true;
+        });
+        saveCurrent();
+        render();
+        return;
+      }
+
       // 查体快捷描述
       if (ds.pequick !== undefined) {
         const group = R.pe[ds.pequick] || (R.pe[ds.pequick] = {});
         group[ds.pekey] = ds.val;
+        // 选了一个具体描述 = 这次查过了，自动勾上（专科技巧：不然点了描述却仍标「未查」）
+        if (SCHEMA.setPeChecked) SCHEMA.setPeChecked(R, ds.pequick, ds.pekey, true);
         saveCurrent();
         // 同步文本框
         const ta = document.querySelector(`textarea[data-path="pe.${ds.pequick}.${ds.pekey}"]`);
-        if (ta) ta.value = ds.val;
+        if (ta) {
+          ta.value = ds.val;
+          refreshPeBadge(ta);
+        }
         $$(`[data-pequick="${ds.pequick}"][data-pekey="${ds.pekey}"]`).forEach(b =>
           b.classList.toggle('on', b.dataset.val === ds.val)
         );
+        return;
+      }
+
+      // 勾选 / 取消勾选一个查体项
+      if (ds.pecheck !== undefined) {
+        SCHEMA.setPeChecked(R, ds.pecheck, ds.pekey, t.checked);
+        saveCurrent();
+        // 就地刷新，不整页重绘（重绘会丢滚动位置）
+        const box = t.closest('.pe-item');
+        if (box) {
+          const ta = box.querySelector('.pe-text');
+          if (ta) refreshPeBadge(ta);
+          else refreshPeCount(ds.pecheck);
+        }
+        return;
+      }
+
+      // 整组全选 / 全不选
+      if (ds.pall !== undefined) {
+        const on = ds.pall === '1';
+        peItemsOf(ds.pgroup).forEach(it => SCHEMA.setPeChecked(R, ds.pgroup, it.key, on));
+        saveCurrent();
+        // 就地刷新，不调 render()：
+        // render() 末尾会 window.scrollTo({top:0})，刚勾完的卡片瞬间离开视野，
+        // 用户得重新滚回去，体验上等于「点了没反应」。整页重绘还会重置所有
+        // <details> 的展开状态、让正在编辑的 textarea 失焦。
+        // 状态判定与计数都只在 DOM 上已存在的节点里改，够用。
+        $$(`[data-pe-group="${ds.pgroup}"]`).forEach(item => {
+          const ta = item.querySelector('.pe-text');
+          if (ta) refreshPeBadge(ta);
+        });
+        refreshPeCount(ds.pgroup);
         return;
       }
 
@@ -9836,7 +12066,8 @@ const APP = (() => {
       }
       if (ds.auxdel !== undefined) {
         R.auxiliary.items.splice(parseInt(ds.auxdel, 10), 1);
-        if (!R.auxiliary.items.length) R.auxiliary.items = [{ name: '', result: '' }];
+        // 保底一行时也要给全字段，否则新加的 date/hospital/no 输入框取不到值
+        if (!R.auxiliary.items.length) R.auxiliary.items = [{ name: '', result: '', date: '', hospital: '', no: '' }];
         saveCurrent();
         render();
       }
@@ -9878,11 +12109,35 @@ const APP = (() => {
         break;
       }
       case 'rosAllNegative': {
-        if (!confirm('确定要把所有系统回顾项目都标记为阴性吗？将清除已选的阳性项。')) return;
+        // ⚠️ 缺陷1第2条连带项：旧实现是 `R.ros = {}`，而那正是「未问」的状态，
+        // 却弹出 toast「已全部标记为阴性」——按钮做的事和说的话相反。
+        // 现在把每个症状显式写成 negative:true（这才真的是「标记为阴性」），
+        // 阳性项会被清掉并计入确认文案，不再是静默删除。
+        const posCount = SCHEMA.ROS.reduce((n, sys) => {
+          const s = R.ros[sys.key] || {};
+          return n + sys.symptoms.filter(x => (s[x.key] || {}).checked).length;
+        }, 0);
+        const msg = posCount
+          ? `确定要把所有系统回顾项目都标记为阴性吗？已选的 ${posCount} 个阳性项会被清除。`
+          : '确定要把所有系统回顾项目都标记为阴性吗？标记后病历里会逐系统写「无…」。';
+        if (!confirm(msg)) return;
+        R.ros = {};
+        SCHEMA.ROS.forEach(sys => {
+          const store = R.ros[sys.key] = {};
+          sys.symptoms.forEach(sym => { store[sym.key] = { checked: false, negative: true, time: '', detail: '' }; });
+        });
+        saveCurrent();
+        render();
+        toast('已全部标记为阴性（病历里会逐系统写「无…」）');
+        break;
+      }
+      case 'rosClearAll': {
+        // 与「全部标记为阴性」相反的操作：回到「未问」，病历里系统回顾写「／」。
+        if (!confirm('确定要把系统回顾全部清空吗？清空后视为「未问」，病历里这一节只写「／」。')) return;
         R.ros = {};
         saveCurrent();
         render();
-        toast('已全部标记为阴性');
+        toast('已清空：视为未问，病历里不会写任何阴性症状');
         break;
       }
       case 'rosExpandAll': {
@@ -9899,7 +12154,7 @@ const APP = (() => {
         break;
       }
       case 'addAux': {
-        R.auxiliary.items.push({ name: '', result: '' });
+        R.auxiliary.items.push({ name: '', result: '', date: '', hospital: '', no: '' });
         saveCurrent();
         render();
         break;
@@ -10342,6 +12597,10 @@ const APP = (() => {
     if (!R.basic.recordDate) R.basic.recordDate = SCHEMA.todayStr();
     if (!R.basic.admitDate) R.basic.admitDate = SCHEMA.todayStr();
 
+    // 回到上次停留的那一步。键不认识（改过步骤、旧存档）就退回第一步，
+    // 不因为一个字符串对不上就让页面白屏。
+    step = stepIndexOf(settings.lastStep);
+
     bindEvents();
     render();
 
@@ -10394,6 +12653,9 @@ const APP = (() => {
       setRecord: r => { R = r; },
       openList,
       gotoStep,
+      stepIndexOf,
+      getStepKey: () => (STEPS[step] || {}).key,
+      getSettings: () => settings,
       // 生成视图：仅供测试断言三种视图各自可复制，不参与业务
       setOutputView: v => { OUT_VIEW = v; },
       getOutputView: () => OUT_VIEW,

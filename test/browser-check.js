@@ -168,15 +168,21 @@ async function main() {
   await evaluate('document.getElementById("btnNext").click()');
   await sleep(300);
   const rosChips = await evaluate('document.querySelectorAll("[data-ros]").length');
-  await evaluate(`
-    document.querySelector('[data-ros="resp"][data-sym="cough"]').click();
-    document.querySelector('[data-ros="resp"][data-sym="sputum"]').click();
-    document.querySelector('[data-ros="general"][data-sym="fever"]').click();
-    'ok'
-  `);
+  // 三态：未问 → 阴性 → 阳性 → 未问。点一次是「阴性」，要点两次才是阳性，
+  // 每次点击都会重绘按钮的 innerHTML，所以必须重新取元素，不能缓存引用。
+  const clickTwice = async (sys, sym) => {
+    const sel = `[data-ros="${sys}"][data-sym="${sym}"]`;
+    await evaluate(`document.querySelector('${sel}').click()`);
+    await sleep(120);
+    await evaluate(`document.querySelector('${sel}').click()`);
+    await sleep(120);
+  };
+  for (const sym of ['cough', 'sputum', 'fever']) await clickTwice('resp', sym);
   await sleep(400);
-  const rosDetailCount = await evaluate('document.querySelectorAll(".ros-item").length');
-  results.push(['系统回顾', rosChips >= 80 && rosDetailCount === 3, `症状项=${rosChips} 阳性详情框=${rosDetailCount}`]);
+  const rosPos = await evaluate('document.querySelectorAll(".ros-item").length');
+  const rosNeg = await evaluate('document.querySelectorAll("[data-rosneg]").length');
+  results.push(['系统回顾', rosChips >= 80 && rosPos === 3 && rosNeg === 8,
+    `症状项=${rosChips} 阳性详情框=${rosPos} 负性批按钮=${rosNeg}`]);
   await shot('04-ros');
 
   // 6. 跳到体格检查
@@ -303,6 +309,9 @@ async function main() {
   // 13. 刷新后恢复
   await send('Page.reload');
   await sleep(1800);
+  // 刷新会回到上次停留的步骤（有意的行为），先跳回基本情况再读姓名
+  await evaluate('APP._test.gotoStep("basic")');
+  await sleep(400);
   const afterReload = await evaluate('document.querySelector(\'[data-path="basic.name"]\').value');
   results.push(['刷新恢复', afterReload === '张三', `刷新后姓名=${afterReload}`]);
   await shot('09-reload');

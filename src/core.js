@@ -70,11 +70,49 @@ const RECORD_CORE = (() => {
     // 旧键 → 新键（当前版本尚未拆分，先留空作为扩展位）
   };
 
+  /**
+   * 中文科室名 / 常见简称 → 科室键。
+   *
+   * 这不是「旧版本遗留」，而是实打实会遇到的：学生在别处记的病历把科室写成
+   * 「消化内科」，导入后 normalizeDeptKey 找不到这个键就静默回退到 'general'，
+   * 结果整段专科查体凭空消失，还不给任何提示。宁可多认几种写法。
+   */
+  const DEPT_NAME_ALIASES = {
+    通用: 'general', 全科: 'general', 通用全科: 'general',
+    呼吸内科: 'respiratory', 呼吸科: 'respiratory', 呼吸: 'respiratory',
+    消化内科: 'digestive', 消化科: 'digestive', 消化: 'digestive',
+    心血管内科: 'cardiology', 心内科: 'cardiology', 心内: 'cardiology', 循环内科: 'cardiology',
+    内分泌科: 'endocrinology', 内分泌: 'endocrinology', 内分泌代谢科: 'endocrinology',
+    肾内科: 'nephrology', 肾脏内科: 'nephrology', 肾内: 'nephrology', 肾病科: 'nephrology',
+    血液内科: 'hematology', 血液科: 'hematology', 血液: 'hematology', 血内: 'hematology',
+    神经内科: 'neurology', 神内科: 'neurology', 神内: 'neurology', 神经科: 'neurology',
+    外科: 'surgery', 普外科: 'surgery', 普外: 'surgery', 骨科: 'surgery', 泌尿外科: 'surgery',
+    神经外科: 'surgery', 心胸外科: 'surgery', 肝胆外科: 'surgery', 胃肠外科: 'surgery',
+    产科: 'obstetrics', 妇产科: 'obstetrics',
+    妇科: 'gynecology', 妇瘤科: 'gynecology',
+    儿科: 'pediatrics', 小儿内科: 'pediatrics', 新生儿科: 'pediatrics', 小儿科: 'pediatrics',
+    急诊: 'emergency', ICU: 'emergency', 重症医学科: 'emergency',
+    急诊ICU: 'emergency', 急诊科: 'emergency', 重症监护室: 'emergency',
+  };
+
+  // 英文/缩写大小写不敏感：DIGESTIVE、Digestive、icu 都应认
+  const DEPT_NAME_ALIASES_LC = {};
+  Object.keys(DEPT_NAME_ALIASES).forEach(k => {
+    DEPT_NAME_ALIASES_LC[k.toLowerCase()] = DEPT_NAME_ALIASES[k];
+  });
+
   /** 把任意科室键规范成当前存在的科室键 */
   function normalizeDeptKey(key, validKeys) {
     const k = isText(key) ? key.trim() : '';
     if (validKeys.includes(k)) return k;
     if (DEPT_ALIASES[k] && validKeys.includes(DEPT_ALIASES[k])) return DEPT_ALIASES[k];
+    // 中文科室名 / 常见简称 / 大小写不同的英文键 —— 都先认一遍再回退
+    const lc = k.toLowerCase();
+    // 大小写变体：DIGESTIVE / Digestive 应该等同于 digestive
+    const exactKey = validKeys.find(v => String(v).toLowerCase() === lc);
+    if (exactKey) return exactKey;
+    const byName = DEPT_NAME_ALIASES[k] || DEPT_NAME_ALIASES_LC[lc];
+    if (byName && validKeys.includes(byName)) return byName;
     // 未知科室（如导入别的版本的数据）回退到通用，避免生成时报错
     return 'general';
   }
@@ -313,7 +351,7 @@ const RECORD_CORE = (() => {
 
   /* ---------------------- 设置 ---------------------- */
 
-  const SETTINGS_DEFAULTS = { rosMode: 'detail', fontScale: 1 };
+  const SETTINGS_DEFAULTS = { rosMode: 'detail', fontScale: 1, lastStep: '' };
 
   function normalizeSettings(raw) {
     const out = { ...SETTINGS_DEFAULTS };
@@ -322,6 +360,9 @@ const RECORD_CORE = (() => {
       const fs = Number(raw.fontScale);
       // 字号缩放限制在合理区间，防止界面被撑坏
       if (Number.isFinite(fs) && fs >= 0.8 && fs <= 1.4) out.fontScale = Math.round(fs * 100) / 100;
+      // 上次停留的步骤键。刷新后回到原处，不要每次都从「基本情况」重新点 7 下。
+      // 只收字符串，具体是哪一步由 app 校验（不认识的键会被忽略，退回第一步）。
+      if (typeof raw.lastStep === 'string') out.lastStep = raw.lastStep;
     }
     return out;
   }

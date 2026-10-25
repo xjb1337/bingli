@@ -1,4 +1,4 @@
-﻿/* ===========================================================================
+/* ===========================================================================
  * 病历生成逻辑测试（node:test）
  * 运行：node --test tests/
  *
@@ -47,23 +47,74 @@ test('每个科室都能生成全部14个章节', async t => {
   }
 });
 
-test('每个有专科查体的科室都会注入对应查体', async t => {
+test('专科查体默认不写，勾选后才写进病历', async t => {
+  // 勾选制的核心保证：见习时没做的专科检查，病历里一个字都不许出现。
+  // 不勾就写，等于替学生编造没做过的查体——这是最不能容忍的一类错误。
   for (const dept of SCHEMA.DEPARTMENTS) {
     if (!dept.special || !dept.special.length) continue;
     await t.test(dept.name, () => {
-      const peText = GENERATOR.buildPE(makeRecord(dept.key));
+      const blank = makeRecord(dept.key);
+      const blankText = GENERATOR.buildPE(blank);
       for (const sp of dept.special) {
-        assert.ok(peText.includes(SCHEMA.PE_SPECIAL[sp].name),
-          `未注入 ${SCHEMA.PE_SPECIAL[sp].name}`);
+        assert.ok(!blankText.includes(SCHEMA.PE_SPECIAL[sp].name),
+          `未勾选时不应出现 ${SCHEMA.PE_SPECIAL[sp].name}`);
+      }
+
+      // 只勾第一项 → 只有这一项的内容出现，且用的是它自己的正常描述
+      const one = makeRecord(dept.key);
+      for (const sp of dept.special) {
+        const first = SCHEMA.PE_SPECIAL[sp].items[0];
+        SCHEMA.setPeChecked(one, 'special_' + sp, first.key, true);
+        const text = GENERATOR.buildPE(one);
+        // 专科段是单独一行「××专科查体：…」。只在这一段里查串台，
+        // 否则会和通用查体的默认描述撞车——例如心内科 cardioMurmur 的默认
+        // 「各瓣膜听诊区未闻及病理性杂音」本来就包含在通用心脏听诊的默认里。
+        const line = text.split('\n').find(l => l.startsWith(SCHEMA.PE_SPECIAL[sp].name)) || '';
+        assert.ok(line, `勾选后应出现 ${SCHEMA.PE_SPECIAL[sp].name}`);
+        assert.ok(line.includes(first.default),
+          `勾了没填，应补该项目的正常描述：${first.default}`);
+        // 同组其它项没勾，其描述不得出现在专科段。
+        // 跳过两种「撞车」情形，它们不是串台：
+        //   ①文案完全相同（同一条正常描述被两个项共用）；
+        //   ②其它项的描述是 first 的子串——专科汇总项（renalExtra/hemExtra）
+        //     本来就会把后面各项的正常描述压缩在一句话里，不是没勾的项混进来。
+        SCHEMA.PE_SPECIAL[sp].items.slice(1).forEach(other => {
+          if (!other.default || other.default === first.default) return;
+          if (first.default.includes(other.default)) return;
+          assert.ok(!line.includes(other.default),
+            `未勾选的 ${other.key} 不应写进病历`);
+        });
       }
     });
   }
 });
 
+test('勾了但没填具体所见 → 写该项正常描述；没勾 → 完全不写', () => {
+  // 用腹部胆囊（教材要求、Student 最常漏的一项）做正反例
+  const r = makeRecord('general');
+  const blank = GENERATOR.buildPE(r);
+  assert.ok(!blank.includes('Murphy征'), '没勾胆囊时不应凭空出现 Murphy 征');
+
+  SCHEMA.setPeChecked(r, 'abdomen', 'gallbladderPalpation', true);
+  const checked = GENERATOR.buildPE(r);
+  assert.ok(checked.includes('胆囊未触及，Murphy征阴性'),
+    `勾了没填应写正常描述，实际：${checked}`);
+});
+
 test('科室之间专科查体不互相串台', () => {
-  const resp = GENERATOR.buildPE(makeRecord('respiratory'));
-  const card = GENERATOR.buildPE(makeRecord('cardiology'));
-  const neuro = GENERATOR.buildPE(makeRecord('neurology'));
+  // 勾选制后专科段默认不输出，所以要显式勾上才能验证「串台」
+  const build = key => {
+    const r = makeRecord(key);
+    const dept = SCHEMA.DEPARTMENTS.find(d => d.key === key);
+    (dept.special || []).forEach(sp => {
+      SCHEMA.PE_SPECIAL[sp].items.forEach(it =>
+        SCHEMA.setPeChecked(r, 'special_' + sp, it.key, true));
+    });
+    return GENERATOR.buildPE(r);
+  };
+  const resp = build('respiratory');
+  const card = build('cardiology');
+  const neuro = build('neurology');
 
   assert.ok(!resp.includes('心血管专科查体'));
   assert.ok(!card.includes('呼吸内科专科查体'));
@@ -73,10 +124,13 @@ test('科室之间专科查体不互相串台', () => {
 });
 
 test('外科专属查体项（乳房）只在普外科出现', () => {
-  const surg = GENERATOR.buildPE(makeRecord('surgery'));
-  const gen = GENERATOR.buildPE(makeRecord('general'));
-  assert.ok(surg.includes('乳房'));
-  assert.ok(!gen.includes('乳房'));
+  // 默认全不勾之后，不勾就什么都不写——所以这条要显式勾上再看科室限制。
+  const surg = makeRecord('surgery');
+  const gen = makeRecord('general');
+  SCHEMA.setPeChecked(surg, 'chest', 'breast', true);
+  SCHEMA.setPeChecked(gen, 'chest', 'breast', true);
+  assert.ok(GENERATOR.buildPE(surg).includes('乳房'));
+  assert.ok(!GENERATOR.buildPE(gen).includes('乳房'));
 });
 
 /* ======================= 婚育史分支 ======================= */
@@ -111,12 +165,22 @@ test('未婚患者婚育史写"未婚"', () => {
 /* ======================= 系统回顾三模式 ======================= */
 
 test('详细模式同时写出阳性和阴性症状', () => {
+  // 三态：checked=阳性，negative=学生显式标了阴性，两者都没有=没问。
+  // 「没问」绝不能当阴性写进病历——那是替病人编病史。
   const r = makeRecord('respiratory');
-  r.ros.resp = { cough: { checked: true, detail: '干咳' } };
+  r.ros.resp = { cough: { checked: true, detail: '干咳' }, hemoptysis: { negative: true } };
   const detail = GENERATOR.buildROS(r, 'detail');
   assert.match(detail, /咳嗽/);
-  assert.match(detail, /无/);
-  assert.match(detail, /咯血/);
+  assert.match(detail, /无咯血/);
+});
+
+test('没问过的症状不写成阴性', () => {
+  const r = makeRecord('respiratory');
+  r.ros.resp = { cough: { checked: true } };
+  const detail = GENERATOR.buildROS(r, 'detail');
+  assert.match(detail, /咳嗽/);
+  assert.doesNotMatch(detail, /无/);
+  assert.equal(GENERATOR.buildROS(makeRecord('general'), 'detail'), '');
 });
 
 test('精简模式只写阳性', () => {
@@ -128,16 +192,26 @@ test('精简模式只写阳性', () => {
 });
 
 test('全阴性时精简模式给统一话术', () => {
-  const r = makeRecord('general');
-  assert.match(GENERATOR.buildROS(r, 'brief'), /未见阳性症状/);
+  // 「一条没问」和「问过、全是阴性」是两回事，话术也必须分开。
+  const none = makeRecord('general');
+  assert.equal(GENERATOR.buildROS(none, 'brief'), '');
+
+  const allNeg = makeRecord('general');
+  SCHEMA.ROS.forEach(sys => {
+    allNeg.ros[sys.key] = {};
+    sys.symptoms.forEach(sym => { allNeg.ros[sys.key][sym.key] = { negative: true }; });
+  });
+  assert.match(GENERATOR.buildROS(allNeg, 'brief'), /未见阳性症状/);
 });
 
 test('阳性症状与阴性列表不重复（避免"头痛；无头晕"式矛盾）', () => {
   const r = makeRecord('neurology');
-  r.ros.head = { headache: { checked: true, detail: '偶有头晕' } };
+  // 教材 8 系统后，「头部及五官」并入「神经精神系统」；
+  // 同一系统内既有阳性又有阴性时，阴性列表不得把阳性症状再重复否定一遍。
+  r.ros.nervous = { headache: { checked: true, detail: '偶有头晕' } };
   const t = GENERATOR.buildROS(r, 'detail');
-  const line = t.split('\n').find(l => l.startsWith('头部及五官'));
-  assert.ok(line, '应有头部及五官行');
+  const line = t.split('\n').find(l => l.startsWith('神经精神系统'));
+  assert.ok(line, '应有神经精神系统行');
   assert.doesNotMatch(line, /无[^；]*头晕/);
 });
 
@@ -282,9 +356,14 @@ test('手写疾病详情优先于勾选描述', () => {
   assert.match(GENERATOR.buildPMH(r), /口服缬沙坦/);
 });
 
-test('未勾选疾病时写"否认"', () => {
+test('未勾选疾病时写占位符，不替学生编「否认」', () => {
+  // 教材《诊断学》第10版 第六篇：病历必须客观真实，「避免任何臆断或虚构」；
+  // 「所有表格项都应详细填写，无内容者画“/”或“—”」。
+  // 学生没勾高血压，不代表他问过、更不代表病人否认——只能写占位符。
   const r = makeRecord('general');
-  assert.match(GENERATOR.buildPMH(r), /否认高血压/);
+  const t = GENERATOR.buildPMH(r);
+  assert.doesNotMatch(t, /否认高血压/);
+  assert.match(t, /疾病史：／/);
 });
 
 test('过敏史正确生成', () => {

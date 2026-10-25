@@ -383,12 +383,22 @@ test('合并是纯函数，不修改入参', () => {
 /* ======================= 10. 设置 ======================= */
 
 test('设置默认值与非法值被纠正', () => {
-  assert.deepEqual(C.normalizeSettings(null), { rosMode: 'detail', fontScale: 1 });
+  // lastStep 是「上次停在哪一步」，默认空串表示从头开始
+  assert.deepEqual(C.normalizeSettings(null), { rosMode: 'detail', fontScale: 1, lastStep: '' });
   assert.deepEqual(C.normalizeSettings({ rosMode: 'bad' }).rosMode, 'detail');
   assert.equal(C.normalizeSettings({ rosMode: 'brief' }).rosMode, 'brief');
   assert.equal(C.normalizeSettings({ fontScale: 5 }).fontScale, 1);
   assert.equal(C.normalizeSettings({ fontScale: 1.2 }).fontScale, 1.2);
   assert.equal(C.normalizeSettings({ fontScale: 0.5 }).fontScale, 1);
+});
+
+test('上次停留的步骤会被记住，非字符串一律丢弃', () => {
+  assert.equal(C.normalizeSettings({ lastStep: 'pe' }).lastStep, 'pe');
+  assert.equal(C.normalizeSettings({ lastStep: 'summary' }).lastStep, 'summary');
+  // 脏数据不能带进界面：数字、对象、null 都退回默认空串
+  assert.equal(C.normalizeSettings({ lastStep: 3 }).lastStep, '');
+  assert.equal(C.normalizeSettings({ lastStep: {} }).lastStep, '');
+  assert.equal(C.normalizeSettings({ lastStep: null }).lastStep, '');
 });
 
 /* ======================= 11. uid ======================= */
@@ -398,4 +408,48 @@ test('uid 生成唯一且带前缀', () => {
   for (let i = 0; i < 200; i++) ids.add(C.uid());
   assert.equal(ids.size, 200);
   assert.ok([...ids][0].startsWith('r'));
+});
+
+/* ======================= 12. 科室名容错 ======================= */
+
+test('中文科室名能被认出来，不能静默降级成通用科', () => {
+  // 真实场景：学生在别处记的病历把科室写成中文，导入后如果认不出来，
+  // normalizeDeptKey 会回退到 'general'，整段专科查体凭空消失且不给提示。
+  const cases = [
+    ['消化内科', 'digestive'], ['消化科', 'digestive'], ['消化', 'digestive'],
+    ['心内科', 'cardiology'], ['心血管内科', 'cardiology'],
+    ['呼吸内科', 'respiratory'], ['呼吸科', 'respiratory'],
+    ['内分泌科', 'endocrinology'], ['肾内科', 'nephrology'],
+    ['血液科', 'hematology'], ['神内', 'neurology'], ['神经内科', 'neurology'],
+    ['普外科', 'surgery'], ['骨科', 'surgery'], ['妇产科', 'obstetrics'],
+    ['产科', 'obstetrics'], ['妇科', 'gynecology'], ['儿科', 'pediatrics'],
+    ['ICU', 'emergency'], ['急诊科', 'emergency'],
+  ];
+  for (const [name, want] of cases) {
+    assert.equal(C.normalizeDeptKey(name, DEPT_KEYS), want, `「${name}」应识别为 ${want}`);
+  }
+});
+
+test('科室键的大小写变体也能认，未知科室才回退通用', () => {
+  assert.equal(C.normalizeDeptKey('DIGESTIVE', DEPT_KEYS), 'digestive');
+  assert.equal(C.normalizeDeptKey('Digestive', DEPT_KEYS), 'digestive');
+  assert.equal(C.normalizeDeptKey('  digestive  ', DEPT_KEYS), 'digestive');
+  // 真的不认识才回退，且回退必须仍是合法键
+  assert.equal(C.normalizeDeptKey('未知科', DEPT_KEYS), 'general');
+  assert.equal(C.normalizeDeptKey('', DEPT_KEYS), 'general');
+  assert.ok(DEPT_KEYS.includes(C.normalizeDeptKey('火星科', DEPT_KEYS)));
+});
+
+test('中文科室名的旧存档能正常生成专科查体', () => {
+  const raw = {
+    schemaVersion: 1,
+    basic: { name: '测试', gender: '女', age: '28', department: '消化内科', chiefComplaint: '上腹痛3天' },
+    hpi: {}, pmh: {}, family: {}, pe: {}, auxiliary: { items: [] }, diagnosis: { confirmed: [] },
+  };
+  const r = C.normalizeRecord(raw, SCHEMA.emptyRecord, DEPT_KEYS);
+  assert.equal(r.basic.department, 'digestive');
+  // 科别行要写中文名，不是键名
+  const t = GENERATOR.generate(r).text;
+  assert.match(t, /科别：消化内科/);
+  assert.doesNotMatch(t, /科别：digestive/);
 });

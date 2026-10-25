@@ -35,6 +35,18 @@ function makeRecord(deptKey) {
 
 /** 只取某一组查体的那一行 */
 /**
+ * 把某一组查体全部勾上。
+ *
+ * 通用查体现在默认全不勾（没勾=本次没查=病历里一个字都不写），
+ * 所以凡是要看查体正文的用例都得先显式勾上，否则拿到的是空行。
+ */
+function checkGroup(r, groupKey) {
+  const group = SCHEMA.PE_COMMON.find(g => g.key === groupKey);
+  if (group) group.items.forEach(it => SCHEMA.setPeChecked(r, groupKey, it.key, true));
+  return r;
+}
+
+/**
  * 取出某一节的完整文本。
  *
  * 查体现在按「大节 + 小节」分段输出（例如「肺：」下面缩进写视诊/触诊/听诊），
@@ -57,7 +69,7 @@ function groupLine(text, name) {
 /* ======================= 1. 腹部查体次序 ======================= */
 
 test('腹部查体输出次序为 视诊→听诊→叩诊→触诊', () => {
-  const pe = GENERATOR.buildPE(makeRecord('digestive'));
+  const pe = GENERATOR.buildPE(checkGroup(makeRecord('digestive'), 'abdomen'));
   const line = groupLine(pe, '腹部');
   assert.ok(line, '应有腹部查体行');
 
@@ -74,7 +86,7 @@ test('腹部查体输出次序为 视诊→听诊→叩诊→触诊', () => {
 });
 
 test('只有腹部改次序，胸部仍是视诊→触诊→叩诊→听诊', () => {
-  const pe = GENERATOR.buildPE(makeRecord('respiratory'));
+  const pe = GENERATOR.buildPE(checkGroup(makeRecord('respiratory'), 'chest'));
   const line = groupLine(pe, '胸部');
   const iInspect = line.indexOf('胸廓对称');
   const iPalp = line.indexOf('语颤对称');
@@ -85,8 +97,10 @@ test('只有腹部改次序，胸部仍是视诊→触诊→叩诊→听诊', ()
 });
 
 test('腹部触诊子项被填写后，父项让位（不同时输出两种描述）', () => {
-  const r = makeRecord('surgery');
-  r.pe.abdomen = { abdPalpSuperficial: '右下腹浅触诊压痛' };
+  // 整组都勾上（含父项 abdPalpation），再单独填一个子项——
+  // 这样才真正测到「父项让位」，否则父项本来就没勾，让位是假通过。
+  const r = checkGroup(makeRecord('surgery'), 'abdomen');
+  r.pe.abdomen.abdPalpSuperficial = '右下腹浅触诊压痛';
   const line = groupLine(GENERATOR.buildPE(r), '腹部');
   assert.match(line, /右下腹浅触诊压痛/);
   assert.doesNotMatch(line, /全腹无压痛、反跳痛/, `父项应让位，实际：${line}`);

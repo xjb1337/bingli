@@ -15,6 +15,12 @@ dist/online-shots/
 # 团队协作状态
 .agent-teams/
 
+# 从《诊断学》第10版 PDF 提取的教材正文与目录：有版权，不入公开仓库
+# （提取用的 tools/scan_pdf.py、tools/extract_range.py 是通用脚本，可以提交；
+#   自检脚本 tools/check-*.js、tools/verify-*.js、tools/sweep-*.js、tools/align-*.js 也必须提交）
+tools/book-*.txt
+tools/pdf-toc.txt
+
 # 从 PDF 提取的评分表原文
 # 仓库是公开的，评分表原属医院内部培训材料，不宜原样上传；
 # docs/评分表对齐说明.md 是我们自己的整理，可以提交。
@@ -26,3 +32,5 @@ tools/docx-dump.txt
 # 编辑器
 .vscode/
 .idea/
+# 评审/排查用的一次性脚本目录，不入库
+tmp-review/

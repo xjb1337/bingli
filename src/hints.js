@@ -65,9 +65,9 @@ const HINTS = (() => {
     {
       id: 'tb', name: '肺结核',
       depts: ['respiratory', 'general'],
-      must: ['ros:general.nightSweat','ros:general.weightLoss','ros:resp.hemoptysis','pmh:肺结核'],
+      must: ['ros:resp.nightSweat','ros:endocrine.weightLoss','ros:resp.hemoptysis','pmh:肺结核'],
       need: 2,
-      match: ['ros:general.nightSweat', 'ros:general.weightLoss', 'ros:general.fever',
+      match: ['ros:resp.nightSweat', 'ros:endocrine.weightLoss', 'ros:resp.fever',
         'ros:resp.hemoptysis', 'cc:咯血', 'pmh:肺结核'],
       hint: '低热盗汗、消瘦、咳嗽超过2周或咯血，需排除肺结核。',
       note: '可补充：胸片/胸部CT、痰抗酸杆菌涂片+培养、结核菌素试验/γ干扰素释放试验、痰GeneXpert。'
@@ -180,7 +180,7 @@ const HINTS = (() => {
       depts: ['surgery', 'emergency', 'general'],
       must: ['pe:abdomen.abdPalpation'],
       need: 2,
-      match: ['cc:转移性右下腹痛', 'ros:general.fever', 'vital:tempUp',
+      match: ['cc:转移性右下腹痛', 'ros:resp.fever', 'vital:tempUp',
         'pev:abdomen.abdPalpation=右下腹压痛、反跳痛', 'pev:abdomen.abdPalpation=全腹压痛、反跳痛，腹肌紧张'],
       hint: '转移性右下腹痛伴右下腹固定压痛/反跳痛，需考虑急性阑尾炎。',
       note: '可补充：血常规、腹部超声或CT、尿常规；育龄女性加做尿妊娠试验。'
@@ -233,7 +233,7 @@ const HINTS = (() => {
       depts: ['nephrology', 'general', 'emergency', 'gynecology'],
       must: ['ros:gu.dysuria','pe:abdomen.abdPercussion'],
       need: 2,
-      match: ['ros:gu.dysuria', 'vital:tempUp', 'ros:general.fever',
+      match: ['ros:gu.dysuria', 'vital:tempUp', 'ros:resp.fever',
         'pev:abdomen.abdPercussion=双肾区叩击痛'],
       hint: '尿频尿急尿痛伴发热或肾区叩击痛，需考虑泌尿系感染。',
       note: '可补充：尿常规、尿培养+药敏、血常规、泌尿系超声。'
@@ -254,7 +254,7 @@ const HINTS = (() => {
       depts: ['endocrinology', 'general', 'cardiology', 'nephrology', 'neurology'],
       must: ['ros:endocrine.polydipsia','ros:endocrine.polyuriaEndo','pmh:糖尿病'],
       need: 2,
-      match: ['ros:endocrine.polydipsia', 'ros:endocrine.polyuriaEndo', 'ros:general.weightLoss',
+      match: ['ros:endocrine.polydipsia', 'ros:endocrine.polyuriaEndo', 'ros:endocrine.weightLoss',
         'pmh:糖尿病', 'vital:bmiHigh'],
       hint: '多饮多尿多食伴体重下降，需考虑糖尿病。',
       note: '可补充：空腹血糖、HbA1c、OGTT、尿酮体、血脂、眼底及神经病变筛查。'
@@ -273,7 +273,7 @@ const HINTS = (() => {
       depts: ['endocrinology', 'cardiology', 'general'],
       must: ['ros:endocrine.heatIntolerance','pe:neck.thyroid'],
       need: 2,
-      match: ['ros:endocrine.heatIntolerance', 'ros:general.weightLoss', 'ros:cardio.palpitation',
+      match: ['ros:endocrine.heatIntolerance', 'ros:endocrine.weightLoss', 'ros:cardio.palpitation',
         'pev:neck.thyroid=甲状腺Ⅰ度肿大', 'pev:neck.thyroid=甲状腺Ⅱ度肿大', 'pev:neck.thyroid=甲状腺Ⅲ度肿大'],
       hint: '怕热多汗、心悸、消瘦伴甲状腺肿大，需考虑甲状腺功能亢进症。',
       note: '可补充：FT3/FT4/TSH、TRAb、甲状腺超声、心电图。'
@@ -283,7 +283,7 @@ const HINTS = (() => {
       depts: ['endocrinology', 'general'],
       must: ['ros:endocrine.coldIntolerance','pe:neck.thyroid'],
       need: 2,
-      match: ['ros:endocrine.coldIntolerance', 'ros:general.fatigue', 'ros:general.weightGain',
+      match: ['ros:endocrine.coldIntolerance', 'ros:hemat.fatigue', 'ros:endocrine.weightGain',
         'pev:neck.thyroid=甲状腺Ⅰ度肿大', 'pev:neck.thyroid=甲状腺Ⅱ度肿大'],
       hint: '怕冷、乏力、体重增加、皮肤干燥，需考虑甲状腺功能减退症。',
       note: '可补充：FT3/FT4/TSH、甲状腺抗体、血脂、心电图。'
@@ -304,7 +304,7 @@ const HINTS = (() => {
       depts: ['hematology', 'general', 'digestive', 'gynecology', 'pediatrics'],
       must: ['ros:hemat.anemia','pe:skin.color','aux:血红蛋白'],
       need: 1,
-      match: ['ros:hemat.anemia', 'pev:skin.color=皮肤黏膜苍白', 'ros:general.fatigue', 'aux:血红蛋白'],
+      match: ['ros:hemat.anemia', 'pev:skin.color=皮肤黏膜苍白', 'ros:hemat.fatigue', 'aux:血红蛋白'],
       hint: '乏力、面色苍白，需考虑贫血，并进一步明确病因（缺铁性/巨幼细胞性/失血性等）。',
       note: '可补充：血常规+网织红细胞、铁代谢、叶酸/B12、大便隐血、必要时胃肠镜及妇科评估。'
     },
@@ -335,7 +335,7 @@ const HINTS = (() => {
       must: ['ros:nervous.weakness','ros:nervous.speech','ros:nervous.numbness','pe:special_neurology.neuroExtra3'],
       need: 2,
       match: ['ros:nervous.weakness', 'ros:nervous.speech', 'ros:nervous.numbness', 'vital:bpUp',
-        'ros:head.headache', 'pmh:脑卒中',
+        'ros:nervous.headache', 'pmh:脑卒中',
         'pev:special_neurology.neuroExtra3=偏瘫', 'pev:special_neurology.neuroExtra3=四肢肌力4级'],
       hint: '突发偏侧肢体无力/麻木、言语不清，需警惕脑卒中。',
       note: '可补充：头颅CT（先除外出血）→MRI/DWI、NIHSS 评分、血糖血脂、心电监测；注意静脉溶栓时间窗。'
@@ -343,9 +343,9 @@ const HINTS = (() => {
     {
       id: 'meningitis', name: '中枢神经系统感染',
       depts: ['neurology', 'pediatrics', 'emergency'],
-      must: ['ros:head.headache','pe:neck.neckResist','pe:nervousPE.nerve'],
+      must: ['ros:nervous.headache','pe:neck.neckResist','pe:nervousPE.nerve'],
       need: 2,
-      match: ['vital:tempUp', 'ros:head.headache', 'ros:nervous.seizure',
+      match: ['vital:tempUp', 'ros:nervous.headache', 'ros:nervous.seizure',
         'pev:neck.neckResist=颈抵抗阳性', 'pev:nervousPE.nerve=脑膜刺激征阳性',
         'pev:nervousPE.nerve=病理反射阳性'],
       hint: '发热、头痛、呕吐伴颈抵抗或脑膜刺激征，需考虑中枢神经系统感染。',
@@ -364,9 +364,9 @@ const HINTS = (() => {
     {
       id: 'vertigo', name: '眩晕 / 前庭疾病',
       depts: ['neurology', 'general'],
-      must: ['ros:head.vertigo','ros:head.tinnitus'],
+      must: ['ros:nervous.vertigo','ros:nervous.tinnitus'],
       need: 1,
-      match: ['ros:head.vertigo', 'ros:head.dizziness', 'ros:head.tinnitus'],
+      match: ['ros:nervous.vertigo', 'ros:nervous.dizziness', 'ros:nervous.tinnitus'],
       hint: '眩晕伴耳鸣或听力下降，需考虑前庭周围性病变，注意排除中枢性眩晕。',
       note: '可补充：Dix-Hallpike 试验、听力检查、头颅MRI、必要时前庭功能检查。'
     },
@@ -437,9 +437,9 @@ const HINTS = (() => {
     {
       id: 'preeclampsia', name: '妊娠期高血压疾病 / 子痫前期',
       depts: ['obstetrics'],
-      must: ['aux:尿蛋白','ros:head.visionBlur','ros:head.headache','ros:head.visualBlur'],
+      must: ['aux:尿蛋白','ros:nervous.visualBlur','ros:nervous.headache','ros:nervous.visualBlur'],
       need: 2,
-      match: ['vital:bpUp', 'ros:head.headache', 'aux:尿蛋白', 'ros:head.visualBlur'],
+      match: ['vital:bpUp', 'ros:nervous.headache', 'aux:尿蛋白', 'ros:nervous.visualBlur'],
       hint: '妊娠20周后血压升高伴蛋白尿或头痛、视物模糊，需警惕子痫前期。',
       note: '可补充：尿蛋白定量、肝肾功能、凝血功能、血小板、胎儿超声及胎心监护。'
     },
@@ -459,7 +459,7 @@ const HINTS = (() => {
       depts: ['pediatrics'],
       must: ['age:child','pe:chest.lungAuscultation'],
       need: 3,
-      match: ['vital:tempUp', 'ros:resp.cough', 'ros:resp.hyperpnea', 'ros:resp.dyspnea',
+      match: ['vital:tempUp', 'ros:resp.cough', 'ros:resp.dyspnea',
         'ros:resp.sputum',
         'pev:chest.lungAuscultation=双肺可闻及湿性啰音', 'pev:chest.lungAuscultation=右下肺可闻及湿性啰音'],
       hint: '患儿发热、咳嗽、气促，肺部闻及固定湿啰音，需考虑小儿肺炎。',
@@ -490,7 +490,7 @@ const HINTS = (() => {
       depts: ['emergency', 'general', 'respiratory', 'digestive', 'surgery'],
       must: ['vital:tempUp','vital:tempDown','pmh:糖尿病'],
       need: 3,
-      match: ['vital:tempUp', 'vital:tachy', 'vital:tachypnea', 'ros:general.chills',
+      match: ['vital:tempUp', 'vital:tachy', 'vital:tachypnea', 'ros:resp.chills',
         'pev:general.conscious=神志清楚，精神差'],
       hint: '感染灶 + 心率增快、呼吸急促、意识改变，需警惕脓毒症（qSOFA）。',
       note: '可补充：血培养（抗菌药物使用前）、乳酸、血常规+CRP+PCT、器官功能评估、液体复苏评估。'
@@ -529,6 +529,14 @@ const HINTS = (() => {
     'abdomen.abdPalpDeep': ['abdomen.abdPalpation'],
     'abdomen.liverPalpation': ['abdomen.abdPalpation'],
     'abdomen.spleenPalpation': ['abdomen.abdPalpation'],
+    // 触诊补充 4 子项（教材《诊断学》第10版腹部触诊书写清单里的胆囊/肾/膀胱/液波震颤）
+    // 同属「腹部触诊」这一大类，阳性同样说明触诊查出了问题
+    'abdomen.gallbladderPalpation': ['abdomen.abdPalpation'],
+    'abdomen.kidneyPalpation': ['abdomen.abdPalpation'],
+    'abdomen.bladderPalpation': ['abdomen.abdPalpation'],
+    'abdomen.fluidThrill': ['abdomen.abdPalpation'],
+    // 振水音是听诊项目（教材归在腹部听诊），映射到 abdAuscultation 而不是触诊
+    'abdomen.succussionSplash': ['abdomen.abdAuscultation'],
     // 神经反射 4 子项 → 聚合父项 nerve
     'nervousPE.tendonReflex': ['nervousPE.nerve'],
     'nervousPE.brudzinski': ['nervousPE.nerve'],
@@ -681,6 +689,9 @@ const HINTS = (() => {
 
     (SCHEMA.PE_COMMON || []).forEach(g => {
       g.items.forEach(it => {
+        // 勾选制：这次没查的项不能参与任何记分。取消勾选 ≠ 检查正常，
+        // 它只是「没查」——不写进病历，也不该给出诊断提示。
+        if (SCHEMA.peChecked && !SCHEMA.peChecked(r, g.key, it.key)) return;
         const val = (GENERATOR.peValue ? GENERATOR.peValue(r, g.key, it) : '') || '';
         if (!val) return;
         if (SCHEMA.peValueIsDefault ? SCHEMA.peValueIsDefault(it, val) : (it.default && val === it.default)) return;
@@ -701,6 +712,8 @@ const HINTS = (() => {
     const dept = (SCHEMA.DEPARTMENTS || []).find(d => d.key === deptKey);
     ((dept && dept.special) || []).forEach(sp => {
       (((SCHEMA.PE_SPECIAL[sp] || {}).items) || []).forEach(it => {
+        // 同上：专科项默认未勾，没勾就是这次没查，不计分、不提示
+        if (SCHEMA.peChecked && !SCHEMA.peChecked(r, 'special_' + sp, it.key)) return;
         const val = (GENERATOR.peValue ? GENERATOR.peValue(r, 'special_' + sp, it) : '') || '';
         if (!val) return;
         if (SCHEMA.peValueIsDefault ? SCHEMA.peValueIsDefault(it, val) : (it.default && val === it.default)) return;

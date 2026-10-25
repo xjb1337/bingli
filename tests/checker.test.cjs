@@ -201,10 +201,23 @@ test('checkPhysical 用变异法识别腹部查体次序错误（把 schema 改�
 
 test('变异恢复后次序检查回到 ok（确保变异可逆）', () => {
   const group = SCHEMA.PE_COMMON.find(g => g.key === 'abdomen');
-  assert.deepEqual(group.items.map(i => i.key), [
-    'abdInspect', 'abdAuscultation', 'abdPercussion', 'abdPalpation',
-    'abdPalpSuperficial', 'abdPalpDeep', 'liverPalpation', 'spleenPalpation'
-  ], 'schema 腹部顺序应已恢复为 视→听→叩→触');
+  // 只锁「四个模态词」的相对次序，不锁死整个数组：
+  // 教材《诊断学》第10版腹部书写清单后续还在补项（胆囊/肾/膀胱/液波震颤/振水音
+  // 都是后加的），若把每一项都写死，每补一项这个测试就要改一次，
+  // 而真正要守住的约束只有「视 → 听 → 叩 → 触」这一条。
+  const order = group.items.map(i => i.key).filter(k =>
+    ['abdInspect', 'abdAuscultation', 'abdPercussion', 'abdPalpation'].includes(k));
+  assert.deepEqual(order, [
+    'abdInspect', 'abdAuscultation', 'abdPercussion', 'abdPalpation'
+  ], 'schema 腹部四个模态词的次序应为 视→听→叩→触');
+  // 触诊子项必须排在触诊父项之后，否则书写出来会前后颠倒
+  const palpAt = group.items.findIndex(i => i.key === 'abdPalpation');
+  ['abdPalpSuperficial', 'abdPalpDeep', 'liverPalpation', 'spleenPalpation',
+    'gallbladderPalpation', 'kidneyPalpation', 'bladderPalpation', 'fluidThrill']
+    .forEach(k => {
+      const at = group.items.findIndex(i => i.key === k);
+      assert.ok(at > palpAt, `触诊子项 ${k} 应排在 abdPalpation 之后`);
+    });
 });
 
 test('checkPhysical 对正确次序判为通过', () => {

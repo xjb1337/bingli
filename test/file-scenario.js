@@ -89,13 +89,22 @@ async function main() {
   const deptValue = await ev(`document.querySelector('select[data-path="basic.department"]').value`);
   check('科室切换成功', deptValue === 'neurology', deptValue);
 
-  // 4. 跳到体格检查，神经专科应有多项
+  // 4. 跳到体格检查，神经专科应有多项（教材对齐后 8～12 项/科）
   await ev(`(() => { for (let i=0;i<7;i++) document.getElementById('btnNext').click(); })()`);
   await sleep(600);
   const stepName = await ev(`document.getElementById('stepTitle').textContent`);
   const neuroItems = await ev(`document.querySelectorAll('#pe-special_neurology .pe-item').length`);
-  check('神经内科查体项数', stepName === '体格检查' && neuroItems === 5, `${stepName} 项数=${neuroItems}`);
+  const neuroChecked = await ev(`document.querySelectorAll('#pe-special_neurology input[data-pecheck]:checked').length`);
+  check('神经内科查体项数',
+    stepName === '体格检查' && neuroItems >= 8 && neuroItems <= 12 && neuroChecked === 0,
+    `${stepName} 项数=${neuroItems} 默认勾选=${neuroChecked}`);
   await shot('10-neuro-pe');
+
+  // 4b. 刷新后应停在体格检查（上次停留的步骤被记住，不用再点 7 次）
+  await send('Page.reload');
+  await sleep(2000);
+  const reloadStep = await ev(`document.getElementById('stepTitle').textContent`);
+  check('刷新后停在原步骤', reloadStep === '体格检查', `刷新后=${reloadStep}`);
 
   // 5. 多病历：保存、新建、列表
   await ev(`document.getElementById('btnSave').click()`);
@@ -106,6 +115,9 @@ async function main() {
   // 直接改 store 模拟已保存病历后刷新，检查恢复
   await send('Page.reload');
   await sleep(2000);
+  // 刷新会回到上次停留的步骤（有意的行为），所以先跳回基本情况再读姓名
+  await ev(`APP._test.gotoStep('basic')`);
+  await sleep(400);
   const restoredName = await ev(`document.querySelector('[data-path="basic.name"]').value`);
   check('刷新后恢复姓名', restoredName === '欧阳小明', restoredName);
 

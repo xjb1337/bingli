@@ -305,7 +305,7 @@ const APP = (() => {
           placeholder: '58 或 7月 / 3天',
           hint: '成人直接写数字（自动补「岁」）；婴儿写「7月」「3天」这类，不要再加「岁」。'
         })}
-        ${input('民族', 'basic.nationality', { placeholder: '汉族' })}
+        ${input('民族', 'basic.nationality', { placeholder: '汉族', hint: '不填则病历里写「／」。' })}
         ${seg('婚姻', 'basic.marital', SCHEMA.MARITAL)}
         ${input('职业', 'basic.occupation', { placeholder: '退休 / 农民 / 工人…' })}
         ${input('工作单位', 'basic.workUnit', { placeholder: '无 / ××公司' })}
@@ -320,10 +320,22 @@ const APP = (() => {
           placeholder: '如：01234567',
           hint: '出院记录的一般情况也会用到。'
         })}
+        ${input('床号', 'basic.bedNo', {
+          placeholder: '如：32 / 12-3',
+          hint: '教材要求每张记录用纸的眉栏（姓名、住院号、科别、床号）都填全；不填则病历里写「／」。'
+        })}
         ${input('入院日期', 'basic.admitDate', { type: 'date' })}
         ${input('记录日期', 'basic.recordDate', { type: 'date' })}
-        ${input('病史陈述者', 'basic.informant', { placeholder: '留空则默认患者本人；儿科写「母亲」' })}
-        ${select('病史可靠程度', 'basic.reliability', SCHEMA.RELIABILITY)}
+        ${input('病史陈述者', 'basic.informant', {
+          placeholder: '如：患者本人；儿科写「母亲」',
+          hint: '14 岁以下留空自动写「家属」（不猜是父亲还是母亲）；成人留空写患者本人姓名。'
+        })}
+        ${/* 加空选项：schema 里 reliability 的默认值已清空（不能替学生判断病史可靠程度），
+             若这里不给空项，下拉框会「看起来选中了可靠」而实际存的是空值。 */ ''}
+        ${select('病史可靠程度', 'basic.reliability', SCHEMA.RELIABILITY, {
+          empty: '未评估',
+          hint: '不选＝没评估，病历里写「／」。'
+        })}
       </div>
 
       <div class="card">
@@ -387,7 +399,8 @@ const APP = (() => {
         })}
         ${textarea('一般情况（精神、食欲、睡眠、大小便、体重）', 'hpi.generalCondition', {
           rows: 2,
-          placeholder: '留空则默认：发病以来，精神、食欲、睡眠可，大小便正常，体重无明显变化'
+          placeholder: '如：发病以来精神、食欲、睡眠可，大小便正常，体重无明显变化',
+          hint: '只有现病史其它内容或主诉填了，留空才会自动补这句常规收尾；全空时代码不替你写——那是编造。'
         })}
         ${textarea('其他补充', 'hpi.extra', { rows: 2 })}
       </div>
@@ -399,18 +412,31 @@ const APP = (() => {
       const store = R.ros[sys.key] || {};
       return n + sys.symptoms.filter(s => (store[s.key] || {}).checked).length;
     }, 0);
+    // 明确标为阴性的症状数（缺陷1：三态里的「问了且阴性」，与「没问」分开计数）
+    const totalNeg = SCHEMA.ROS.reduce((n, sys) => {
+      const store = R.ros[sys.key] || {};
+      return n + sys.symptoms.filter(s => {
+        const v = store[s.key] || {};
+        return !v.checked && v.negative;
+      }).length;
+    }, 0);
+    const totalSym = SCHEMA.ROS.reduce((n, sys) => n + sys.symptoms.length, 0);
 
     let html = `
       <div class="card sticky-note">
         <div class="ros-head">
           <div>
             <strong>系统回顾</strong>
-            <div class="hint">默认全部为阴性；有症状的点一下变红，即记为阳性。</div>
+            <div class="hint">${/* 旧文案「默认全部为阴性」已经不成立：没勾不等于阴性。
+                  现在必须明说「不点就不写」，否则用户会以为留空也没关系（其实会写「／」）。 */ ''}
+              问过且没有的症状，点一下变<b>灰</b>记为阴性；有症状的点一下变<b>红</b>记为阳性。
+              <b>没点过 = 没问 = 病历里一个字都不写。</b>已标阴性 ${totalNeg}/${totalSym} 项。</div>
           </div>
           <div class="ros-count">已选阳性 <b>${totalPos}</b> 项</div>
         </div>
         <div class="btn-row">
           <button class="btn btn-ghost" data-act="rosAllNegative">全部标记为阴性</button>
+          <button class="btn btn-ghost" data-act="rosClearAll">全部清空为未问</button>
           <button class="btn btn-ghost" data-act="rosExpandAll">展开/收起全部</button>
         </div>
         <div class="ros-jump">
@@ -428,11 +454,22 @@ const APP = (() => {
     SCHEMA.ROS.forEach(sys => {
       const store = R.ros[sys.key] || {};
       const posCount = sys.symptoms.filter(s => (store[s.key] || {}).checked).length;
+      const negCount = sys.symptoms.filter(s => {
+        const v = store[s.key] || {};
+        return !v.checked && v.negative;
+      }).length;
       const chips = sys.symptoms.map(sym => {
         const v = store[sym.key] || {};
-        const on = v.checked ? ' on' : '';
-        return `<button type="button" class="chip chip-sym${on}" data-ros="${sys.key}" data-sym="${sym.key}">
-          ${esc(sym.label)}${v.checked ? ' ✓' : ''}
+        // 三态样式：阳性（红，复用既有 .chip-sym.on）、阴性（灰，行内样式）、未问（默认白）
+        // 阴性态的样式写成行内是有意的：style.css 不归本文件改，
+        // 不新造 .neg 类名，免得与其他人正在改的 CSS 撞车（撞了就是"点了没反应"的死按钮）。
+        const cls = v.checked ? ' on' : '';
+        const negStyle = (!v.checked && v.negative)
+          ? ' style="background:var(--gray-2);border-color:var(--gray-4);color:var(--gray-5);text-decoration:line-through;"'
+          : '';
+        const mark = v.checked ? ' ✓' : (v.negative ? ' −' : '');
+        return `<button type="button" class="chip chip-sym${cls}"${negStyle} data-ros="${sys.key}" data-sym="${sym.key}">
+          ${esc(sym.label)}${mark}
         </button>`;
       }).join('');
       // 默认展开含阳性项的系统，其余收起（避免一屏全是标题）
@@ -440,7 +477,11 @@ const APP = (() => {
         <summary>
           <span>${esc(sys.name)}</span>
           ${posCount ? `<span class="badge-pos">${posCount}</span>` : ''}
+          ${negCount ? `<span class="tag-off" data-negcount="${sys.key}">阴性 ${negCount}</span>` : ''}
         </summary>
+        <div class="btn-row">
+          <button class="btn btn-ghost btn-sm" data-rosneg="${sys.key}">本系统剩余项全部标为阴性</button>
+        </div>
         <div class="chips">${chips}</div>
         <div class="ros-detail" data-ros-detail="${sys.key}"></div>
       </details>`;
@@ -474,7 +515,12 @@ const APP = (() => {
     return `
       <div class="card">
         <div class="card-title">平素健康状况</div>
-        ${seg('健康状况', 'pmh.health', ['良好', '一般', '较差'])}
+        ${/* 原来 seg 没有空选项，一进页面就默认选中「良好」，于是即便学生没问，
+             病历也会生成「既往健康状况：平素良好」。加「未问」空选项后，
+             不选就是没问，病历里写「／」而不是替学生下结论。 */ ''}
+        ${seg('健康状况', 'pmh.health', [{ value: '', text: '未问' }, '良好', '一般', '较差'], {
+          hint: '不选＝没问过，病历里写「／」；选了才写「平素良好」等。'
+        })}
       </div>
 
       <div class="card">
@@ -517,7 +563,11 @@ const APP = (() => {
 
       <div class="card">
         <div class="card-title">过敏史</div>
-        ${seg('有无过敏史', 'pmh.allergy', ['无', '有'])}
+        ${/* 同 pmh.health：原来只有「无/有」两态，默认停在「无」，
+             等于工具替学生否认了过敏史。加空选项表示「没问」。 */ ''}
+        ${seg('有无过敏史', 'pmh.allergy', [{ value: '', text: '未问' }, '无', '有'], {
+          hint: '不选＝没问过，病历里写「／」；点「无」才会写成「否认食物、药物过敏史」。'
+        })}
         ${p.allergy === '有' ? `
           ${checks('过敏原', 'pmh.allergenChecks', SCHEMA.ALLERGENS)}
           ${input('其他过敏原', 'pmh.allergenOther')}
@@ -539,17 +589,26 @@ const APP = (() => {
   }
 
   function renderPersonal() {
+    // 母孕史/出生史/喂养史/生长发育史是儿科病历的项目。成人默认收起，
+    // 免得学生填了半天才发现这些东西根本不该出现在成人病历里；
+    // 老存档里已有内容时自动展开，不能让既有记录看不见。
+    const p = R.personal || {};
+    const hasGrowth = ['maternal', 'birth', 'feeding', 'growth'].some(k => String(p[k] || '').trim());
+    const ageNum = Number(String(R.basic.age || '').match(/\d+/));
+    const isChild = Number.isFinite(ageNum) && ageNum > 0 && ageNum < 14;
+    const growthOpen = hasGrowth || isChild;
     return `
-      <div class="card">
-        <div class="card-title">出生与成长 <span class="muted">儿科 / 妇产科必填</span></div>
+      <details class="card mini-details"${growthOpen ? ' open' : ''}>
+        <summary>出生与成长 <span class="muted">儿科填写，成人一般不写</span></summary>
         ${textarea('母孕史', 'personal.maternal', {
           rows: 2,
           placeholder: '如：母孕期体健，否认重大感染病史及特殊服药史，否认毒物、放射线接触史',
-          hint: '母亲怀孕期间的健康与用药情况。成人病历可留空。'
+          hint: '母亲怀孕期间的健康与用药情况。成人病历留空，病历里不会出现这一行。'
         })}
         ${textarea('出生史', 'personal.birth', {
           rows: 2,
-          placeholder: '如：G2P2，足月剖宫产，出生体重4.2kg，无产伤、窒息史'
+          placeholder: '如：G2P2，足月剖宫产，出生体重4.2kg，无产伤、窒息史',
+          hint: '出生方式、出生体重、有无产伤或窒息。成人留空即可。'
         })}
         ${textarea('喂养史', 'personal.feeding', {
           rows: 2,
@@ -561,7 +620,7 @@ const APP = (() => {
           placeholder: '如：3个月会抬头，6个月会坐，生长发育与正常同龄儿相同',
           hint: '儿科病历要求写明与同龄儿的比较。成人可留空。'
         })}
-      </div>
+      </details>
 
       <div class="card">
         <div class="card-title">居住与接触</div>
@@ -571,11 +630,16 @@ const APP = (() => {
 
       <div class="card">
         <div class="card-title">嗜好</div>
-        ${seg('吸烟', 'personal.smoking', ['无', '有', '已戒'])}
+        ${/* 加「未问」空选项：原默认停在「无」，空记录会凭空输出「吸烟史：无」。 */ ''}
+        ${seg('吸烟', 'personal.smoking', [{ value: '', text: '未问' }, '无', '有', '已戒'], {
+          hint: '不选＝没问过，病历里写「／」。'
+        })}
         ${input('吸烟情况', 'personal.smokingAmount', {
           placeholder: '如：吸烟30年，每日约20支，未戒烟'
         })}
-        ${seg('饮酒', 'personal.drinking', ['无', '有', '已戒'])}
+        ${seg('饮酒', 'personal.drinking', [{ value: '', text: '未问' }, '无', '有', '已戒'], {
+          hint: '不选＝没问过，病历里写「／」。'
+        })}
         ${input('饮酒情况', 'personal.drinkingAmount', {
           placeholder: '如：饮白酒约2两/日，已戒酒5年'
         })}
@@ -583,6 +647,18 @@ const APP = (() => {
 
       <div class="card">
         <div class="card-title">接触史</div>
+        ${/* 《诊断学》第10版 个人史：「职业与工作条件及有无工业毒物、粉尘、
+             放射性物质接触史，有无冶游史」——这两项教材点名要求，此前全项目缺失。 */ ''}
+        ${textarea('职业与工作条件', 'personal.occupationEnv', {
+          rows: 2,
+          placeholder: '如：从事煤矿井下作业12年，长期接触粉尘；否认放射性物质接触史',
+          hint: '教材要求记录工作环境及有无工业毒物、粉尘、放射性物质接触史。与「一般项目」里的职业名称不同；不填则病历里写「／」。'
+        })}
+        ${textarea('冶游史', 'personal.sexualHistory', {
+          rows: 2,
+          placeholder: '如：否认冶游史',
+          hint: '冶游史即不洁性接触史。敏感项，不填则病历里写「／」，工具不会替你写「否认」。'
+        })}
         ${textarea('毒物、粉尘、放射性物质接触史', 'personal.drugs', {
           rows: 2, placeholder: '如：否认毒物、粉尘及放射性物质接触史'
         })}
@@ -598,9 +674,20 @@ const APP = (() => {
     return `
       <div class="card">
         <div class="card-title">婚姻史</div>
-        ${seg('婚姻状况', 'marriage.status', SCHEMA.MARITAL)}
+        ${/* 缺陷2第3条：婚姻史以前没填就整节消失，validate 里也没有任何检查项，
+              属于完全静默的丢失。schema 的 marriage.status 本来默认就是 ''，
+              但 seg 没有空选项时界面会"看起来"一个都没选中，用户以为选过了。
+              加「未填」空选项，选中态与数据一致，点一下也能主动清空。 */ ''}
+        ${seg('婚姻状况', 'marriage.status', [{ value: '', text: '未填' }, ...SCHEMA.MARITAL], {
+          hint: '不选＝没问过，病历这一节写「／」，同时在质控提醒里提示。'
+        })}
         ${input('结婚年龄', 'marriage.age', { type: 'number', inputmode: 'numeric', placeholder: '25' })}
         ${input('配偶健康状况', 'marriage.spouseHealth', { placeholder: '如：配偶体健' })}
+        ${input('性生活情况', 'marriage.sexLife', {
+          placeholder: '如：正常',
+          hint: '《诊断学》婚姻史要求记录性生活情况与夫妻关系；属于隐私，不填就不会写进病历。'
+        })}
+        ${input('夫妻关系', 'marriage.relation', { placeholder: '如：和睦' })}
       </div>
 
       ${isFemale ? `
@@ -624,26 +711,46 @@ const APP = (() => {
             ${input('经期（天）', 'menstruation.duration', { type: 'number', inputmode: 'numeric' })}
             ${input('经量', 'menstruation.quantity', { placeholder: '中等' })}
           </div>
+          ${/* 《诊断学》第10版 月经史：「并记录月经量、颜色，有无血块、痛经、白带等情况」。
+               经量此前已有，颜色/血块/白带三项缺失，采集不到也就写不出来。 */ ''}
+          <div class="row2">
+            ${input('经血颜色', 'menstruation.color', { placeholder: '暗红' })}
+            ${input('血块', 'menstruation.clot', { placeholder: '无血块' })}
+          </div>
+          ${input('白带', 'menstruation.leukorrhea', { placeholder: '量中，色白，无异味' })}
           <div class="row2">
             ${input('绝经年龄', 'menstruation.menopauseAge', { type: 'number', inputmode: 'numeric' })}
             ${input('末次月经', 'menstruation.lmp', { placeholder: '2026-09-28' })}
           </div>
-          ${seg('痛经', 'menstruation.dysmenorrhea', ['无', '有'])}
+          ${/* 原来「痛经」只有无/有两态且默认「无」，空记录会凭空输出「无痛经。」。
+               加「未问」表示没问过，此时病历里不写痛经。 */ ''}
+          ${seg('痛经', 'menstruation.dysmenorrhea', [{ value: '', text: '未问' }, '无', '有'], {
+            hint: '不选＝没问过，病历里不出现「痛经」字样。'
+          })}
         </details>
       </div>
 
       <div class="card">
         <div class="card-title">生育史</div>
+        <div class="hint">按《诊断学》要求写成「足月分娩数-早产数-流产或人流数-存活数」，四项填任意一项即用此格式；一项都不填则回退到「孕次/产次」写法。</div>
         <div class="row2">
-          ${input('孕次', 'childbirth.gravida', { type: 'number', inputmode: 'numeric' })}
-          ${input('产次', 'childbirth.para', { type: 'number', inputmode: 'numeric' })}
+          ${input('足月分娩数', 'childbirth.fullTerm', { type: 'number', inputmode: 'numeric', placeholder: '1' })}
+          ${input('早产数', 'childbirth.premature', { type: 'number', inputmode: 'numeric', placeholder: '0' })}
         </div>
         <div class="row2">
-          ${input('流产次数', 'childbirth.abortion', { type: 'number', inputmode: 'numeric' })}
+          ${input('流产或人流数', 'childbirth.abortion', { type: 'number', inputmode: 'numeric', placeholder: '0' })}
+          ${input('存活数', 'childbirth.alive', { type: 'number', inputmode: 'numeric', placeholder: '1' })}
+        </div>
+        <details class="mini-details">
+          <summary>其他生育信息</summary>
+          <div class="row2">
+            ${input('孕次', 'childbirth.gravida', { type: 'number', inputmode: 'numeric' })}
+            ${input('产次', 'childbirth.para', { type: 'number', inputmode: 'numeric' })}
+          </div>
           ${input('末次分娩', 'childbirth.lastBirth', { placeholder: '2020年顺产一子' })}
-        </div>
-        ${textarea('分娩及子女情况', 'childbirth.details', { rows: 2, placeholder: '如：顺产1子，体健' })}
-        ${input('避孕方式', 'childbirth.contraception', { placeholder: '如：宫内节育器 / 无' })}
+          ${textarea('分娩及子女情况', 'childbirth.details', { rows: 2, placeholder: '如：顺产1子，体健' })}
+        </details>
+        ${input('避孕措施', 'childbirth.contraception', { placeholder: '如：宫内节育器 / 无' })}
       </div>
       ` : `
       <div class="card">
@@ -663,19 +770,24 @@ const APP = (() => {
         <div class="card-title">家族史</div>
         ${checks('家族中患有的疾病（可多选）', 'family.diseaseChecks', SCHEMA.FAMILY_DISEASES)}
         ${textarea('父母、兄弟姐妹健康状况', 'family.deceased', {
-          rows: 2, placeholder: '如：父母健在，兄弟1人均体健'
+          rows: 2, placeholder: '如：父母健在，兄弟1人均体健；如已死亡，写死亡原因及年龄'
         })}
         ${textarea('与本病相似的病情', 'family.similarDisease', {
           rows: 2,
-          placeholder: '留空则按上面的勾选写，没有类似病情写「家族中无类似疾病患者」',
-          hint: '评分表第2页家族史「与本病相似的病情」2.5 分。手写内容优先于勾选。'
+          placeholder: '如：父亲患高血压，母亲患2型糖尿病；或写「家族中无类似疾病患者」',
+          hint: '评分表第2页家族史「与本病相似的病情」2.5 分。手写内容优先于勾选；全空则病历里写「家族中类似疾病史：／」。'
+        })}
+        ${textarea('家族传染病史', 'family.infectionHistory', {
+          rows: 2,
+          placeholder: '如：否认结核、肝炎、性病等传染性疾病史',
+          hint: '《诊断学》家族史三个问题之一，与遗传性疾病分开记录。留空则写「／」，不替你写「否认」。'
         })}
         ${textarea('两系三代遗传性疾病史', 'family.threeGeneration', {
           rows: 2,
           placeholder: '留空则默认：两系三代否认遗传性疾病史',
           hint: '评分表第2页家族史「两系三代遗传性疾病史」2.5 分。'
         })}
-        ${textarea('其他补充（遗传病、传染病、死亡原因）', 'family.other', {
+        ${textarea('其他补充', 'family.other', {
           rows: 2, placeholder: '如：否认家族性遗传病及传染病史'
         })}
       </div>
@@ -687,6 +799,14 @@ const APP = (() => {
     const dept = SCHEMA.DEPARTMENTS.find(d => d.key === deptKey) || SCHEMA.DEPARTMENTS[0];
 
     let html = `
+      <div class="card sticky-note">
+        <div><strong>体格检查</strong></div>
+        <div class="hint">
+          <b>勾了才算查过。</b>没勾的项目＝本次没做，病历里不会出现，也不会替你写「正常」。
+          常规问诊会做的项目，可以用每张卡片里的「全选」，或点「常用描述」直接选一句（会自动勾上）。
+          生命体征没填的项，病历里写「／」。
+        </div>
+      </div>
       <div class="card">
         <div class="card-title">生命体征</div>
         <div class="grid3">
@@ -717,40 +837,15 @@ const APP = (() => {
     SCHEMA.PE_COMMON.forEach(group => {
       const items = group.items.filter(it => !it.depts || it.depts.includes(deptKey));
       if (!items.length) return;
-      const itemHtml = items.map(it => {
-        const cur = R.pe[group.key] && R.pe[group.key][it.key];
-        const val = cur !== undefined && cur !== null && String(cur) !== '' ? String(cur) : '';
-        const shown = val || it.default || '';
-        // 三种状态必须分开：
-        //   filled  —— 用户填过
-        //   default —— 没填，但 schema 有默认正常描述，留空会自动写进病历
-        //   blank   —— 没填也没默认（子项/实查项），必须自己填，否则病历里没这段
-        const state = val ? 'filled' : (it.default ? 'default' : 'blank');
-        const badge = state === 'filled'
-          ? '<span class="tag-done">已填</span>'
-          : (state === 'default'
-            ? '<span class="tag-auto">系统默认</span>'
-            : '<span class="tag-req">需填</span>');
-        const quick = (it.options || []).map(o =>
-          `<button type="button" class="chip small${shown === o ? ' on' : ''}"
-            data-pequick="${group.key}" data-pekey="${it.key}" data-val="${esc(o)}">${esc(o)}</button>`
-        ).join('');
-        return `<div class="pe-item is-${state}">
-          <div class="pe-label">${esc(it.label)}${badge}</div>
-          <textarea rows="2" class="pe-text" data-path="pe.${group.key}.${it.key}"
-            placeholder="${esc(it.default || '填写检查所见')}">${esc(shown)}</textarea>
-          ${state === 'default' ? '<div class="hint">自动补的正常描述，留空也能生成；核对过再改一个字即算已填。</div>' : ''}
-          ${state === 'blank' ? '<div class="hint">这一项没有默认值，留空则病历里不会出现这句。</div>' : ''}
-          <details class="pe-opts">
-            <summary>常用描述</summary>
-            <div class="chips">${quick}</div>
-          </details>
-        </div>`;
-      }).join('');
-      html += `<details class="card pe-group" id="pe-${group.key}" ${R.pe[group.key] && Object.values(R.pe[group.key] || {}).some(v => v) ? 'open' : ''}>
-        <summary>${esc(group.name)}</summary>
-        <div class="pe-body">${itemHtml}</div>
-      </details>`;
+      const itemHtml = items.map(it => peItemHtml(group.key, group.key, it)).join('');
+      html += peGroupCard({
+        id: `pe-${group.key}`,
+        name: group.name,
+        groupKey: group.key,
+        items,
+        itemHtml,
+        extra: ''
+      });
     });
 
     // 专科查体
@@ -758,39 +853,97 @@ const APP = (() => {
       const sp = SCHEMA.PE_SPECIAL[spKey];
       if (!sp) return;
       const storeKey = 'special_' + spKey;
-      const itemHtml = sp.items.map(it => {
-        const cur = (R.pe[storeKey] || {})[it.key];
-        const val = cur !== undefined && cur !== null && String(cur) !== '' ? String(cur) : '';
-        const shown = val || it.default || '';
-        const state = val ? 'filled' : (it.default ? 'default' : 'blank');
-        const badge = state === 'filled'
-          ? '<span class="tag-done">已填</span>'
-          : (state === 'default'
-            ? '<span class="tag-auto">系统默认</span>'
-            : '<span class="tag-req">需填</span>');
-        const quick = (it.options || []).map(o =>
-          `<button type="button" class="chip small${shown === o ? ' on' : ''}"
-            data-pequick="${storeKey}" data-pekey="${it.key}" data-val="${esc(o)}">${esc(o)}</button>`
-        ).join('');
-        return `<div class="pe-item is-${state}">
-          <div class="pe-label">${esc(it.label)}${badge}</div>
-          <textarea rows="2" class="pe-text" data-path="pe.${storeKey}.${it.key}"
-            placeholder="${esc(it.default || '填写检查所见')}">${esc(shown)}</textarea>
-          ${state === 'default' ? '<div class="hint">自动补的正常描述，留空也能生成；核对过再改一个字即算已填。</div>' : ''}
-          ${state === 'blank' ? '<div class="hint">这一项没有默认值，留空则病历里不会出现这句。</div>' : ''}
-          <details class="pe-opts">
-            <summary>常用描述</summary>
-            <div class="chips">${quick}</div>
-          </details>
-        </div>`;
-      }).join('');
-      html += `<details class="card pe-group pe-special" id="pe-special_${spKey}">
-        <summary>${esc(sp.name)}<span class="tag-dept">本科室</span></summary>
-        <div class="pe-body">${itemHtml}</div>
-      </details>`;
+      const itemHtml = sp.items.map(it => peItemHtml(storeKey, storeKey, it)).join('');
+      html += peGroupCard({
+        id: `pe-special_${spKey}`,
+        name: sp.name,
+        groupKey: storeKey,
+        items: sp.items,
+        itemHtml,
+        extra: '<span class="tag-dept">本科室</span>',
+        cls: ' pe-special'
+      });
     });
 
     return html;
+  }
+
+  /**
+   * 勾选制的核心交互文案：一个查体项要不要写进病历，由学生说了算。
+   *
+   * ⚠️ 本轮语义变更（缺陷1第4条）：**通用查体也改成默认不勾。**
+   * 旧设计是「通用查体每个病人都做 → 默认勾上，留空自动补正常描述」，
+   * 结果空记录直接生成「发育正常，营养中等，神志清楚…双肺呼吸音清…腹平软」整段正常描述，
+   * 学生一眼都没看过病人，工具已经替他写完了查体。
+   * 现在统一规则：**勾了才算查过，没勾＝本次没做＝病历里不出现**。
+   * 判定逻辑的唯一实现是 SCHEMA.peChecked（那里也已删掉「有默认描述就算已勾」那一级），
+   * 这里只负责呈现。
+   */
+  function peItemHtml(groupKey, containerKey, it) {
+    const cur = (R.pe[containerKey] || {})[it.key];
+    const val = cur !== undefined && cur !== null && String(cur) !== '' ? String(cur) : '';
+    const checked = SCHEMA.peChecked(R, groupKey, it.key);
+    const normalText = SCHEMA.peNormalText(it);
+    // 未勾选时**不预填**正常描述，输入框留空，只在 placeholder 里给提示。
+    // 原来无条件预填（shown = val || normalText）会造成两个问题：
+    //   ①界面上看着像"已经写了查体结果"，其实记录是空的；
+    //   ②学生误以为空白框里那行字是自己写的，直接生成。
+    // 已经手写的值（val）无论勾没勾都照常显示，不能把用户写过的东西藏起来。
+    const shown = val || (checked ? normalText : '');
+    // 四种状态：
+    //   off     —— 未勾选，本次没查，病历里完全不出现这一项
+    //   filled  —— 勾了且自己填了
+    //   default —— 勾了但没填，生成时自动补规范正常描述
+    //   blank   —— 勾了但没默认也没正常描述，必须自己填
+    const state = !checked ? 'off' : (val ? 'filled' : (normalText ? 'default' : 'blank'));
+    const badge = state === 'off'
+      ? '<span class="tag-off">未查</span>'
+      : (state === 'filled'
+        ? '<span class="tag-done">已填</span>'
+        : (state === 'default'
+          ? '<span class="tag-auto">系统默认</span>'
+          : '<span class="tag-req">需填</span>'));
+    const quick = (it.options || []).map(o =>
+      `<button type="button" class="chip small${shown === o ? ' on' : ''}"
+        data-pequick="${containerKey}" data-pekey="${it.key}" data-val="${esc(o)}">${esc(o)}</button>`
+    ).join('');
+    const hint = state === 'off'
+      ? `未勾选：本次没做这一项，病历里不会出现「${esc(it.label)}」。`
+      : (state === 'default'
+        ? '已勾选但没填具体所见，生成时自动写这句正常描述。'
+        : (state === 'blank'
+          ? '这一项没有默认描述，留空则病历里不会出现这句。'
+          : ''));    return `<div class="pe-item is-${state}" data-pe-group="${esc(groupKey)}" data-pe-key="${esc(it.key)}">
+      <div class="pe-label">
+        <label class="pe-check"><input type="checkbox" data-pecheck="${esc(groupKey)}" data-pekey="${esc(it.key)}"${checked ? ' checked' : ''}><span>本次检查</span></label>
+        ${esc(it.label)}${badge}
+      </div>
+      <div class="pe-input">
+        <textarea rows="2" class="pe-text" data-path="pe.${containerKey}.${it.key}"
+          placeholder="${esc(normalText || '填写检查所见')}">${esc(shown)}</textarea>
+        ${hint ? `<div class="hint pe-hint">${hint}</div>` : ''}
+        <details class="pe-opts">
+          <summary>常用描述</summary>
+          <div class="chips">${quick}</div>
+        </details>
+      </div>
+    </div>`;
+  }
+
+  /** 一张查体卡片：标题 + 「已勾 N/M」+ 全选/全不选 + 条目列表 */
+  function peGroupCard(opt) {
+    const items = opt.items || [];
+    const on = items.filter(it => SCHEMA.peChecked(R, opt.groupKey, it.key)).length;
+    const store = (R.pe[opt.containerKey || opt.groupKey] || {});
+    const open = Object.values(store).some(v => v) || (opt.cls || '').includes('pe-special');
+    return `<details class="card pe-group${opt.cls || ''}" id="${opt.id}" ${open ? 'open' : ''}>
+      <summary>${esc(opt.name)}${opt.extra || ''}<span class="pe-count" data-count-for="${esc(opt.groupKey)}">已勾 ${on}/${items.length}</span></summary>
+      <div class="btn-row pe-tools">
+        <button type="button" class="btn btn-ghost btn-sm" data-pall="1" data-pgroup="${esc(opt.groupKey)}">全选</button>
+        <button type="button" class="btn btn-ghost btn-sm" data-pall="0" data-pgroup="${esc(opt.groupKey)}">全不选</button>
+      </div>
+      <div class="pe-body">${opt.itemHtml}</div>
+    </details>`;
   }
 
   /**
@@ -843,21 +996,43 @@ const APP = (() => {
     `;
   }
 
+  /**
+   * 辅助检查录入。
+   *
+   * 《诊断学》第10版 辅助检查：「应分类按检查时间顺序记录检查结果，如系在其他
+   * 医疗机构所做检查，应当写明该机构名称及检查号」。原先每项只有「项目名 + 结果」
+   * 两个输入框，外院机构名和检查号无处可填，日期也没有，生成时只能按录入顺序排。
+   * 本轮每项补 date / hospital / no 三个输入框。
+   *
+   * 布局注意：`.aux-row` 在 style.css 里是 flex 且写了 `input:first-child` /
+   * `input:nth-child(2)` 的宽度比例，往里平铺新输入框会打乱这两条规则、412px 下溢出。
+   * 所以新增的输入框一律放到 `.aux-row` 之外的 `.row2` 或独立行里，不动既有结构。
+   */
   function renderAux() {
     const items = (R.auxiliary && R.auxiliary.items) || [{ name: '', result: '' }];
     const rows = items.map((it, i) => `
-      <div class="aux-row">
-        <input type="text" data-aux="name" data-idx="${i}" value="${esc(it.name || '')}"
-          placeholder="检查项目，如：血常规">
-        <input type="text" data-aux="result" data-idx="${i}" value="${esc(it.result || '')}"
-          placeholder="结果">
-        <button type="button" class="btn-del" data-auxdel="${i}">×</button>
+      <div class="aux-item">
+        <div class="aux-row">
+          <input type="text" data-aux="name" data-idx="${i}" value="${esc(it.name || '')}"
+            placeholder="检查项目，如：血常规">
+          <input type="text" data-aux="result" data-idx="${i}" value="${esc(it.result || '')}"
+            placeholder="结果">
+          <button type="button" class="btn-del" data-auxdel="${i}">×</button>
+        </div>
+        <div class="row2">
+          <input type="date" data-aux="date" data-idx="${i}" value="${esc(it.date || '')}"
+            title="检查日期：填了会按日期升序排列">
+          <input type="text" data-aux="hospital" data-idx="${i}" value="${esc(it.hospital || '')}"
+            placeholder="检查机构（外院必填）">
+        </div>
+        <input type="text" data-aux="no" data-idx="${i}" value="${esc(it.no || '')}"
+          placeholder="检查号（外院填写）">
       </div>
     `).join('');
     return `
       <div class="card">
         <div class="card-title">辅助检查</div>
-        <div class="hint">填写本次就诊已有的检查结果；没有可留空，生成时显示"暂缺"。</div>
+        <div class="hint">填写本次就诊已有的检查结果；没有就留空，生成时这一节写「暂缺」。填了日期会按时间先后排列，在外院做的检查请写明机构名称与检查号。</div>
         <div id="auxList">${rows}</div>
         <button class="btn btn-ghost" data-act="addAux">+ 添加一项</button>
       </div>
@@ -905,11 +1080,16 @@ const APP = (() => {
 
       <div class="card">
         <div class="card-title">初步诊断</div>
+        <div class="hint">按主次顺序排列：主要疾病在前，次要疾病在后，并发症列于有关主病之后，伴发病最后。一时难以确定的在病名后加「？」，如「发热待查，肠结核？」。</div>
         <div id="diagList">${diagHtml || '<div class="empty">尚未添加诊断</div>'}</div>
         <div class="diag-add">
           <input type="text" id="diagNew" placeholder="输入诊断后点添加">
           <button class="btn" data-act="addDiag">添加</button>
         </div>
+        ${input('医师签名', 'diagnosis.signature', {
+          placeholder: '签全名，如：李四',
+          hint: '入院记录要求书写者在初步诊断右下角签全名；留空则病历里不出现签名行。'
+        })}
       </div>
 
       <div class="card">
@@ -1250,16 +1430,19 @@ const APP = (() => {
     const mustMissing = mustList.filter(isBlank).map(p => NAME[p] || p);
     const shouldMissing = shouldList.filter(isBlank).map(p => NAME[p] || p);
 
-    // 查体里有多少项还是「系统默认」没核对
+    // 查体里有多少项还没勾（没勾 = 本次没查 = 病历里不出现）
+    //
+    // ⚠️ 语义变更（本轮）：这里原来统计「没写字」的项，并声称它们「用系统默认」
+    // 自动补一句正常描述。现在通用查体默认全不勾（缺陷1），留空 ≠ 默认正常，
+    // 而是「没查、不写」。所以统计口径必须改成「没勾」，否则会继续误导学生。
     const deptKey = R.basic.department || 'general';
     const dept = SCHEMA.DEPARTMENTS.find(d => d.key === deptKey) || SCHEMA.DEPARTMENTS[0];
     let peTotal = 0;
-    let peDefault = 0;
+    let peUnchecked = 0;
     SCHEMA.PE_COMMON.forEach(g => {
       g.items.filter(it => !it.depts || it.depts.includes(deptKey)).forEach(it => {
         peTotal++;
-        const cur = (R.pe[g.key] || {})[it.key];
-        if (cur === undefined || cur === null || String(cur).trim() === '') peDefault++;
+        if (!SCHEMA.peChecked(R, g.key, it.key)) peUnchecked++;
       });
     });
     (dept.special || []).forEach(spKey => {
@@ -1267,8 +1450,7 @@ const APP = (() => {
       if (!sp) return;
       sp.items.forEach(it => {
         peTotal++;
-        const cur = (R.pe['special_' + spKey] || {})[it.key];
-        if (cur === undefined || cur === null || String(cur).trim() === '') peDefault++;
+        if (!SCHEMA.peChecked(R, 'special_' + spKey, it.key)) peUnchecked++;
       });
     });
 
@@ -1296,11 +1478,11 @@ const APP = (() => {
         </div>
 
         <div class="fs-row">
-          <div class="fs-head"><span class="tag-auto">可留空</span> 查体 ${peTotal} 项中 ${peDefault} 项用系统默认</div>
+          <div class="fs-head"><span class="tag-auto">可留空</span> 查体 ${peTotal} 项中 ${peTotal - peUnchecked} 项已勾选</div>
           <div class="hint">
-            这些项目留空时，工具会自动补一句常规的正常描述写进病历（例如「腹平软，全腹无压痛」）。
-            <b>你只需要改掉本例异常的那几项</b>，其余保持默认即可。
-            生成页的「评分自查」会把用到默认值的项单独标出来，方便核对。
+            <b>没勾的项 = 本次没查</b>，病历里一个字都不会写，工具不会替你补「未见异常」。
+            勾一项、写一句所见（或点「常用描述」选一个），病历里才会出现这一项。
+            生命体征同理：填了才写，没填就写「／」。
           </div>
         </div>
       </div>
@@ -1517,6 +1699,13 @@ const APP = (() => {
     return Number.isInteger(v) ? String(v) : v.toFixed(1);
   }
 
+  /** 步骤键 → 索引。认不出来（空串、旧键、改过步骤）一律回 0，不让页面白屏 */
+  function stepIndexOf(key) {
+    if (!key) return 0;
+    const i = STEPS.findIndex(s => s.key === key);
+    return i < 0 ? 0 : i;
+  }
+
   /** 跳到某个步骤（保持 render 的唯一步骤入口） */
   function gotoStep(key) {
     const i = STEPS.findIndex(s => s.key === key);
@@ -1583,6 +1772,15 @@ const APP = (() => {
 
     // 实时预览
     updateLivePreviews();
+
+    // 记住停在哪一步。刷新、切走再回来都会回到原处，
+    // 不必每次都从「基本情况」重新点 7 下。
+    // 生成页不记——它只是输出，回到编辑流程更有用。
+    if (cur.key !== 'output' && settings.lastStep !== cur.key) {
+      settings.lastStep = cur.key;
+      saveSettings();
+    }
+
     window.scrollTo({ top: 0, behavior: 'instant' });
   }
 
@@ -1620,41 +1818,71 @@ const APP = (() => {
   function refreshPeBadge(el) {
     const item = el.closest('.pe-item');
     if (!item) return;
-    const val = String(el.value || '').trim();
-    const placeholder = el.getAttribute('placeholder') || '';
-    const hasDefault = placeholder && placeholder !== '填写检查所见';
-    const state = val ? 'filled' : (hasDefault ? 'default' : 'blank');
-    item.classList.remove('is-filled', 'is-default', 'is-blank');
+    const groupKey = item.dataset.peGroup || '';
+    const itemKey = item.dataset.peKey || '';
+    if (!groupKey || !itemKey || !SCHEMA.findPEItem) return;
+    const it = SCHEMA.findPEItem(groupKey + '.' + itemKey);
+    if (!it) return;
+    // 读记录值，不读 el.value ——
+    // textarea 里预填着正常描述（shown = val || normalText），拿它当「用户填了」
+    // 会把「勾了但没填」错判成绿色「已填」，而整页重绘后又变回「系统默认」，
+    // 同一份数据两种显示。记录值是唯一真相。
+    const containerKey = el.dataset.path
+      ? el.dataset.path.split('.')[1]
+      : groupKey;
+    const raw = (R.pe[containerKey] || {})[itemKey];
+    const val = raw !== undefined && raw !== null ? String(raw).trim() : '';
+    const checked = SCHEMA.peChecked(R, groupKey, itemKey);
+    const normalText = SCHEMA.peNormalText(it);
+    const state = !checked ? 'off' : (val ? 'filled' : (normalText ? 'default' : 'blank'));
+    item.classList.remove('is-filled', 'is-default', 'is-blank', 'is-off');
     item.classList.add('is-' + state);
+
+    // 勾选框本身也要跟上（「全选 / 全不选」是整组改状态，不经过单个 input 事件，
+    // 不在这里同步的话，记录改了、框还画着旧的）
+    const cb = item.querySelector('input[data-pecheck]');
+    if (cb && cb.checked !== checked) cb.checked = checked;
 
     const label = item.querySelector('.pe-label');
     if (label) {
       // 去掉旧角标再插新的
-      label.querySelectorAll('.tag-done,.tag-auto,.tag-req').forEach(n => n.remove());
+      label.querySelectorAll('.tag-done,.tag-auto,.tag-req,.tag-off').forEach(n => n.remove());
       const span = document.createElement('span');
-      if (state === 'filled') { span.className = 'tag-done'; span.textContent = '已填'; }
+      if (state === 'off') { span.className = 'tag-off'; span.textContent = '未查'; }
+      else if (state === 'filled') { span.className = 'tag-done'; span.textContent = '已填'; }
       else if (state === 'default') { span.className = 'tag-auto'; span.textContent = '系统默认'; }
       else { span.className = 'tag-req'; span.textContent = '需填'; }
       label.appendChild(span);
     }
-    // 提示文案跟着状态切换
-    const oldHint = item.querySelector('.hint');
-    if (oldHint && (oldHint.textContent.includes('自动补的正常描述') || oldHint.textContent.includes('没有默认值'))) {
-      oldHint.remove();
+
+    // 提示文案跟着状态切换（只动我们自己加的那条，别碰别的 hint）
+    const hintBox = item.querySelector('.pe-hint');
+    if (hintBox) {
+      if (state === 'off') hintBox.textContent = `未勾选：本次没做这一项，病历里不会出现「${it.label}」。`;
+      else if (state === 'default') hintBox.textContent = '已勾选但没填具体所见，生成时自动写这句正常描述。';
+      else if (state === 'blank') hintBox.textContent = '这一项没有默认描述，留空则病历里不会出现这句。';
+      else hintBox.remove();
     }
-    if (state === 'default') {
-      const d = document.createElement('div');
-      d.className = 'hint';
-      d.textContent = '自动补的正常描述，留空也能生成；核对过再改一个字即算已填。';
-      const opts = item.querySelector('.pe-opts');
-      item.insertBefore(d, opts);
-    } else if (state === 'blank') {
-      const d = document.createElement('div');
-      d.className = 'hint';
-      d.textContent = '这一项没有默认值，留空则病历里不会出现这句。';
-      const opts = item.querySelector('.pe-opts');
-      item.insertBefore(d, opts);
+    refreshPeCount(groupKey);
+  }
+
+  /** 刷新某张查体卡片标题上的「已勾 N/M」 */
+  function refreshPeCount(groupKey) {
+    const box = document.querySelector(`[data-count-for="${groupKey}"]`);
+    if (!box) return;
+    const items = peItemsOf(groupKey);
+    const on = items.filter(it => SCHEMA.peChecked(R, groupKey, it.key)).length;
+    box.textContent = `已勾 ${on}/${items.length}`;
+  }
+
+  /** 按组键取查体项列表：普通组从 PE_COMMON 取，special_xxx 从 PE_SPECIAL 取 */
+  function peItemsOf(groupKey) {
+    if (String(groupKey).startsWith('special_')) {
+      const sp = SCHEMA.PE_SPECIAL[String(groupKey).slice('special_'.length)];
+      return (sp && sp.items) || [];
     }
+    const g = SCHEMA.PE_COMMON.find(x => x.key === groupKey);
+    return (g && g.items) || [];
   }
 
   function bindEvents() {
@@ -1677,7 +1905,8 @@ const APP = (() => {
       }
       if (t.dataset.aux) {
         const idx = parseInt(t.dataset.idx, 10);
-        R.auxiliary.items[idx] = R.auxiliary.items[idx] || { name: '', result: '' };
+        // 旧存档里这一项可能没有 date/hospital/no，缺什么补什么（只补空壳，不填值）。
+        R.auxiliary.items[idx] = R.auxiliary.items[idx] || { name: '', result: '', date: '', hospital: '', no: '' };
         R.auxiliary.items[idx][t.dataset.aux] = t.value;
         saveCurrent();
       }
@@ -1711,7 +1940,7 @@ const APP = (() => {
 
     // 点击事件（委托）
     document.addEventListener('click', e => {
-      const t = e.target.closest('[data-seg],[data-check],[data-ros],[data-pequick],[data-act],[data-addhint],[data-auxdel],[data-diagdel],[data-jump],[data-dismiss-alert],[data-view],[data-checkjump],[data-arrdel],[data-arrstrdel],[data-focusadd],[data-focusdel]');
+      const t = e.target.closest('[data-seg],[data-check],[data-ros],[data-rosneg],[data-pequick],[data-pecheck],[data-pall],[data-act],[data-addhint],[data-auxdel],[data-diagdel],[data-jump],[data-dismiss-alert],[data-view],[data-checkjump],[data-arrdel],[data-arrstrdel],[data-focusadd],[data-focusdel]');
       if (!t) return;
       const ds = t.dataset;
 
@@ -1733,6 +1962,13 @@ const APP = (() => {
         const f = R.focusPE || (R.focusPE = { keys: [], note: '' });
         if (!Array.isArray(f.keys)) f.keys = [];
         if (!f.keys.includes(ds.focusadd)) f.keys.push(ds.focusadd);
+        // 加入重点查体 = 明确要写进病历，顺手把它置为已勾选。
+        // 否则会出现「重点查体里列了这一项，正文说未查」的自相矛盾。
+        const ref = String(ds.focusadd);
+        const dot = ref.indexOf('.');
+        if (dot > 0 && SCHEMA.setPeChecked) {
+          SCHEMA.setPeChecked(R, ref.slice(0, dot), ref.slice(dot + 1), true);
+        }
         saveCurrent();
         render();
         return;
@@ -1802,22 +2038,47 @@ const APP = (() => {
         return;
       }
 
-      // 系统回顾阳性切换
+      // 系统回顾三态切换（缺陷1第2条的核心交互）
+      //
+      // 旧实现只有两态（勾=阳性，不勾=阴性），于是「没问过」必然被写成阴性。
+      // 现在每个症状按固定顺序循环：
+      //   未问 →（点一次）→ 阴性 →（再点）→ 阳性 →（再点）→ 未问
+      // 这个顺序保证「要写成阳性」也必须先经过一次阴性，反而更贴合问诊动作：
+      // 先确认病人没有这个症状，有的话才记成阳性。
       if (ds.ros !== undefined) {
         const store = R.ros[ds.ros] || (R.ros[ds.ros] = {});
-        const item = store[ds.sym] || (store[ds.sym] = { checked: false, time: '', detail: '' });
-        item.checked = !item.checked;
+        const item = store[ds.sym] || (store[ds.sym] = { checked: false, negative: false, time: '', detail: '' });
+        if (item.checked) {
+          // 阳性 → 未问
+          item.checked = false;
+          item.negative = false;
+        } else if (item.negative) {
+          // 阴性 → 阳性
+          item.negative = false;
+          item.checked = true;
+        } else {
+          // 未问 → 阴性
+          item.negative = true;
+          item.checked = false;
+        }
         saveCurrent();
         // 更新按钮外观与详情区
         const label = SCHEMA.ROS.find(s => s.key === ds.ros).symptoms.find(s => s.key === ds.sym).label;
-        t.classList.toggle('on', item.checked);
-        t.innerHTML = esc(label) + (item.checked ? ' ✓' : '');
+        t.classList.toggle('on', !!item.checked);
+        if (item.checked) {
+          t.setAttribute('style', '');
+        } else if (item.negative) {
+          t.setAttribute('style', 'background:var(--gray-2);border-color:var(--gray-4);color:var(--gray-5);text-decoration:line-through;');
+        } else {
+          t.setAttribute('style', '');
+        }
+        t.innerHTML = esc(label) + (item.checked ? ' ✓' : (item.negative ? ' −' : ''));
         const box = document.querySelector(`[data-ros-detail="${ds.ros}"]`);
         if (box) box.innerHTML = renderRosDetail(ds.ros);
         // 选中阳性时自动展开该系统
         const group = document.getElementById('ros-group-' + ds.ros);
         if (group) {
-          group.open = true;
+          if (item.checked) group.open = true;
           const badge = group.querySelector('.badge-pos');
           const summary = group.querySelector('summary');
           const posN = SCHEMA.ROS.find(s => s.key === ds.ros).symptoms
@@ -1827,6 +2088,20 @@ const APP = (() => {
             const span = document.createElement('span');
             span.className = 'badge-pos';
             span.textContent = posN;
+            summary.appendChild(span);
+          }
+          // 阴性计数角标
+          const negN = SCHEMA.ROS.find(s => s.key === ds.ros).symptoms
+            .filter(s => { const v = (R.ros[ds.ros] || {})[s.key] || {}; return !v.checked && v.negative; }).length;
+          const negBadge = summary.querySelector('[data-negcount]');
+          if (negBadge) {
+            negBadge.textContent = `阴性 ${negN}`;
+            negBadge.style.display = negN ? '' : 'none';
+          } else if (negN) {
+            const span = document.createElement('span');
+            span.className = 'tag-off';
+            span.setAttribute('data-negcount', ds.ros);
+            span.textContent = `阴性 ${negN}`;
             summary.appendChild(span);
           }
         }
@@ -1840,17 +2115,68 @@ const APP = (() => {
         return;
       }
 
+      // 单个系统的「剩余项全部标为阴性」：只标没问过的，已标阳性的保持阳性
+      if (ds.rosneg !== undefined) {
+        const sys = SCHEMA.ROS.find(s => s.key === ds.rosneg);
+        if (!sys) return;
+        const store = R.ros[ds.rosneg] || (R.ros[ds.rosneg] = {});
+        sys.symptoms.forEach(sym => {
+          const it = store[sym.key] || (store[sym.key] = { checked: false, negative: false, time: '', detail: '' });
+          if (!it.checked) it.negative = true;
+        });
+        saveCurrent();
+        render();
+        return;
+      }
+
       // 查体快捷描述
       if (ds.pequick !== undefined) {
         const group = R.pe[ds.pequick] || (R.pe[ds.pequick] = {});
         group[ds.pekey] = ds.val;
+        // 选了一个具体描述 = 这次查过了，自动勾上（专科技巧：不然点了描述却仍标「未查」）
+        if (SCHEMA.setPeChecked) SCHEMA.setPeChecked(R, ds.pequick, ds.pekey, true);
         saveCurrent();
         // 同步文本框
         const ta = document.querySelector(`textarea[data-path="pe.${ds.pequick}.${ds.pekey}"]`);
-        if (ta) ta.value = ds.val;
+        if (ta) {
+          ta.value = ds.val;
+          refreshPeBadge(ta);
+        }
         $$(`[data-pequick="${ds.pequick}"][data-pekey="${ds.pekey}"]`).forEach(b =>
           b.classList.toggle('on', b.dataset.val === ds.val)
         );
+        return;
+      }
+
+      // 勾选 / 取消勾选一个查体项
+      if (ds.pecheck !== undefined) {
+        SCHEMA.setPeChecked(R, ds.pecheck, ds.pekey, t.checked);
+        saveCurrent();
+        // 就地刷新，不整页重绘（重绘会丢滚动位置）
+        const box = t.closest('.pe-item');
+        if (box) {
+          const ta = box.querySelector('.pe-text');
+          if (ta) refreshPeBadge(ta);
+          else refreshPeCount(ds.pecheck);
+        }
+        return;
+      }
+
+      // 整组全选 / 全不选
+      if (ds.pall !== undefined) {
+        const on = ds.pall === '1';
+        peItemsOf(ds.pgroup).forEach(it => SCHEMA.setPeChecked(R, ds.pgroup, it.key, on));
+        saveCurrent();
+        // 就地刷新，不调 render()：
+        // render() 末尾会 window.scrollTo({top:0})，刚勾完的卡片瞬间离开视野，
+        // 用户得重新滚回去，体验上等于「点了没反应」。整页重绘还会重置所有
+        // <details> 的展开状态、让正在编辑的 textarea 失焦。
+        // 状态判定与计数都只在 DOM 上已存在的节点里改，够用。
+        $$(`[data-pe-group="${ds.pgroup}"]`).forEach(item => {
+          const ta = item.querySelector('.pe-text');
+          if (ta) refreshPeBadge(ta);
+        });
+        refreshPeCount(ds.pgroup);
         return;
       }
 
@@ -1884,7 +2210,8 @@ const APP = (() => {
       }
       if (ds.auxdel !== undefined) {
         R.auxiliary.items.splice(parseInt(ds.auxdel, 10), 1);
-        if (!R.auxiliary.items.length) R.auxiliary.items = [{ name: '', result: '' }];
+        // 保底一行时也要给全字段，否则新加的 date/hospital/no 输入框取不到值
+        if (!R.auxiliary.items.length) R.auxiliary.items = [{ name: '', result: '', date: '', hospital: '', no: '' }];
         saveCurrent();
         render();
       }
@@ -1926,11 +2253,35 @@ const APP = (() => {
         break;
       }
       case 'rosAllNegative': {
-        if (!confirm('确定要把所有系统回顾项目都标记为阴性吗？将清除已选的阳性项。')) return;
+        // ⚠️ 缺陷1第2条连带项：旧实现是 `R.ros = {}`，而那正是「未问」的状态，
+        // 却弹出 toast「已全部标记为阴性」——按钮做的事和说的话相反。
+        // 现在把每个症状显式写成 negative:true（这才真的是「标记为阴性」），
+        // 阳性项会被清掉并计入确认文案，不再是静默删除。
+        const posCount = SCHEMA.ROS.reduce((n, sys) => {
+          const s = R.ros[sys.key] || {};
+          return n + sys.symptoms.filter(x => (s[x.key] || {}).checked).length;
+        }, 0);
+        const msg = posCount
+          ? `确定要把所有系统回顾项目都标记为阴性吗？已选的 ${posCount} 个阳性项会被清除。`
+          : '确定要把所有系统回顾项目都标记为阴性吗？标记后病历里会逐系统写「无…」。';
+        if (!confirm(msg)) return;
+        R.ros = {};
+        SCHEMA.ROS.forEach(sys => {
+          const store = R.ros[sys.key] = {};
+          sys.symptoms.forEach(sym => { store[sym.key] = { checked: false, negative: true, time: '', detail: '' }; });
+        });
+        saveCurrent();
+        render();
+        toast('已全部标记为阴性（病历里会逐系统写「无…」）');
+        break;
+      }
+      case 'rosClearAll': {
+        // 与「全部标记为阴性」相反的操作：回到「未问」，病历里系统回顾写「／」。
+        if (!confirm('确定要把系统回顾全部清空吗？清空后视为「未问」，病历里这一节只写「／」。')) return;
         R.ros = {};
         saveCurrent();
         render();
-        toast('已全部标记为阴性');
+        toast('已清空：视为未问，病历里不会写任何阴性症状');
         break;
       }
       case 'rosExpandAll': {
@@ -1947,7 +2298,7 @@ const APP = (() => {
         break;
       }
       case 'addAux': {
-        R.auxiliary.items.push({ name: '', result: '' });
+        R.auxiliary.items.push({ name: '', result: '', date: '', hospital: '', no: '' });
         saveCurrent();
         render();
         break;
@@ -2390,6 +2741,10 @@ const APP = (() => {
     if (!R.basic.recordDate) R.basic.recordDate = SCHEMA.todayStr();
     if (!R.basic.admitDate) R.basic.admitDate = SCHEMA.todayStr();
 
+    // 回到上次停留的那一步。键不认识（改过步骤、旧存档）就退回第一步，
+    // 不因为一个字符串对不上就让页面白屏。
+    step = stepIndexOf(settings.lastStep);
+
     bindEvents();
     render();
 
@@ -2442,6 +2797,9 @@ const APP = (() => {
       setRecord: r => { R = r; },
       openList,
       gotoStep,
+      stepIndexOf,
+      getStepKey: () => (STEPS[step] || {}).key,
+      getSettings: () => settings,
       // 生成视图：仅供测试断言三种视图各自可复制，不参与业务
       setOutputView: v => { OUT_VIEW = v; },
       getOutputView: () => OUT_VIEW,
