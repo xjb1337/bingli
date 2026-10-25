@@ -146,8 +146,13 @@ async function main() {
 
   await send('Page.reload');
   await sleep(3500);
+  // 步骤位置会持久化（settings.lastStep），刷新后停在上次的「生成病历」页，
+  // 基本页的输入框根本不在 DOM 里。先跳回去再读。
+  const reloadStep = await ev(`APP._test.getStepKey()`);
+  await ev(`APP._test.gotoStep('basic')`);
+  await sleep(400);
   const restored = await ev(`document.querySelector('[data-path="basic.name"]').value`);
-  check('刷新后数据恢复', restored === '线上测试', restored);
+  check('刷新后数据恢复', restored === '线上测试', `${restored}（刷新后停在「${reloadStep}」）`);
 
   console.log('\n================ 线上地址验收 ================');
   console.log(`地址：${URL}\n`);

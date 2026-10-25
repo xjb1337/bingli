@@ -1,8 +1,13 @@
 /* 通过 GitHub API 推送本地提交。
  *
- * 背景：本机到 github.com:443 的 Git 协议线路不通（直连超时、代理程序未运行），
- * 但 api.github.com 可达。这里用 Git Data API 复刻一次 push：
- *   blob → tree → commit → 更新 ref
+ * 背景：本机 `git push` 会卡在凭据输入上（报 `/dev/tty: No such device or address`），
+ * `git credential fill` 也读不到（报 terminal prompts disabled），但 api.github.com 可达。
+ * 这里用 Git Data API 复刻一次 push：blob → tree → commit → 更新 ref。
+ *
+ * 令牌来源（按顺序尝试）：
+ *   1. 环境变量 GH_TOKEN / GITHUB_TOKEN
+ *   2. Windows 凭据管理器里的 `git:https://github.com`（advapi32 的 CredRead）
+ *   3. `git credential fill`
  *
  * 用法：
  *   node tools/push-via-api.mjs                   # 推送 HEAD 到 origin/main
@@ -22,15 +27,83 @@ function git(...args) {
   return execFileSync('git', ['-c', 'core.quotepath=false', ...args], { encoding: 'utf8' }).trim();
 }
 
+/* Windows 凭据管理器。读不到返回 ''。
+ * 注意：node 的 PATH 里通常没有 pwsh（PowerShell 7），但一定有系统自带的
+ * Windows PowerShell 5.1，所以两个都试，谁先能用就用谁。 */
+function tokenFromWindowsCredentialManager() {
+  if (process.platform !== 'win32') return '';
+  const script = [
+    '$sig = @\'',
+    'using System;',
+    'using System.Runtime.InteropServices;',
+    'public class BingliCred {',
+    '  [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)]',
+    '  public struct CREDENTIAL {',
+    '    public int Flags; public int Type; public string TargetName; public string Comment;',
+    '    public System.Runtime.InteropServices.ComTypes.FILETIME LastWritten;',
+    '    public int CredentialBlobSize; public IntPtr CredentialBlob;',
+    '    public int Persist; public int AttributeCount; public IntPtr Attributes;',
+    '    public string TargetAlias; public string UserName;',
+    '  }',
+    '  [DllImport("advapi32.dll", CharSet=CharSet.Unicode, SetLastError=true)]',
+    '  public static extern bool CredRead(string target, int type, int reservedFlag, out IntPtr credentialPtr);',
+    '  [DllImport("advapi32.dll", SetLastError=true)]',
+    '  public static extern void CredFree(IntPtr cred);',
+    '  public static string Get(string target) {',
+    '    IntPtr p;',
+    '    if (!CredRead(target, 1, 0, out p)) return "";',
+    '    try {',
+    '      CREDENTIAL c = (CREDENTIAL)Marshal.PtrToStructure(p, typeof(CREDENTIAL));',
+    '      if (c.CredentialBlobSize == 0) return "";',
+    '      byte[] b = new byte[c.CredentialBlobSize];',
+    '      Marshal.Copy(c.CredentialBlob, b, 0, c.CredentialBlobSize);',
+    '      return System.Text.Encoding.Unicode.GetString(b);',
+    '    } finally { CredFree(p); }',
+    '  }',
+    '}',
+    '\'@',
+    'Add-Type -TypeDefinition $sig -Language CSharp',
+    "[Console]::Out.Write([BingliCred]::Get('git:https://github.com'))"
+  ].join('\n');
+  const shells = [
+    'pwsh',
+    process.env.SystemRoot ? `${process.env.SystemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe` : '',
+    'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'
+  ].filter(Boolean);
+  for (const shell of shells) {
+    try {
+      const out = execFileSync(shell, ['-NoProfile', '-NonInteractive', '-Command', script], {
+        encoding: 'utf8', timeout: 60000
+      }).trim();
+      if (out) return out;
+    } catch { /* 换下一个 */ }
+  }
+  return '';
+}
+
+function tokenFromGitCredential() {
+  try {
+    const out = execFileSync('git', ['credential', 'fill'], {
+      input: 'protocol=https\nhost=github.com\n\n',
+      encoding: 'utf8',
+      timeout: 15000,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }
+    });
+    const m = /^password=(.+)$/m.exec(out);
+    return m ? m[1].trim() : '';
+  } catch {
+    return '';
+  }
+}
+
 function token() {
-  // 复用 git 已保存的凭据（credential.helper = manager）
-  const out = execFileSync('git', ['credential', 'fill'], {
-    input: 'protocol=https\nhost=github.com\n\n',
-    encoding: 'utf8'
-  });
-  const m = /^password=(.+)$/m.exec(out);
-  if (!m) throw new Error('未能从 git 凭据读取 GitHub token');
-  return m[1].trim();
+  const fromEnv = (process.env.GH_TOKEN || process.env.GITHUB_TOKEN || '').trim();
+  if (fromEnv) { console.log('令牌来源：环境变量'); return fromEnv; }
+  const fromWin = tokenFromWindowsCredentialManager();
+  if (fromWin) { console.log('令牌来源：Windows 凭据管理器'); return fromWin; }
+  const fromGit = tokenFromGitCredential();
+  if (fromGit) { console.log('令牌来源：git credential'); return fromGit; }
+  throw new Error('找不到 GitHub 令牌：请设置 GH_TOKEN，或在 Windows 凭据管理器里存 git:https://github.com');
 }
 
 const TOKEN = token();
