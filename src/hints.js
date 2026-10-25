@@ -146,6 +146,20 @@ const HINTS = (() => {
 
     /* ------------------------------ 消化 ------------------------------ */
     {
+      id: 'pud', name: '消化性溃疡（无出血）',
+      depts: ['digestive', 'general'],
+      // 必要条件给「节律性上腹痛」与「幽门螺杆菌/胃镜证据」任一条即可：
+      // 只有上腹痛没有检查的病例也该提示，那是学生最需要被提醒去做胃镜的时候。
+      must: ['ros:gi.abdominalPain', 'cc:上腹痛', 'aux:胃镜', 'aux:幽门螺杆菌'],
+      need: 3,
+      match: ['ros:gi.abdominalPain', 'ros:gi.reflux',
+        'pev:special_digestive.giTenderness=上腹部压痛',
+        'pev:abdomen.abdPalpation=上腹部压痛，无反跳痛',
+        'aux:胃镜', 'aux:幽门螺杆菌', 'aux:大便', 'risk:smoke'],
+      hint: '慢性、周期性、节律性上腹痛，空腹痛或夜间痛、进食后缓解，伴反酸嗳气，需考虑消化性溃疡。',
+      note: '可补充：胃镜（确诊金标准）、幽门螺杆菌检测（13C/14C 呼气试验或快速尿素酶）、粪便隐血、血常规。'
+    },
+    {
       id: 'ugib', name: '消化性溃疡 / 上消化道出血',
       depts: ['digestive', 'emergency', 'general'],
       must: ['ros:gi.hematemesis','ros:gi.melena'],
@@ -161,6 +175,7 @@ const HINTS = (() => {
       must: ['cc:上腹痛','ros:gi.vomiting','aux:淀粉酶','aux:脂肪酶'],
       need: 2,
       match: ['cc:上腹痛', 'cc:腹痛', 'ros:gi.vomiting', 'risk:alcohol', 'aux:淀粉酶', 'aux:脂肪酶',
+        'pev:special_digestive.giTenderness=上腹部压痛',
         'pev:abdomen.abdPalpation=上腹部压痛，无反跳痛'],
       hint: '饱食或饮酒后上腹剧痛放射至腰背、伴呕吐，需考虑急性胰腺炎。',
       note: '可补充：血/尿淀粉酶、脂肪酶、腹部CT、血脂、肝功能、电解质及血糖。'
@@ -171,6 +186,8 @@ const HINTS = (() => {
       must: ['aux:超声','pe:abdomen.abdPercussion','ros:gi.jaundiceGi'],
       need: 2,
       match: ['cc:右上腹痛', 'ros:gi.jaundiceGi', 'ros:gi.nausea', 'aux:超声',
+        'pev:special_digestive.giTenderness=右上腹压痛，胆囊点压痛',
+        'pev:special_digestive.giGallbladderPalp=Murphy征阳性',
         'pev:abdomen.abdPalpation=上腹部压痛，无反跳痛', 'pev:abdomen.abdPercussion=肝区叩击痛'],
       hint: '进食油腻后右上腹痛、放射至右肩背，需考虑胆囊炎/胆石症。',
       note: '可补充：腹部超声（首选）、血常规、肝功能、胆红素、腹部CT。'
@@ -187,7 +204,7 @@ const HINTS = (() => {
     },
     {
       id: 'obstruction', name: '肠梗阻',
-      depts: ['surgery', 'emergency', 'general'],
+      depts: ['digestive', 'surgery', 'emergency', 'general'],
       must: ['pe:abdomen.abdInspect','pe:abdomen.abdAuscultation','ros:gi.constipation'],
       need: 3,
       match: ['ros:gi.constipation', 'ros:gi.vomiting', 'cc:腹胀', 'cc:腹痛',
@@ -618,7 +635,16 @@ const HINTS = (() => {
     const ccKeys = ['发热', '咳嗽', '咳痰', '咯血', '呼吸困难', '气促', '喘息', '胸闷', '胸痛',
       '心悸', '上腹痛', '腹痛', '转移性右下腹痛', '右上腹痛', '腹泻', '呕吐', '腹胀', '黑便',
       '呕血', '黄疸', '水肿', '血尿', '头痛', '头晕', '乏力', '消瘦'];
-    ccKeys.forEach(k => { if (textAll.includes(k)) F.add('cc:' + k); });
+
+    // 主诉/现病史里的说法太活，「上腹部疼痛」「上腹隐痛」都不会包含子串「上腹痛」，
+    // 于是最常见的上腹痛连 cc:上腹痛 都命不中，消化性溃疡一条规则都触发不了。
+    // 这里先把写法拉平再匹配：腹部→腹、各种「X痛」→「痛」、疼痛→痛。
+    // 只影响 cc: 关键词，不影响 pev: 的精确匹配。
+    const flatCC = textAll
+      .replace(/腹部/g, '腹')
+      .replace(/疼痛/g, '痛')
+      .replace(/(隐|胀|绞|刺|钝|烧灼|灼|刀割|撕裂|牵扯|压榨|闷|跳|酸|胀)痛/g, '痛');
+    ccKeys.forEach(k => { if (flatCC.includes(k)) F.add('cc:' + k); });
 
     // 系统回顾阳性
     (SCHEMA.ROS || []).forEach(sys => {
@@ -643,7 +669,11 @@ const HINTS = (() => {
     if (per.smoking === '有' || per.smoking === '已戒') F.add('smoke:有');
     if (per.smoking === '有' || per.smoking === '已戒') F.add('risk:smoke');
     if (per.drinking === '有' || per.drinking === '已戒') F.add('risk:alcohol');
-    if (String((r.pmh || {}).trauma || '').trim()) F.add('trauma:有');
+    // 「外伤史」是自由文本，绝大多数人会写「否认外伤史」。
+    // 旧实现只要非空就加 trauma:有，于是「否认外伤史」的病人被当成有外伤，
+    // 骨折规则（must: trauma:有）就会凭空冒出来。必须认否定词。
+    const traumaText = String((r.pmh || {}).trauma || '').trim();
+    if (traumaText && !/^(否认|无|未|没有|不)/.test(traumaText)) F.add('trauma:有');
 
     // 生命体征
     const v = (r.pe || {}).vitals || {};
@@ -727,8 +757,9 @@ const HINTS = (() => {
     // 辅助检查关键词
     const auxText = (((r.auxiliary || {}).items) || [])
       .map(i => (i.name || '') + (i.result || '')).join(' ').toLowerCase();
-    ['胸片', '超声', '心电图', '血常规', '尿常规', '淀粉酶', '脂肪酶', '血红蛋白', '尿蛋白', '大便']
-      .forEach(k => { if (auxText.includes(k)) F.add('aux:' + k); });
+    ['胸片', '超声', '心电图', '血常规', '尿常规', '淀粉酶', '脂肪酶', '血红蛋白', '尿蛋白', '大便',
+      '胃镜', '幽门螺杆菌', '隐血', '腹部平片', '腹部ct']
+      .forEach(k => { if (auxText.includes(k.toLowerCase())) F.add('aux:' + (k === '腹部ct' ? 'CT' : k)); });
     if (auxText.includes('ct')) F.add('aux:CT');
 
     // 人口学

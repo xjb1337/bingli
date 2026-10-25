@@ -795,7 +795,11 @@ const GENERATOR = (() => {
     if (status === '未婚') return '未婚。';
     let s = status;
     if (m.age) s += `，${m.age}岁结婚`;
-    if (m.spouseHealth) s += `，配偶${stripTail(m.spouseHealth)}`;
+    // 学生常直接写「配偶体健」，再冠一次「配偶」就成了「配偶配偶体健」。
+    if (m.spouseHealth) {
+      const sp = stripTail(m.spouseHealth);
+      s += `，${/^配偶/.test(sp) ? sp : `配偶${sp}`}`;
+    }
     appendMarriageExtra(m, part => { s += `，${part}`; });
     return s + '。';
   }

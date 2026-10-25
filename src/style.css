@@ -709,6 +709,89 @@ select {
 
 .mini-details > summary::after { content: " ▾"; }
 
+/* ---------------- 模板病例 ---------------- */
+
+/* 默认折叠：模板是「可选的起点」，一进来就摊开一堆病种会让人
+   以为必须先选一个才能往下走。 */
+.tpl-card > summary {
+  font-size: calc(14px * var(--fs-scale));
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 4px 0;
+}
+
+.tpl-card > summary::-webkit-details-marker { display: none; }
+
+.tpl-card > summary::before {
+  content: "▸";
+  color: var(--gray-4);
+  font-size: 12px;
+  transition: transform .15s;
+}
+
+.tpl-card[open] > summary::before { transform: rotate(90deg); }
+
+.tpl-count {
+  margin-left: auto;
+  font-size: calc(11px * var(--fs-scale));
+  font-weight: 400;
+  color: var(--gray-5);
+}
+
+.tpl-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.tpl-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  text-align: left;
+  background: var(--gray-1);
+  border: 1px solid var(--gray-2);
+  border-radius: 10px;
+  font-family: inherit;
+  color: var(--gray-6);
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+
+.tpl-item:active {
+  background: var(--score-ok-bg);
+  border-color: var(--green);
+}
+
+.tpl-name {
+  font-size: calc(14px * var(--fs-scale));
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.tpl-alias {
+  margin-left: 6px;
+  font-size: calc(11px * var(--fs-scale));
+  font-weight: 400;
+  color: var(--gray-5);
+}
+
+.tpl-hint {
+  font-size: calc(12px * var(--fs-scale));
+  color: var(--gray-6);
+  line-height: 1.5;
+}
+
 /* ---------------- 辅助检查 ---------------- */
 
 .aux-row {

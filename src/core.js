@@ -59,6 +59,76 @@ const RECORD_CORE = (() => {
     return obj === undefined ? defaults : obj;
   }
 
+  /* ---------------------- 只填空白的合并（套用模板用） ---------------------- */
+
+  /**
+   * 「空」的判定。模板套用时只有空的字段才会被写入。
+   *
+   * 口径是刻意的：
+   *   - 空串、纯空白串、undefined、null → 空
+   *   - 数组：长度为 0，或所有元素都是「空」→ 空（辅助检查预置了一行空行）
+   *   - 对象：所有值都是「空」→ 空
+   *   - `false` 和 `0` **不算空**：false 是一个明确的「否」，
+   *     0 可能真是测出来的 0，覆盖它就是篡改。
+   */
+  function isBlankValue(v) {
+    if (v === undefined || v === null) return true;
+    if (typeof v === 'string') return v.trim() === '';
+    if (Array.isArray(v)) return v.every(isBlankValue);
+    if (isObject(v)) return Object.keys(v).every(k => isBlankValue(v[k]));
+    return false;
+  }
+
+  function cloneValue(v) {
+    if (Array.isArray(v)) return v.map(cloneValue);
+    if (isObject(v)) {
+      const out = {};
+      Object.keys(v).forEach(k => { out[k] = cloneValue(v[k]); });
+      return out;
+    }
+    return v;
+  }
+
+  /**
+   * 把 source 里「有内容」的值填进 target 里「还是空的」字段，返回本次真正写入的路径列表。
+   *
+   * 为什么不是 deepMerge：
+   *   deepMerge 是「用新结构补齐旧数据」，只要有键就保留旧值；
+   *   而模板套用要的是「我填过的别动，我没填的按模板补」——判据是**值是否为空**，
+   *   不是**键是否存在**。两者差一个「用户点过但留空」的场景，必须分开实现。
+   *
+   * 写入是原地改 target，返回值只用于告诉用户「这次补了多少项」。
+   */
+  function fillBlanks(target, source, path = '') {
+    const filled = [];
+    if (!isObject(target) || !isObject(source)) return filled;
+    Object.keys(source).forEach(k => {
+      const p = path ? path + '.' + k : k;
+      const s = source[k];
+      // 模板里没有内容的键直接跳过，避免把空值写成「已填过」
+      if (isBlankValue(s)) return;
+      if (isObject(s)) {
+        if (!isObject(target[k])) target[k] = {};
+        filled.push(...fillBlanks(target[k], s, p));
+        return;
+      }
+      // 数组按整体套用：诊断列表、辅助检查列表这类，只要用户还没写就整组换成模板的。
+      // 不做逐元素合并——用户的 1 条和模板的 3 条混在一起，主次就乱了。
+      if (Array.isArray(s)) {
+        if (isBlankValue(target[k])) {
+          target[k] = cloneValue(s);
+          filled.push(p);
+        }
+        return;
+      }
+      if (isBlankValue(target[k])) {
+        target[k] = s;
+        filled.push(p);
+      }
+    });
+    return filled;
+  }
+
   /* ---------------------- 科室键的迁移 ---------------------- */
 
   /**
@@ -447,6 +517,7 @@ const RECORD_CORE = (() => {
   const api = {
     SCHEMA_VERSION, STORAGE_KEYS, SETTINGS_DEFAULTS,
     assertSafeKeys, deepMerge, normalizeDeptKey,
+    isBlankValue, cloneValue, fillBlanks,
     normalizeRecord, lookLikeRecord,
     uid, summarize, sortByUpdated, upsertRecord, removeRecord, findRecord,
     buildExport, parseImport, mergeImport, replaceImport,

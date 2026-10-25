@@ -1,0 +1,725 @@
+# 查体选项总表（由 tools/dump-pe-options.js 生成，勿手改）
+# 写法：组key.项key ｜ 标签 ｜ parent
+#   def=系统默认描述   nor=无默认值时的正常描述
+#   opt=快捷描述候选（模板必须逐字选用其中一项，或者自己写完整描述）
+
+===== PE_COMMON.general  一般状况（整组用「，」连成一句）
+  general.development ｜ 发育
+      def=发育正常
+      opt=发育正常 ‖ 发育不良 ‖ 发育迟缓 ‖ 发育异常
+  general.nutrition ｜ 营养
+      def=营养中等
+      opt=营养良好 ‖ 营养中等 ‖ 营养不良 ‖ 肥胖
+  general.conscious ｜ 神志
+      def=神志清楚，精神可
+      opt=神志清楚，精神可 ‖ 神志清楚，精神一般 ‖ 神志清楚，精神差 ‖ 嗜睡 ‖ 昏睡 ‖ 浅昏迷 ‖ 深昏迷
+  general.posture ｜ 体位
+      def=自主体位
+      opt=自主体位 ‖ 被动体位 ‖ 强迫体位
+  general.face ｜ 面容
+      def=面容自然
+      opt=面容自然 ‖ 急性病容 ‖ 慢性病容 ‖ 贫血面容 ‖ 二尖瓣面容 ‖ 甲亢面容 ‖ 满月面容
+  general.cooperation ｜ 查体合作
+      def=查体合作
+      opt=查体合作 ‖ 查体欠合作 ‖ 查体不合作
+
+===== PE_COMMON.skin  皮肤粘膜
+  skin.color ｜ 色泽
+      def=全身皮肤黏膜无黄染、苍白、发绀
+      opt=全身皮肤黏膜无黄染、苍白、发绀 ‖ 皮肤黏膜黄染 ‖ 皮肤黏膜苍白 ‖ 口唇及肢端发绀
+  skin.rash ｜ 皮疹/出血点
+      def=未见皮疹及出血点
+      opt=未见皮疹及出血点 ‖ 可见散在皮疹 ‖ 可见瘀点瘀斑
+  skin.elasticity ｜ 弹性
+      def=皮肤弹性良好
+      opt=皮肤弹性良好 ‖ 皮肤弹性减退
+  skin.lymph ｜ 浅表淋巴结
+      def=全身浅表淋巴结未触及肿大
+      opt=全身浅表淋巴结未触及肿大 ‖ 双侧颈部可触及肿大淋巴结 ‖ 双侧腋窝可触及肿大淋巴结 ‖ 双侧腹股沟可触及肿大淋巴结
+
+===== PE_COMMON.head  头颅及其器官
+  head.headShape ｜ 头颅
+      def=头颅大小、形态正常，无压痛及包块
+      opt=头颅大小、形态正常，无压痛及包块 ‖ 头颅外伤 ‖ 方颅 ‖ 头颅有压痛
+  head.hair ｜ 毛发
+      def=毛发分布均匀
+      opt=毛发分布均匀 ‖ 毛发稀疏 ‖ 毛发分布异常
+  head.eyes ｜ 眼
+      def=眼睑无水肿，巩膜无黄染，双侧瞳孔等大等圆，对光反射灵敏
+      opt=眼睑无水肿，巩膜无黄染，双侧瞳孔等大等圆，对光反射灵敏 ‖ 眼睑水肿 ‖ 巩膜黄染 ‖ 双侧瞳孔不等大 ‖ 双侧瞳孔对光反射迟钝 ‖ 眼睑下垂
+  head.ent ｜ 耳鼻口咽
+      def=耳廓无畸形，外耳道无分泌物，乳突无压痛；鼻通气良好，鼻窦无压痛；口唇无发绀，咽无充血，扁桃体无肿大
+      opt=耳廓无畸形，外耳道无分泌物，乳突无压痛；鼻通气良好，鼻窦无压痛；口唇无发绀，咽无充血，扁桃体无肿大 ‖ 咽充血，扁桃体肿大 ‖ 双侧扁桃体Ⅰ度肿大 ‖ 外耳道有分泌物 ‖ 鼻窦区压痛 ‖ 口唇发绀
+  head.teeth ｜ 口腔黏膜/舌
+      def=口腔黏膜无溃疡，舌质淡红、苔薄白
+      opt=口腔黏膜无溃疡，舌质淡红、苔薄白 ‖ 口腔黏膜溃疡 ‖ 舌质红、苔黄腻 ‖ 舌质红、少苔 ‖ 草莓舌
+
+===== PE_COMMON.neck  颈部
+  neck.neckResist ｜ 颈抵抗
+      def=颈软，无抵抗
+      opt=颈软，无抵抗 ‖ 颈抵抗阳性
+  neck.thyroid ｜ 甲状腺
+      def=甲状腺无肿大
+      opt=甲状腺无肿大 ‖ 甲状腺Ⅰ度肿大 ‖ 甲状腺Ⅱ度肿大 ‖ 甲状腺Ⅲ度肿大 ‖ 甲状腺可触及结节
+  neck.neckVessel ｜ 颈静脉/颈动脉
+      def=颈静脉无充盈，颈动脉无异常搏动
+      opt=颈静脉无充盈，颈动脉无异常搏动 ‖ 颈静脉充盈 ‖ 颈静脉怒张 ‖ 颈动脉搏动增强
+  neck.trachea ｜ 气管
+      def=气管居中
+      opt=气管居中 ‖ 气管向左侧移位 ‖ 气管向右侧移位
+
+===== PE_COMMON.chest  胸部
+  chest.chestShape ｜ 胸廓
+      def=胸廓对称，无畸形，肋间隙正常
+      opt=胸廓对称，无畸形，肋间隙正常 ‖ 桶状胸 ‖ 胸廓不对称 ‖ 肋间隙增宽 ‖ 肋间隙变窄 ‖ 鸡胸 ‖ 漏斗胸
+  chest.lungInspect ｜ 肺—视诊
+      def=呼吸运动对称，节律规整
+      opt=呼吸运动对称，节律规整 ‖ 呼吸运动减弱 ‖ 呼吸浅快 ‖ 呼吸深大
+  chest.lungPalpation ｜ 肺—触诊
+      def=语颤对称，无胸膜摩擦感
+      opt=语颤对称，无胸膜摩擦感 ‖ 语颤增强 ‖ 语颤减弱 ‖ 可触及胸膜摩擦感
+  chest.lungPercussion ｜ 肺—叩诊
+      def=双肺叩诊清音，肺下界位置正常
+      opt=双肺叩诊清音，肺下界位置正常 ‖ 双肺叩诊过清音 ‖ 局部叩诊浊音 ‖ 局部叩诊实音 ‖ 肺下界下移
+  chest.lungAuscultation ｜ 肺—听诊
+      def=双肺呼吸音清，未闻及干湿性啰音及胸膜摩擦音
+      opt=双肺呼吸音清，未闻及干湿性啰音及胸膜摩擦音 ‖ 双肺呼吸音粗，可闻及散在干啰音 ‖ 双肺可闻及湿性啰音 ‖ 右下肺可闻及湿性啰音 ‖ 双肺可闻及哮鸣音 ‖ 可闻及胸膜摩擦音 ‖ 呼吸音减弱
+  chest.heartInspect ｜ 心—视诊
+      def=心前区无隆起，心尖搏动位置正常，未超出正常范围
+      opt=心前区无隆起，心尖搏动位置正常，未超出正常范围 ‖ 心尖搏动向左下移位 ‖ 心前区隆起
+  chest.heartPalpation ｜ 心—触诊
+      def=心尖搏动无抬举性，未触及震颤
+      opt=心尖搏动无抬举性，未触及震颤 ‖ 可触及抬举性心尖搏动 ‖ 可触及震颤
+  chest.heartPercussion ｜ 心—叩诊
+      def=心界不大
+      opt=心界不大 ‖ 心界向左下扩大 ‖ 心界向两侧扩大
+  chest.heartAuscultation ｜ 心—听诊
+      def=心律齐，各瓣膜听诊区未闻及病理性杂音
+      opt=心律齐，各瓣膜听诊区未闻及病理性杂音 ‖ 心律不齐，可闻及早搏 ‖ 心尖区可闻及收缩期杂音 ‖ 主动脉瓣区可闻及舒张期杂音 ‖ 心音低钝 ‖ 可闻及心包摩擦音
+  chest.breast ｜ 乳房
+      def=双侧乳房对称，未触及肿块
+      opt=双侧乳房对称，未触及肿块 ‖ 乳房可触及肿块 ‖ 乳房不对称
+      depts=surgery
+
+===== PE_COMMON.abdomen  腹部
+  abdomen.abdInspect ｜ 视诊
+      def=腹部平坦，未见腹壁静脉曲张，未见胃肠型及蠕动波
+      opt=腹部平坦，未见腹壁静脉曲张，未见胃肠型及蠕动波 ‖ 腹部膨隆 ‖ 腹壁静脉曲张 ‖ 可见胃肠型及蠕动波 ‖ 可见手术瘢痕
+  abdomen.abdAuscultation ｜ 听诊
+      def=肠鸣音正常，未闻及血管杂音
+      opt=肠鸣音正常，未闻及血管杂音 ‖ 肠鸣音活跃 ‖ 肠鸣音减弱 ‖ 肠鸣音消失 ‖ 可闻及血管杂音
+  abdomen.abdPercussion ｜ 叩诊
+      def=自左下腹起逆时针叩诊，肝区及双肾区无叩击痛，移动性浊音阴性
+      opt=自左下腹起逆时针叩诊，肝区及双肾区无叩击痛，移动性浊音阴性 ‖ 肝区叩击痛 ‖ 双肾区叩击痛 ‖ 移动性浊音阳性 ‖ 鼓音区缩小
+  abdomen.abdPalpation ｜ 触诊
+      def=腹平软，全腹无压痛、反跳痛，未触及包块，肝脾肋下未触及
+      opt=腹平软，全腹无压痛、反跳痛，未触及包块，肝脾肋下未触及 ‖ 上腹部压痛，无反跳痛 ‖ 右下腹压痛、反跳痛 ‖ 全腹压痛、反跳痛，腹肌紧张 ‖ 肝肋下可触及 ‖ 脾肋下可触及 ‖ 可触及腹部包块
+  abdomen.abdPalpSuperficial ｜ 触诊—全腹浅触诊 ｜ parent=abdPalpation
+      nor=全腹浅触诊无压痛，腹肌柔软
+      opt=全腹浅触诊无压痛，腹肌柔软 ‖ 上腹部浅触诊压痛 ‖ 右下腹浅触诊压痛 ‖ 全腹浅触诊压痛，腹肌紧张
+  abdomen.abdPalpDeep ｜ 触诊—全腹深触诊 ｜ parent=abdPalpation
+      nor=全腹深触诊无压痛、反跳痛，未触及包块
+      opt=全腹深触诊无压痛、反跳痛，未触及包块 ‖ 深触诊可触及包块 ‖ 深触诊反跳痛阳性
+  abdomen.liverPalpation ｜ 触诊—肝 ｜ parent=abdPalpation
+      nor=肝肋下未触及，肝区无压痛
+      opt=肝肋下未触及，肝区无压痛 ‖ 肝肋下可触及 ‖ 肝区压痛
+  abdomen.spleenPalpation ｜ 触诊—脾 ｜ parent=abdPalpation
+      nor=脾肋下未触及
+      opt=脾肋下未触及 ‖ 脾肋下可触及 ‖ 脾肋下可触及且质硬
+  abdomen.gallbladderPalpation ｜ 触诊—胆囊（Murphy征） ｜ parent=abdPalpation
+      nor=胆囊未触及，Murphy征阴性
+      opt=胆囊未触及，Murphy征阴性 ‖ 胆囊触痛阳性 ‖ Murphy征阳性 ‖ 胆囊可触及
+  abdomen.kidneyPalpation ｜ 触诊—肾 ｜ parent=abdPalpation
+      nor=双肾未触及，季肋点及肋脊点无压痛
+      opt=双肾未触及，季肋点及肋脊点无压痛 ‖ 右肾下极可触及 ‖ 双肾可触及 ‖ 季肋点压痛 ‖ 肋脊点压痛
+  abdomen.bladderPalpation ｜ 触诊—膀胱 ｜ parent=abdPalpation
+      nor=膀胱未触及，耻骨上区无压痛
+      opt=膀胱未触及，耻骨上区无压痛 ‖ 膀胱充盈可触及 ‖ 耻骨上区压痛
+  abdomen.fluidThrill ｜ 触诊—液波震颤 ｜ parent=abdPalpation
+      nor=液波震颤阴性
+      opt=液波震颤阴性 ‖ 液波震颤阳性
+  abdomen.succussionSplash ｜ 听诊—振水音 ｜ parent=abdAuscultation
+      nor=振水音阴性
+      opt=振水音阴性 ‖ 振水音阳性
+
+===== PE_COMMON.genital  生殖器、肛门及直肠
+  genital.genitalia ｜ 外生殖器
+      def=未见异常
+      opt=未见异常 ‖ 未查 ‖ 包皮过长 ‖ 外生殖器发育异常
+  genital.anus ｜ 肛门及直肠
+      def=未见异常
+      opt=未见异常 ‖ 未查 ‖ 肛门指检未触及异常 ‖ 肛门指检可触及肿物 ‖ 肛周红肿
+
+===== PE_COMMON.spine  脊柱及四肢
+  spine.spineCol ｜ 脊柱
+      def=脊柱生理弯曲存在，无畸形，无压痛及叩击痛，活动度正常
+      opt=脊柱生理弯曲存在，无畸形，无压痛及叩击痛，活动度正常 ‖ 脊柱侧弯 ‖ 脊柱后凸 ‖ 胸腰椎压痛 ‖ 胸腰椎叩击痛
+  spine.limbs ｜ 四肢
+      def=四肢无畸形，关节无红肿，活动自如
+      opt=四肢无畸形，关节无红肿，活动自如 ‖ 双下肢凹陷性水肿 ‖ 双下肢非凹陷性水肿 ‖ 关节红肿畸形 ‖ 杵状指 ‖ 四肢肌力减退
+  spine.limbMuscle ｜ 四肢肌力 ｜ parent=limbs
+      nor=四肢肌力5级
+      opt=四肢肌力5级 ‖ 四肢肌力4级 ‖ 四肢肌力3级 ‖ 双上肢肌力正常、双下肢肌力减退 ‖ 偏瘫侧肌力减退
+  spine.kneeJerk ｜ 双侧膝跳反射
+      nor=双侧膝跳反射正常对称
+      opt=双侧膝跳反射正常对称 ‖ 双侧膝跳反射减弱 ‖ 双侧膝跳反射亢进 ‖ 单侧膝跳反射减弱
+  spine.edemaAnkle ｜ 下肢水肿—踝部 ｜ parent=limbs
+      nor=双侧踝部无水肿
+      opt=双侧踝部无水肿 ‖ 双侧踝部凹陷性水肿 ‖ 单侧踝部水肿
+  spine.edemaPretibial ｜ 下肢水肿—胫前 ｜ parent=limbs
+      nor=双侧胫前无水肿
+      opt=双侧胫前无水肿 ‖ 双侧胫前凹陷性水肿 ‖ 单侧胫前水肿
+  spine.dorsalisPedis ｜ 足背动脉搏动
+      nor=双侧足背动脉搏动对称有力
+      opt=双侧足背动脉搏动对称有力 ‖ 双侧足背动脉搏动减弱 ‖ 单侧足背动脉搏动减弱 ‖ 单侧足背动脉搏动未触及
+  spine.radialPulse ｜ 桡动脉搏动
+      nor=双侧桡动脉搏动对称
+      opt=双侧桡动脉搏动对称 ‖ 双侧桡动脉搏动减弱 ‖ 脉搏短绌 ‖ 水冲脉
+
+===== PE_COMMON.nervousPE  神经系统
+  nervousPE.nerve ｜ 神经反射
+      def=生理反射存在，病理反射未引出
+      opt=生理反射存在，病理反射未引出 ‖ 膝反射减弱 ‖ 膝反射亢进 ‖ 病理反射阳性 ‖ 脑膜刺激征阳性
+  nervousPE.tendonReflex ｜ 腱反射 ｜ parent=nerve
+      nor=双侧肱二头肌、膝腱、跟腱反射正常对称
+      opt=双侧肱二头肌、膝腱、跟腱反射正常对称 ‖ 腱反射普遍减弱 ‖ 腱反射普遍亢进 ‖ 单侧腱反射减弱
+  nervousPE.brudzinski ｜ 布氏征（Brudzinski） ｜ parent=nerve
+      nor=布氏征阴性
+      opt=布氏征阴性 ‖ 布氏征阳性
+  nervousPE.kernig ｜ 克氏征（Kernig） ｜ parent=nerve
+      nor=克氏征阴性
+      opt=克氏征阴性 ‖ 克氏征阳性
+  nervousPE.babinski ｜ 巴氏征（Babinski） ｜ parent=nerve
+      nor=巴氏征阴性
+      opt=巴氏征阴性 ‖ 巴氏征阳性 ‖ 双侧巴氏征阳性
+
+===== PE_SPECIAL.respiratory  呼吸内科专科查体（写入路径 pe.special_respiratory.<项key>）
+  special_respiratory.respExtra ｜ 呼吸专科
+      def=三凹征阴性，语音传导正常
+      opt=三凹征阴性，语音传导正常 ‖ 三凹征阳性 ‖ 语音传导增强 ‖ 语音传导减弱 ‖ 可闻及支气管呼吸音
+      summaryOf=respAccessory,respVocalResonance（明细项全勾时本项让位）
+  special_respiratory.respShape ｜ 胸廓外形与呼吸运动
+      def=呼吸运动两侧对称，呼吸平稳，未见桶状胸
+      opt=呼吸运动两侧对称，呼吸平稳，未见桶状胸 ‖ 桶状胸 ‖ 肋间隙增宽 ‖ 肋间隙变窄 ‖ 一侧呼吸运动减弱 ‖ 胸廓不对称
+  special_respiratory.respAccessory ｜ 辅助呼吸肌与三凹征
+      def=未见辅助呼吸肌参与呼吸运动，三凹征阴性
+      opt=未见辅助呼吸肌参与呼吸运动，三凹征阴性 ‖ 可见辅助呼吸肌参与呼吸运动 ‖ 吸气性三凹征 ‖ 端坐呼吸
+  special_respiratory.respVocalFremitus ｜ 语音震颤
+      def=双侧语音震颤对称，无明显增强或减弱
+      opt=双侧语音震颤对称，无明显增强或减弱 ‖ 患侧语音震颤增强 ‖ 患侧语音震颤减弱 ‖ 双侧语音震颤减弱
+  special_respiratory.respPercussion ｜ 叩诊音与肺下界
+      def=双肺叩诊清音，肺下界位置正常
+      opt=双肺叩诊清音，肺下界位置正常 ‖ 局部叩诊浊音 ‖ 局部叩诊实音 ‖ 局部叩诊过清音 ‖ 肺下界下移 ‖ 肺下界上移
+  special_respiratory.respChestExpansion ｜ 肺下界移动度
+      def=肺下界移动度正常，两侧对称
+      opt=肺下界移动度正常，两侧对称 ‖ 肺下界移动度减小 ‖ 一侧肺下界移动度消失
+  special_respiratory.respBreathSound ｜ 呼吸音
+      def=双肺呼吸音清晰，未闻及异常呼吸音
+      opt=双肺呼吸音清晰，未闻及异常呼吸音 ‖ 双肺呼吸音减弱 ‖ 可闻及支气管呼吸音 ‖ 可闻及湿啰音 ‖ 可闻及干啰音
+  special_respiratory.respVocalResonance ｜ 语音共振
+      def=双侧语音共振对称，无增强或减弱
+      opt=双侧语音共振对称，无增强或减弱 ‖ 患侧语音共振增强 ‖ 患侧语音共振减弱
+  special_respiratory.respPleuralRub ｜ 胸膜摩擦音
+      def=未闻及胸膜摩擦音
+      opt=未闻及胸膜摩擦音 ‖ 可闻及胸膜摩擦音
+  special_respiratory.respCyanosis ｜ 发绀与杵状指
+      def=无杵状指，无球结膜水肿
+      opt=无杵状指，无球结膜水肿 ‖ 口唇发绀 ‖ 杵状指 ‖ 球结膜水肿
+
+===== PE_SPECIAL.cardiology  心血管内科专科查体（写入路径 pe.special_cardiology.<项key>）
+  special_cardiology.cardioExtra ｜ 心血管专科
+      def=未闻及额外心音，毛细血管搏动征阴性，水冲脉阴性
+      opt=未闻及额外心音，毛细血管搏动征阴性，水冲脉阴性 ‖ 可闻及奔马律 ‖ 毛细血管搏动征阳性 ‖ 水冲脉阳性 ‖ 交替脉 ‖ 奇脉 ‖ 周围血管搏动征阳性
+      summaryOf=cardioHeartSound,cardioPeripheralSign（明细项全勾时本项让位）
+  special_cardiology.cardioApex ｜ 心前区视诊与心尖搏动
+      def=心尖搏动位置正常，搏动范围无明显扩大
+      opt=心尖搏动位置正常，搏动范围无明显扩大 ‖ 心尖搏动向左下移位 ‖ 心尖搏动弥散 ‖ 心前区隆起 ‖ 心尖搏动消失
+  special_cardiology.cardioThrill ｜ 心前区触诊与震颤
+      def=心尖搏动无抬举感，未触及震颤及心包摩擦感
+      opt=心尖搏动无抬举感，未触及震颤及心包摩擦感 ‖ 可触及收缩期震颤 ‖ 可触及舒张期震颤 ‖ 心尖搏动呈抬举样 ‖ 可触及心包摩擦感
+  special_cardiology.cardioBorder ｜ 心脏叩诊与心界
+      def=心浊音界各径线在正常范围
+      opt=心浊音界各径线在正常范围 ‖ 心界向左下扩大 ‖ 心界向两侧扩大 ‖ 心界向左侧扩大 ‖ 心界缩小
+  special_cardiology.cardioRate ｜ 心率与心律
+      def=心率正常，心律齐
+      opt=心率正常，心律齐 ‖ 心动过速 ‖ 心动过缓 ‖ 心律不齐，心房颤动 ‖ 早搏
+  special_cardiology.cardioHeartSound ｜ 心音与额外心音
+      def=第一心音正常，P2与A2强度相等，未闻及额外心音及奔马律
+      opt=第一心音正常，P2与A2强度相等，未闻及额外心音及奔马律 ‖ 第一心音减弱 ‖ P2亢进 ‖ P2减弱 ‖ 可闻及第三心音 ‖ 可闻及奔马律
+  special_cardiology.cardioMurmur ｜ 心脏杂音
+      def=各瓣膜听诊区未闻及病理性杂音
+      opt=各瓣膜听诊区未闻及病理性杂音 ‖ 二尖瓣区可闻及2/6级收缩期杂音 ‖ 二尖瓣区可闻及3/6级收缩期杂音 ‖ 主动脉瓣区可闻及舒张期杂音 ‖ 全收缩期杂音伴传导
+  special_cardiology.cardioPericardium ｜ 心包摩擦音
+      def=未闻及心包摩擦音
+      opt=未闻及心包摩擦音 ‖ 可闻及心包摩擦音
+  special_cardiology.cardioJVP ｜ 颈静脉与肝颈静脉回流征
+      def=肝颈静脉回流征阴性
+      opt=肝颈静脉回流征阴性 ‖ 颈静脉充盈 ‖ 颈静脉怒张 ‖ 肝颈静脉回流征阳性
+  special_cardiology.cardioPeripheralSign ｜ 周围血管征
+      def=水冲脉、枪击音、毛细血管搏动征、交替脉、奇脉均阴性
+      opt=水冲脉、枪击音、毛细血管搏动征、交替脉、奇脉均阴性 ‖ 水冲脉阳性 ‖ 枪击音阳性 ‖ 毛细血管搏动征阳性 ‖ 交替脉 ‖ 奇脉
+  special_cardiology.cardioEdema ｜ 下肢水肿
+      def=双下肢无水肿
+      opt=双下肢无水肿 ‖ 双下肢凹陷性水肿 ‖ 双下肢非凹陷性水肿 ‖ 单侧下肢水肿
+
+===== PE_SPECIAL.digestive  消化内科专科查体（写入路径 pe.special_digestive.<项key>）
+  special_digestive.giExtra ｜ 消化专科
+      def=肝颈静脉回流征阴性
+      opt=肝颈静脉回流征阴性 ‖ 肝颈静脉回流征阳性 ‖ Murphy征阳性 ‖ 麦氏点压痛 ‖ 液波震颤阳性 ‖ 振水音阳性
+  special_digestive.giAbdShape ｜ 腹部视诊
+      def=腹部平坦，未见胃肠型及蠕动波，未见腹壁静脉曲张
+      opt=腹部平坦，未见胃肠型及蠕动波，未见腹壁静脉曲张 ‖ 腹部膨隆 ‖ 呈蛙状腹 ‖ 可见胃肠型及蠕动波 ‖ 腹壁静脉曲张，血流方向自下而上 ‖ 可见手术瘢痕
+  special_digestive.giTenderness ｜ 压痛点
+      def=麦氏点、胆囊点、上输尿管点及中输尿管点均无压痛
+      opt=麦氏点、胆囊点、上输尿管点及中输尿管点均无压痛 ‖ 麦氏点压痛 ‖ 右上腹压痛，胆囊点压痛 ‖ 上腹部压痛 ‖ 脐周压痛 ‖ 全腹压痛
+  special_digestive.giRebound ｜ 反跳痛与腹肌紧张
+      def=全腹无反跳痛，腹肌柔软
+      opt=全腹无反跳痛，腹肌柔软 ‖ 右下腹反跳痛 ‖ 全腹反跳痛伴腹肌紧张 ‖ 局部腹肌紧张 ‖ 板状腹
+  special_digestive.giLiverPalp ｜ 肝脏触诊
+      def=肝肋下未触及，剑突下未触及，肝区无压痛及叩击痛
+      opt=肝肋下未触及，剑突下未触及，肝区无压痛及叩击痛 ‖ 肝肋下可触及，质软，边缘钝 ‖ 肝肋下可触及，质韧，边缘结节状 ‖ 肝区压痛 ‖ 肝区叩击痛 ‖ 肝浊音界缩小
+  special_digestive.giSpleenPalp ｜ 脾脏触诊
+      def=脾脏未触及，脾区无摩擦感
+      opt=脾脏未触及，脾区无摩擦感 ‖ 脾肋下可触及，质软 ‖ 脾肋下可触及，质硬 ‖ 脾区摩擦感 ‖ 脾浊音区扩大
+  special_digestive.giGallbladderPalp ｜ 胆囊触诊与Murphy征
+      def=胆囊未触及，Murphy征阴性，无胆囊触痛
+      opt=胆囊未触及，Murphy征阴性，无胆囊触痛 ‖ 胆囊触痛阳性 ‖ Murphy征阳性 ‖ 可触及肿大胆囊，无压痛 ‖ 库瓦西耶征阳性
+  special_digestive.giFluidThrill ｜ 液波震颤
+      def=液波震颤阴性
+      opt=液波震颤阴性 ‖ 液波震颤阳性
+  special_digestive.giShiftingDullness ｜ 移动性浊音
+      def=移动性浊音阴性
+      opt=移动性浊音阴性 ‖ 移动性浊音阳性 ‖ 移动性浊音可疑
+  special_digestive.giBowelSound ｜ 肠鸣音与振水音
+      def=未闻及振水音及血管杂音
+      opt=未闻及振水音及血管杂音 ‖ 肠鸣音活跃 ‖ 肠鸣音减弱 ‖ 肠鸣音消失 ‖ 可闻及金属音 ‖ 振水音阳性 ‖ 可闻及腹部血管杂音
+  special_digestive.giRectal ｜ 直肠指检
+      def=直肠指检未触及肿物，指套无染血
+      opt=直肠指检未触及肿物，指套无染血 ‖ 直肠内可触及肿物 ‖ 指套染血 ‖ 肛门括约肌松弛 ‖ 直肠前壁触痛 ‖ 未行直肠指检
+
+===== PE_SPECIAL.endocrinology  内分泌科专科查体（写入路径 pe.special_endocrinology.<项key>）
+  special_endocrinology.endoExtra ｜ 内分泌专科
+      def=皮肤细腻，无明显满月脸、水牛背
+      opt=皮肤细腻，无明显满月脸、水牛背 ‖ 满月脸、水牛背 ‖ 皮肤粗糙 ‖ 手足增大 ‖ 胫前黏液性水肿 ‖ 突眼
+  special_endocrinology.endoBody ｜ 体型与脂肪分布
+      def=体型匀称，脂肪分布正常，无向心性肥胖
+      opt=体型匀称，脂肪分布正常，无向心性肥胖 ‖ 向心性肥胖 ‖ 满月脸 ‖ 水牛背 ‖ 消瘦 ‖ 巨人症体型
+  special_endocrinology.endoSkin ｜ 皮肤改变
+      def=皮肤无紫纹、痤疮及色素沉着，毛发分布正常
+      opt=皮肤无紫纹、痤疮及色素沉着，毛发分布正常 ‖ 可见紫纹 ‖ 痤疮 ‖ 多毛 ‖ 色素沉着 ‖ 皮肤菲薄 ‖ 胫前黏液性水肿
+  special_endocrinology.endoThyroid ｜ 甲状腺
+      def=甲状腺不大，质软，未触及结节，未闻及血管杂音
+      opt=甲状腺不大，质软，未触及结节，未闻及血管杂音 ‖ 甲状腺Ⅰ度肿大 ‖ 甲状腺Ⅱ度肿大 ‖ 甲状腺Ⅲ度肿大 ‖ 可触及甲状腺结节 ‖ 可闻及甲状腺血管杂音 ‖ 可触及甲状腺震颤
+  special_endocrinology.endoEye ｜ 眼部征象
+      def=双眼球无突出，眼征阴性
+      opt=双眼球无突出，眼征阴性 ‖ 双眼球突出 ‖ 单侧眼球突出 ‖ Graefe征阳性 ‖ Stellwag征阳性 ‖ 眼睑闭合不全
+  special_endocrinology.endoHandFoot ｜ 手足改变
+      def=手足无畸形，指端无增粗
+      opt=手足无畸形，指端无增粗 ‖ 手指增粗呈杵状 ‖ 手足增大 ‖ 指端粗隆 ‖ 掌骨增宽
+  special_endocrinology.endoBreast ｜ 男性乳房发育
+      def=男性乳房未发育
+      opt=男性乳房未发育 ‖ 男性乳房发育 ‖ 乳房可触及结节
+  special_endocrinology.endoPulseBP ｜ 脉搏与血压
+      def=脉搏节律规整，双上肢血压对称
+      opt=脉搏节律规整，双上肢血压对称 ‖ 脉搏增快 ‖ 脉搏缓慢 ‖ 双上肢血压不对称 ‖ 血压升高 ‖ 体位性低血压
+  special_endocrinology.endoWound ｜ 皮肤伤口与溃疡
+      def=全身皮肤完整，未见溃疡及伤口愈合不良
+      opt=全身皮肤完整，未见溃疡及伤口愈合不良 ‖ 足部溃疡 ‖ 伤口愈合不良 ‖ 皮肤感染
+
+===== PE_SPECIAL.nephrology  肾脏专科查体（写入路径 pe.special_nephrology.<项key>）
+  special_nephrology.renalExtra ｜ 肾脏专科
+      def=颜面及双下肢无水肿，未见皮下出血点
+      opt=颜面及双下肢无水肿，未见皮下出血点 ‖ 双侧眼睑水肿 ‖ 双下肢水肿 ‖ 双肾区叩击痛
+      summaryOf=renalFacialEdema,renalLegEdema,renalSkin（明细项全勾时本项让位）
+  special_nephrology.renalFacialEdema ｜ 颜面及眼睑水肿
+      def=颜面无水肿，双眼睑无水肿
+      opt=颜面无水肿，双眼睑无水肿 ‖ 双眼睑水肿 ‖ 颜面水肿 ‖ 晨起眼睑水肿
+  special_nephrology.renalLegEdema ｜ 下肢水肿
+      def=双下肢无水肿
+      opt=双下肢无水肿 ‖ 双下肢凹陷性水肿 ‖ 双下肢非凹陷性水肿 ‖ 单侧下肢水肿 ‖ 腰骶部水肿
+  special_nephrology.renalPercussion ｜ 肾区叩击痛
+      def=双肾区无叩击痛
+      opt=双肾区无叩击痛 ‖ 左肾区叩击痛 ‖ 右肾区叩击痛 ‖ 双肾区叩击痛
+  special_nephrology.renalTenderPoint ｜ 季肋点与输尿管点压痛
+      def=季肋点、上输尿管点、中输尿管点均无压痛
+      opt=季肋点、上输尿管点、中输尿管点均无压痛 ‖ 季肋点压痛 ‖ 上输尿管点压痛 ‖ 中输尿管点压痛
+  special_nephrology.renalBladder ｜ 膀胱充盈
+      def=膀胱未触及，耻骨上区无压痛
+      opt=膀胱未触及，耻骨上区无压痛 ‖ 膀胱充盈可触及 ‖ 耻骨上区压痛
+  special_nephrology.renalSkin ｜ 皮肤与贫血貌
+      def=皮肤黏膜无苍白、出血点及尿素霜
+      opt=皮肤黏膜无苍白、出血点及尿素霜 ‖ 睑结膜苍白 ‖ 皮肤可见瘀点瘀斑 ‖ 皮肤可见尿素霜 ‖ 皮肤瘙痒抓痕
+  special_nephrology.renalCardio ｜ 心肺（容量负荷）
+      def=双肺未闻及湿啰音，未闻及心包摩擦音
+      opt=双肺未闻及湿啰音，未闻及心包摩擦音 ‖ 双肺底可闻及湿啰音 ‖ 可闻及心包摩擦音 ‖ 颈静脉怒张
+  special_nephrology.renalBP ｜ 血压
+      def=血压正常，双上肢对称
+      opt=血压正常，双上肢对称 ‖ 血压升高 ‖ 血压偏低 ‖ 双上肢血压不对称
+
+===== PE_SPECIAL.hematology  血液专科查体（写入路径 pe.special_hematology.<项key>）
+  special_hematology.hemExtra ｜ 血液专科
+      def=胸骨无压痛，无皮下出血点，牙龈无渗血
+      opt=胸骨无压痛，无皮下出血点，牙龈无渗血 ‖ 胸骨压痛 ‖ 浅表淋巴结肿大 ‖ 皮下瘀点瘀斑 ‖ 牙龈渗血
+      summaryOf=hemSternum,hemBleeding,hemGum（明细项全勾时本项让位）
+  special_hematology.hemAnemia ｜ 贫血体征
+      def=睑结膜、口唇及甲床无苍白
+      opt=睑结膜、口唇及甲床无苍白 ‖ 睑结膜苍白 ‖ 口唇苍白 ‖ 甲床苍白 ‖ 面色苍白
+  special_hematology.hemBleeding ｜ 皮肤黏膜出血
+      def=皮肤黏膜未见瘀点、瘀斑及紫癜
+      opt=皮肤黏膜未见瘀点、瘀斑及紫癜 ‖ 可见瘀点 ‖ 可见瘀斑 ‖ 可见紫癜 ‖ 可见血肿
+  special_hematology.hemNode ｜ 浅表淋巴结
+      def=全身浅表淋巴结未触及肿大
+      opt=全身浅表淋巴结未触及肿大 ‖ 颈部淋巴结肿大 ‖ 腋窝淋巴结肿大 ‖ 腹股沟淋巴结肿大 ‖ 全身多发淋巴结肿大
+  special_hematology.hemSternum ｜ 胸骨压痛
+      def=胸骨无压痛
+      opt=胸骨无压痛 ‖ 胸骨中下段压痛 ‖ 肋骨压痛
+  special_hematology.hemHepatospleen ｜ 肝脾触诊
+      def=肝脾肋下未触及
+      opt=肝脾肋下未触及 ‖ 脾肋下可触及 ‖ 肝肋下可触及 ‖ 巨脾
+  special_hematology.hemGum ｜ 牙龈与口腔黏膜
+      def=牙龈无增生、渗血
+      opt=牙龈无增生、渗血 ‖ 牙龈增生 ‖ 牙龈渗血 ‖ 口腔黏膜溃疡 ‖ 口腔黏膜血疱
+  special_hematology.hemJaundice ｜ 黄疸
+      def=皮肤巩膜无黄染
+      opt=皮肤巩膜无黄染 ‖ 皮肤巩膜轻度黄染 ‖ 皮肤巩膜明显黄染 ‖ 尿色加深
+  special_hematology.hemBoneTender ｜ 骨与关节压痛
+      def=四肢长骨及关节无压痛
+      opt=四肢长骨及关节无压痛 ‖ 长骨压痛 ‖ 关节肿痛 ‖ 病理性骨折体征
+
+===== PE_SPECIAL.neurology  神经内科专科查体（写入路径 pe.special_neurology.<项key>）
+  special_neurology.neuroExtra1 ｜ 高级神经活动
+      def=言语流利，定向力、记忆力、计算力正常
+      opt=言语流利，定向力、记忆力、计算力正常 ‖ 言语不利 ‖ 记忆力减退 ‖ 计算力减退 ‖ 失语
+  special_neurology.neuroExtra2 ｜ 颅神经
+      def=十二对颅神经检查未见异常
+      opt=十二对颅神经检查未见异常 ‖ 面部感觉减退 ‖ 面瘫 ‖ 伸舌偏斜 ‖ 眼睑下垂
+  special_neurology.neuroExtra3 ｜ 运动系统
+      def=四肢肌张力正常，肌力正常，未见肌萎缩
+      opt=四肢肌张力正常，肌力正常，未见肌萎缩 ‖ 四肢肌力4级 ‖ 偏瘫 ‖ 肌张力增高 ‖ 肌张力减低 ‖ 肌萎缩
+  special_neurology.neuroExtra4 ｜ 感觉系统
+      def=痛温觉、触觉、深感觉检查未见异常
+      opt=痛温觉、触觉、深感觉检查未见异常 ‖ 偏身感觉减退 ‖ 手套袜套样感觉减退 ‖ 感觉过敏
+  special_neurology.neuroExtra5 ｜ 共济运动
+      def=指鼻试验、跟膝胫试验稳准，Romberg征阴性
+      opt=指鼻试验、跟膝胫试验稳准，Romberg征阴性 ‖ 指鼻试验欠稳准 ‖ Romberg征阳性 ‖ 共济失调
+  special_neurology.neuroSuperficialReflex ｜ 浅反射
+      def=腹壁反射、提睾反射存在且对称
+      opt=腹壁反射、提睾反射存在且对称 ‖ 腹壁反射减弱 ‖ 腹壁反射消失 ‖ 提睾反射消失
+  special_neurology.neuroDeepReflex ｜ 深反射
+      def=肱二头肌反射、肱三头肌反射、膝腱反射、跟腱反射正常对称
+      opt=肱二头肌反射、肱三头肌反射、膝腱反射、跟腱反射正常对称 ‖ 深反射减弱 ‖ 深反射消失 ‖ 深反射亢进 ‖ 反射不对称
+  special_neurology.neuroPathologic ｜ 病理反射
+      def=Babinski征、Oppenheim征、Gordon征、Chaddock征、Hoffmann征均阴性
+      opt=Babinski征、Oppenheim征、Gordon征、Chaddock征、Hoffmann征均阴性 ‖ Babinski征阳性 ‖ Hoffmann征阳性 ‖ 踝阵挛阳性 ‖ 髌阵挛阳性
+  special_neurology.neuroMeningeal ｜ 脑膜刺激征
+      def=颈项强直阴性，Kernig征阴性，Brudzinski征阴性
+      opt=颈项强直阴性，Kernig征阴性，Brudzinski征阴性 ‖ 颈项强直阳性 ‖ Kernig征阳性 ‖ Brudzinski征阳性
+  special_neurology.neuroGait ｜ 步态
+      def=步态正常，行走平稳
+      opt=步态正常，行走平稳 ‖ 偏瘫步态 ‖ 共济失调步态 ‖ 慌张步态 ‖ 跨阈步态 ‖ 剪刀步态
+  special_neurology.neuroAutonomic ｜ 自主神经功能
+      def=皮肤划痕试验阴性，出汗正常，无体位性低血压
+      opt=皮肤划痕试验阴性，出汗正常，无体位性低血压 ‖ 皮肤划痕试验阳性 ‖ 出汗减少 ‖ 出汗增多 ‖ 体位性低血压
+
+===== PE_SPECIAL.pediatrics  儿科专科查体（写入路径 pe.special_pediatrics.<项key>）
+  special_pediatrics.pedExtra1 ｜ 发育
+      def=生长发育与同龄儿相仿
+      opt=生长发育与同龄儿相仿 ‖ 生长发育落后 ‖ 前囟未闭 ‖ 前囟平软 ‖ 前囟饱满
+  special_pediatrics.pedExtra2 ｜ 皮肤黏膜
+      def=皮肤无黄染、花纹，毛细血管充盈良好
+      opt=皮肤无黄染、花纹，毛细血管充盈良好 ‖ 皮肤黄染 ‖ 皮肤花纹 ‖ 毛细血管充盈时间延长
+  special_pediatrics.pedExtra3 ｜ 小儿特殊体征
+      def=咽无充血，扁桃体无肿大
+      opt=咽无充血，扁桃体无肿大 ‖ 咽充血，扁桃体肿大 ‖ 假性脑膜刺激征阳性
+  special_pediatrics.pedGrowth ｜ 体格生长指标
+      def=身高、体重、头围在同龄儿正常范围内
+      opt=身高、体重、头围在同龄儿正常范围内 ‖ 体重低于同龄儿 ‖ 身高低于同龄儿 ‖ 头围异常 ‖ 生长迟缓
+  special_pediatrics.pedFontanel ｜ 前囟与颅缝
+      def=前囟平坦，大小正常，颅缝无分离
+      opt=前囟平坦，大小正常，颅缝无分离 ‖ 前囟饱满隆起 ‖ 前囟凹陷 ‖ 前囟已闭 ‖ 颅缝分离 ‖ 方颅
+  special_pediatrics.pedResp ｜ 呼吸与三凹征
+      def=呼吸平稳，无三凹征，无鼻翼扇动
+      opt=呼吸平稳，无三凹征，无鼻翼扇动 ‖ 呼吸急促 ‖ 三凹征阳性 ‖ 鼻翼扇动 ‖ 呼气性呻吟
+  special_pediatrics.pedHeart ｜ 心率与心音
+      def=心率在正常范围，心音有力，律齐，未闻及杂音
+      opt=心率在正常范围，心音有力，律齐，未闻及杂音 ‖ 心率增快 ‖ 心率减慢 ‖ 心音低钝 ‖ 可闻及心脏杂音
+  special_pediatrics.pedAbdomen ｜ 腹部
+      def=腹部平软，肝脾未超出同龄儿正常范围
+      opt=腹部平软，肝脾未超出同龄儿正常范围 ‖ 腹部膨隆 ‖ 肝肋下可触及 ‖ 脾肋下可触及 ‖ 可触及腹部包块
+  special_pediatrics.pedNeuro ｜ 神经系统
+      def=原始反射已消失，脑膜刺激征阴性
+      opt=原始反射已消失，脑膜刺激征阴性 ‖ 原始反射未消失 ‖ 生理反射减弱 ‖ 脑膜刺激征阳性 ‖ 肌张力异常
+  special_pediatrics.pedRickets ｜ 佝偻病体征
+      def=未见方颅、肋骨串珠、手镯及足镯征
+      opt=未见方颅、肋骨串珠、手镯及足镯征 ‖ 方颅 ‖ 肋骨串珠 ‖ 手镯征 ‖ 足镯征 ‖ 鸡胸 ‖ 漏斗胸
+
+===== PE_SPECIAL.surgery  外科专科查体（写入路径 pe.special_surgery.<项key>）
+  special_surgery.surgExtra1 ｜ 手术区域
+      def=手术区域皮肤完整，无红肿及分泌物
+      opt=手术区域皮肤完整，无红肿及分泌物 ‖ 手术切口愈合良好 ‖ 手术切口红肿 ‖ 手术切口有渗出
+  special_surgery.surgExtra2 ｜ 疝及浅表肿块
+      def=腹股沟及股区未触及肿块，站立位无咳嗽冲击感
+      opt=腹股沟及股区未触及肿块，站立位无咳嗽冲击感 ‖ 腹股沟区可触及肿块 ‖ 肿块有咳嗽冲击感
+  special_surgery.surgWound ｜ 切口与引流
+      def=切口对合良好，无渗血渗液，引流管通畅
+      opt=切口对合良好，无渗血渗液，引流管通畅 ‖ 切口裂开 ‖ 切口渗血 ‖ 切口渗液 ‖ 引流液浑浊 ‖ 引流管堵塞
+  special_surgery.surgMass ｜ 浅表肿块
+      def=全身未触及异常浅表肿块
+      opt=全身未触及异常浅表肿块 ‖ 可触及皮下肿块，质软，活动度好 ‖ 可触及皮下肿块，质硬，活动度差 ‖ 肿块伴红肿压痛
+  special_surgery.surgPeritoneum ｜ 腹膜刺激征
+      def=全腹无压痛、反跳痛及腹肌紧张
+      opt=全腹无压痛、反跳痛及腹肌紧张 ‖ 局部压痛伴反跳痛 ‖ 全腹压痛、反跳痛伴板状腹 ‖ 肝浊音界消失
+  special_surgery.surgAbdomenMass ｜ 腹部包块
+      def=腹部未触及包块
+      opt=腹部未触及包块 ‖ 右上腹可触及包块 ‖ 右下腹可触及包块 ‖ 中腹部可触及包块 ‖ 包块随呼吸移动
+  special_surgery.surgLymph ｜ 局部淋巴结
+      def=引流区域淋巴结未触及肿大
+      opt=引流区域淋巴结未触及肿大 ‖ 引流区域淋巴结肿大伴压痛 ‖ 引流区域淋巴结质硬固定
+  special_surgery.surgTrauma ｜ 创伤部位
+      def=未见皮肤软组织损伤、畸形及异常活动
+      opt=未见皮肤软组织损伤、畸形及异常活动 ‖ 局部肿胀压痛 ‖ 皮肤裂伤 ‖ 肢体畸形 ‖ 反常活动 ‖ 骨擦音
+  special_surgery.surgVessel ｜ 患肢血运
+      def=患肢远端动脉搏动可及，毛细血管充盈良好，皮温正常
+      opt=患肢远端动脉搏动可及，毛细血管充盈良好，皮温正常 ‖ 远端动脉搏动减弱 ‖ 远端动脉搏动消失 ‖ 毛细血管充盈时间延长 ‖ 皮温降低 ‖ 肢体肿胀
+  special_surgery.surgJoint ｜ 关节活动度
+      def=各关节活动度正常，无红肿及压痛
+      opt=各关节活动度正常，无红肿及压痛 ‖ 关节活动受限 ‖ 关节红肿 ‖ 关节压痛 ‖ 关节畸形
+
+===== PE_SPECIAL.obstetrics  产科专科查体（写入路径 pe.special_obstetrics.<项key>）
+  special_obstetrics.obsExtra1 ｜ 宫高腹围
+      def=宫高、腹围与孕周相符，胎位纵产式
+      opt=宫高、腹围与孕周相符，胎位纵产式 ‖ 宫高与孕周不符 ‖ 横产式 ‖ 臀先露
+  special_obstetrics.obsExtra2 ｜ 胎心
+      def=胎心音可闻及，律齐
+      opt=胎心音可闻及，律齐 ‖ 胎心音偏快 ‖ 胎心音偏慢 ‖ 未闻及胎心
+  special_obstetrics.obsLeopold ｜ 四步触诊法
+      def=宫底为胎臀，胎背位于左侧，先露为头，未入盆
+      opt=宫底为胎臀，胎背位于左侧，先露为头，未入盆 ‖ 宫底为胎头 ‖ 先露已入盆 ‖ 胎位不清 ‖ 跨耻征阳性
+  special_obstetrics.obsContraction ｜ 子宫收缩
+      def=无规律宫缩，子宫无压痛
+      opt=无规律宫缩，子宫无压痛 ‖ 有不规律宫缩 ‖ 规律宫缩 ‖ 宫缩过强 ‖ 子宫压痛 ‖ 板状腹
+  special_obstetrics.obsCervix ｜ 宫颈（Bishop评分）
+      def=宫颈未消，宫口未开，质地中等，位置居中
+      opt=宫颈未消，宫口未开，质地中等，位置居中 ‖ 宫颈部分消退 ‖ 宫颈完全消退 ‖ 宫口开大2cm ‖ 宫口开全 ‖ 宫颈质硬
+  special_obstetrics.obsPelvis ｜ 骨盆测量
+      def=骨盆外测量各径线在正常范围
+      opt=骨盆外测量各径线在正常范围 ‖ 骶耻外径偏小 ‖ 坐骨结节间径偏小 ‖ 骨盆出口狭窄 ‖ 均小骨盆
+  special_obstetrics.obsEdema ｜ 水肿与体重
+      def=双下肢无水肿，体重增长在正常范围
+      opt=双下肢无水肿，体重增长在正常范围 ‖ 双下肢凹陷性水肿 ‖ 全身水肿 ‖ 体重增长过快 ‖ 体重增长不足
+  special_obstetrics.obsBP ｜ 血压与尿蛋白
+      def=血压正常，尿蛋白阴性
+      opt=血压正常，尿蛋白阴性 ‖ 血压升高 ‖ 尿蛋白阳性 ‖ 尿蛋白强阳性 ‖ 血压升高伴尿蛋白阳性
+  special_obstetrics.obsBreast ｜ 乳房与乳头
+      def=双侧乳房对称，乳头无凹陷，无红肿及结节
+      opt=双侧乳房对称，乳头无凹陷，无红肿及结节 ‖ 乳头凹陷 ‖ 乳房红肿 ‖ 可触及乳房结节 ‖ 乳汁分泌
+  special_obstetrics.obsFetalMovement ｜ 胎动与胎心监护
+      def=胎动正常，胎心监护反应型
+      opt=胎动正常，胎心监护反应型 ‖ 胎动减少 ‖ 胎动频繁 ‖ 胎心监护无反应型 ‖ 胎心监护见减速
+
+===== PE_SPECIAL.gynecology  妇科专科查体（写入路径 pe.special_gynecology.<项key>）
+  special_gynecology.gynExtra1 ｜ 外阴及阴道
+      def=外阴发育正常；阴道通畅，分泌物不多
+      opt=外阴发育正常；阴道通畅，分泌物不多 ‖ 阴道分泌物增多 ‖ 阴道可见异常分泌物 ‖ 宫颈糜烂样改变
+      summaryOf=gynVulva,gynVagina（明细项全勾时本项让位）
+  special_gynecology.gynExtra2 ｜ 双合诊（直肠-腹部）
+      def=子宫前倾前屈，正常大小，无压痛，双附件未触及包块
+      opt=子宫前倾前屈，正常大小，无压痛，双附件未触及包块 ‖ 子宫压痛 ‖ 附件区可触及包块 ‖ 附件区压痛
+      summaryOf=gynUterus,gynAdnexa（明细项全勾时本项让位）
+  special_gynecology.gynVulva ｜ 外阴
+      def=外阴发育正常，未见赘生物、溃疡及色素减退
+      opt=外阴发育正常，未见赘生物、溃疡及色素减退 ‖ 外阴赘生物 ‖ 外阴溃疡 ‖ 外阴色素减退 ‖ 外阴静脉曲张 ‖ 处女膜完整
+  special_gynecology.gynVagina ｜ 阴道
+      def=阴道通畅，黏膜光滑，分泌物量少、色白、无异味
+      opt=阴道通畅，黏膜光滑，分泌物量少、色白、无异味 ‖ 阴道分泌物增多伴异味 ‖ 阴道分泌物呈豆腐渣样 ‖ 阴道分泌物呈泡沫状 ‖ 阴道壁充血 ‖ 阴道狭窄
+  special_gynecology.gynCervix ｜ 宫颈
+      def=宫颈光滑，大小正常，无举痛，无接触性出血
+      opt=宫颈光滑，大小正常，无举痛，无接触性出血 ‖ 宫颈糜烂样改变 ‖ 宫颈息肉 ‖ 宫颈举痛 ‖ 接触性出血 ‖ 宫颈质硬
+  special_gynecology.gynUterus ｜ 子宫
+      def=子宫前倾前屈，正常大小，质中，活动度好，无压痛
+      opt=子宫前倾前屈，正常大小，质中，活动度好，无压痛 ‖ 子宫增大 ‖ 子宫压痛 ‖ 子宫活动度差 ‖ 子宫后倾后屈 ‖ 子宫质硬
+  special_gynecology.gynAdnexa ｜ 双附件
+      def=双附件区未触及包块，无压痛
+      opt=双附件区未触及包块，无压痛 ‖ 左附件区可触及包块 ‖ 右附件区可触及包块 ‖ 双附件区压痛 ‖ 附件区增厚
+  special_gynecology.gynTriple ｜ 三合诊
+      def=三合诊未触及异常，直肠黏膜光滑
+      opt=三合诊未触及异常，直肠黏膜光滑 ‖ 宫骶韧带增厚结节 ‖ 直肠窝可触及结节 ‖ 直肠黏膜不平
+  special_gynecology.gynBreast ｜ 乳房检查
+      def=双侧乳房对称，未触及肿块，乳头无溢液
+      opt=双侧乳房对称，未触及肿块，乳头无溢液 ‖ 乳房可触及肿块 ‖ 乳头溢液 ‖ 乳房皮肤橘皮样改变 ‖ 腋窝淋巴结肿大
+  special_gynecology.gynAbdomen ｜ 腹部检查
+      def=腹平软，未触及包块，移动性浊音阴性
+      opt=腹平软，未触及包块，移动性浊音阴性 ‖ 下腹部可触及包块 ‖ 下腹部压痛 ‖ 移动性浊音阳性 ‖ 腹部膨隆
+
+===== PE_SPECIAL.emergency  急诊/重症专科查体（写入路径 pe.special_emergency.<项key>）
+  special_emergency.emExtra1 ｜ 病情评估
+      def=生命体征平稳，格拉斯哥昏迷评分正常
+      opt=生命体征平稳，格拉斯哥昏迷评分正常 ‖ GCS评分下降 ‖ 休克表现 ‖ 意识障碍
+  special_emergency.emExtra2 ｜ 创伤评估
+      def=全身未见明显创伤
+      opt=全身未见明显创伤 ‖ 皮肤软组织损伤 ‖ 骨折表现 ‖ 腹部闭合性损伤
+  special_emergency.emConscious ｜ 意识与瞳孔
+      def=神志清楚，双侧瞳孔等大等圆，对光反射灵敏
+      opt=神志清楚，双侧瞳孔等大等圆，对光反射灵敏 ‖ 嗜睡 ‖ 昏睡 ‖ 昏迷 ‖ 双侧瞳孔不等大 ‖ 瞳孔对光反射迟钝 ‖ 瞳孔散大固定
+  special_emergency.emAirway ｜ 气道与呼吸
+      def=气道通畅，呼吸平稳，双肺呼吸音对称
+      opt=气道通畅，呼吸平稳，双肺呼吸音对称 ‖ 气道不畅 ‖ 呼吸困难 ‖ 一侧呼吸音减弱 ‖ 三凹征阳性
+  special_emergency.emCirculation ｜ 循环与灌注
+      def=脉搏有力，毛细血管充盈良好，四肢温暖
+      opt=脉搏有力，毛细血管充盈良好，四肢温暖 ‖ 脉搏细速 ‖ 毛细血管充盈时间延长 ‖ 四肢湿冷 ‖ 皮肤花斑 ‖ 血压测不出
+  special_emergency.emShock ｜ 休克指数与末梢
+      def=休克指数<0.5，末梢循环良好
+      opt=休克指数<0.5，末梢循环良好 ‖ 休克指数0.5～1.0 ‖ 休克指数>1.0 ‖ 末梢发绀
+  special_emergency.emTraumaABC ｜ 创伤初级评估（ABCDE）
+      def=按ABCDE顺序评估，各环节未见致命性损伤
+      opt=按ABCDE顺序评估，各环节未见致命性损伤 ‖ 气道梗阻 ‖ 张力性气胸 ‖ 开放性气胸 ‖ 活动性出血 ‖ 连枷胸
+  special_emergency.emTraumaSurvey ｜ 全身系统筛查
+      def=头、颈、胸、腹、脊柱、骨盆及四肢系统筛查未见异常
+      opt=头、颈、胸、腹、脊柱、骨盆及四肢系统筛查未见异常 ‖ 头部血肿 ‖ 颈部压痛 ‖ 胸部压痛 ‖ 腹部压痛 ‖ 骨盆挤压痛 ‖ 脊柱压痛
+  special_emergency.emSkin ｜ 皮肤与出血
+      def=皮肤完整，未见出血点及伤口
+      opt=皮肤完整，未见出血点及伤口 ‖ 皮肤湿冷 ‖ 皮肤出血点 ‖ 皮肤裂伤 ‖ 皮下血肿 ‖ 烧伤创面
+  special_emergency.emAbdomen ｜ 腹部（急腹症）
+      def=腹部平软，无压痛及反跳痛，肠鸣音正常
+      opt=腹部平软，无压痛及反跳痛，肠鸣音正常 ‖ 腹部压痛 ‖ 腹膜刺激征阳性 ‖ 肠鸣音消失 ‖ 腹围增大
+
+===== VITALS 生命体征（模板里一律留空，不要填数字）
+  temperature  体温（℃）
+  pulse  脉搏（次/分）
+  respiration  呼吸（次/分）
+  sbp  收缩压（mmHg）
+  dbp  舒张压（mmHg）
+  height  身高（cm）
+  weight  体重（kg）
+  abdCirc  腹围（cm）
+  headCirc  头围（cm）
+  chestCirc  胸围（cm）
+
+===== ROS 系统回顾（8 系统）
+# 写法：ros.<系统key>.<症状key> = { checked:true, detail:"..." } 阳性；{ negative:true } 阴性；不写=没问
+  ===== resp 呼吸系统
+      resp.cough  咳嗽
+      resp.sputum  咳痰
+      resp.hemoptysis  咯血
+      resp.dyspnea  呼吸困难
+      resp.chestPainResp  胸痛
+      resp.wheeze  喘息
+      resp.pleurisy  胸膜炎性胸痛
+      resp.fever  发热
+      resp.chills  畏寒寒战
+      resp.nightSweat  盗汗
+      resp.nasalObstruction  鼻塞流涕
+      resp.soreThroat  咽痛
+      resp.hoarseness  声音嘶哑
+  ===== cardio 循环系统
+      cardio.palpitation  心悸
+      cardio.chestPainCardio  心前区疼痛
+      cardio.orthopnea  夜间阵发性呼吸困难/端坐呼吸
+      cardio.intermittentClaudication  间歇性跛行
+      cardio.edemaCardio  下肢水肿
+      cardio.cyanosis  发绀
+      cardio.syncope  晕厥
+      cardio.edemaSys  全身水肿
+  ===== gi 消化系统
+      gi.nausea  恶心
+      gi.vomiting  呕吐
+      gi.hematemesis  呕血
+      gi.abdominalPain  腹痛
+      gi.diarrhea  腹泻
+      gi.constipation  便秘
+      gi.melena  黑便
+      gi.hematochezia  便血
+      gi.bloating  腹胀
+      gi.reflux  反酸烧心
+      gi.jaundiceGi  黄疸
+      gi.jaundice  皮肤黏膜黄染
+      gi.appetiteLoss  食欲减退
+      gi.toothache  牙痛
+  ===== gu 泌尿系统
+      gu.dysuria  尿频尿急尿痛
+      gu.hematuria  血尿
+      gu.oliguria  尿量减少
+      gu.polyuria  多尿
+      gu.nocturia  夜尿增多
+      gu.flankPain  腰痛/肾区疼痛
+      gu.edemaGu  颜面及双下肢水肿
+      gu.discharge  尿道分泌物
+  ===== hemat 血液系统
+      hemat.anemia  乏力、面色苍白
+      hemat.fatigue  疲乏无力
+      hemat.bleeding  易出血/出血难止
+      hemat.bruise  皮下瘀斑
+      hemat.purpura  瘀点瘀斑
+      hemat.epistaxis  鼻出血
+      hemat.lymphNode  淋巴结肿大
+      hemat.bonePain  骨痛
+      hemat.transfusion  输血史
+      hemat.rash  皮疹
+      hemat.pruritus  皮肤瘙痒
+      hemat.pallorSkin  皮肤苍白
+      hemat.ulcer  皮肤溃疡
+  ===== endocrine 内分泌及代谢系统
+      endocrine.polydipsia  多饮
+      endocrine.polyphagia  多食
+      endocrine.polyuriaEndo  多尿
+      endocrine.heatIntolerance  怕热多汗
+      endocrine.coldIntolerance  怕冷少汗
+      endocrine.hairChange  毛发改变
+      endocrine.neckMass  颈部肿块
+      endocrine.growthChange  身高明显改变
+      endocrine.weightLoss  体重下降
+      endocrine.weightGain  体重增加
+      endocrine.hairLoss  脱发
+  ===== nervous 神经精神系统
+      nervous.headache  头痛
+      nervous.dizziness  头晕
+      nervous.vertigo  眩晕
+      nervous.syncopeNerve  晕厥
+      nervous.visualBlur  视物模糊
+      nervous.eyePain  眼痛/畏光
+      nervous.hearingLoss  听力下降
+      nervous.tinnitus  耳鸣
+      nervous.numbness  肢体麻木
+      nervous.weakness  肢体无力
+      nervous.seizure  抽搐
+      nervous.tremor  震颤
+      nervous.memoryLoss  记忆力减退
+      nervous.sleepDisorder  睡眠障碍
+      nervous.speech  言语不清
+      nervous.incontinence  大小便失禁
+      nervous.insomnia  失眠
+      nervous.moodLow  情绪低落
+      nervous.anxiety  焦虑
+      nervous.hallucination  幻觉妄想
+  ===== joint 肌肉骨骼系统
+      joint.jointPain  关节疼痛/肿胀
+      joint.morningStiff  晨僵
+      joint.backPain  腰背痛
+      joint.muscleWeak  肌肉酸痛无力
+
+===== 既往史疾病勾选（pmh.diseaseChecks.<名> = true）
+  高血压 ‖ 糖尿病 ‖ 冠心病 ‖ 心力衰竭 ‖ 高脂血症 ‖ 脑卒中 ‖ 慢性阻塞性肺疾病 ‖ 哮喘 ‖ 肺结核 ‖ 病毒性肝炎 ‖ 肝硬化 ‖ 慢性肾脏病 ‖ 痛风 ‖ 甲状腺功能亢进 ‖ 甲状腺功能减退 ‖ 类风湿关节炎 ‖ 肿瘤 ‖ 贫血 ‖ 消化性溃疡 ‖ 胆囊结石 ‖ 前列腺增生 ‖ 精神疾病 ‖ 其他
+
+===== 家族史疾病（family.diseaseChecks.<名> = true）
+  高血压 ‖ 糖尿病 ‖ 冠心病 ‖ 脑卒中 ‖ 恶性肿瘤 ‖ 精神病 ‖ 肺结核 ‖ 病毒性肝炎 ‖ 血友病 ‖ 哮喘 ‖ 甲状腺疾病 ‖ 痛风 ‖ 新生儿黄疸 ‖ 遗传性疾病
+
+===== 过敏原（pmh.allergenChecks.<名> = true）
+  青霉素 ‖ 头孢类 ‖ 磺胺类 ‖ 解热镇痛药 ‖ 造影剂 ‖ 海鲜 ‖ 酒精 ‖ 其他
+
+===== 过敏反应（pmh.allergenReactionChecks.<名> = true）
+  皮疹 ‖ 瘙痒 ‖ 呼吸困难 ‖ 过敏性休克 ‖ 腹泻 ‖ 其他
+
+===== 科室键（basic.department 只能填键，不能填中文名）
+  general  通用/全科
+  respiratory  呼吸内科
+  digestive  消化内科
+  cardiology  心血管内科
+  endocrinology  内分泌科
+  nephrology  肾内科
+  hematology  血液内科
+  neurology  神经内科
+  surgery  外科（普外/骨科等）
+  obstetrics  产科
+  gynecology  妇科
+  pediatrics  儿科
+  emergency  急诊/ICU

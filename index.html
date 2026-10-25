@@ -719,6 +719,89 @@ select {
 
 .mini-details > summary::after { content: " ▾"; }
 
+/* ---------------- 模板病例 ---------------- */
+
+/* 默认折叠：模板是「可选的起点」，一进来就摊开一堆病种会让人
+   以为必须先选一个才能往下走。 */
+.tpl-card > summary {
+  font-size: calc(14px * var(--fs-scale));
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 4px 0;
+}
+
+.tpl-card > summary::-webkit-details-marker { display: none; }
+
+.tpl-card > summary::before {
+  content: "▸";
+  color: var(--gray-4);
+  font-size: 12px;
+  transition: transform .15s;
+}
+
+.tpl-card[open] > summary::before { transform: rotate(90deg); }
+
+.tpl-count {
+  margin-left: auto;
+  font-size: calc(11px * var(--fs-scale));
+  font-weight: 400;
+  color: var(--gray-5);
+}
+
+.tpl-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.tpl-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  text-align: left;
+  background: var(--gray-1);
+  border: 1px solid var(--gray-2);
+  border-radius: 10px;
+  font-family: inherit;
+  color: var(--gray-6);
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+
+.tpl-item:active {
+  background: var(--score-ok-bg);
+  border-color: var(--green);
+}
+
+.tpl-name {
+  font-size: calc(14px * var(--fs-scale));
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.tpl-alias {
+  margin-left: 6px;
+  font-size: calc(11px * var(--fs-scale));
+  font-weight: 400;
+  color: var(--gray-5);
+}
+
+.tpl-hint {
+  font-size: calc(12px * var(--fs-scale));
+  color: var(--gray-6);
+  line-height: 1.5;
+}
+
 /* ---------------- 辅助检查 ---------------- */
 
 .aux-row {
@@ -2513,7 +2596,9 @@ const SCHEMA = (() => {
           key: 'giExtra', label: '消化专科', default: '肝颈静脉回流征阴性',
           // 只留「肝颈静脉回流征」——这一句没有别的项会写。
           // Murphy 征归下面的胆囊触诊，两边都写会在一段话里出现两遍。
-          options: ['肝颈静脉回流征阴性', '肝颈静脉回流征阳性', 'Murphy征阳性', '麦氏点压痛', '液波震颤阳性', '振水音阳性']
+          // 肝掌与蜘蛛痣是肝硬化最有价值的体表体征，通用查体的「皮疹」项写不了这两样，
+          // 只能放在这里，否则学生遇到这类病人只能手打，选项里看不见就容易被漏掉。
+          options: ['肝颈静脉回流征阴性', '肝颈静脉回流征阳性', 'Murphy征阳性', '麦氏点压痛', '液波震颤阳性', '振水音阳性', '可见蜘蛛痣，肝掌阳性']
         },
         {
           key: 'giAbdShape', label: '腹部视诊',
@@ -3565,6 +3650,76 @@ const RECORD_CORE = (() => {
     return obj === undefined ? defaults : obj;
   }
 
+  /* ---------------------- 只填空白的合并（套用模板用） ---------------------- */
+
+  /**
+   * 「空」的判定。模板套用时只有空的字段才会被写入。
+   *
+   * 口径是刻意的：
+   *   - 空串、纯空白串、undefined、null → 空
+   *   - 数组：长度为 0，或所有元素都是「空」→ 空（辅助检查预置了一行空行）
+   *   - 对象：所有值都是「空」→ 空
+   *   - `false` 和 `0` **不算空**：false 是一个明确的「否」，
+   *     0 可能真是测出来的 0，覆盖它就是篡改。
+   */
+  function isBlankValue(v) {
+    if (v === undefined || v === null) return true;
+    if (typeof v === 'string') return v.trim() === '';
+    if (Array.isArray(v)) return v.every(isBlankValue);
+    if (isObject(v)) return Object.keys(v).every(k => isBlankValue(v[k]));
+    return false;
+  }
+
+  function cloneValue(v) {
+    if (Array.isArray(v)) return v.map(cloneValue);
+    if (isObject(v)) {
+      const out = {};
+      Object.keys(v).forEach(k => { out[k] = cloneValue(v[k]); });
+      return out;
+    }
+    return v;
+  }
+
+  /**
+   * 把 source 里「有内容」的值填进 target 里「还是空的」字段，返回本次真正写入的路径列表。
+   *
+   * 为什么不是 deepMerge：
+   *   deepMerge 是「用新结构补齐旧数据」，只要有键就保留旧值；
+   *   而模板套用要的是「我填过的别动，我没填的按模板补」——判据是**值是否为空**，
+   *   不是**键是否存在**。两者差一个「用户点过但留空」的场景，必须分开实现。
+   *
+   * 写入是原地改 target，返回值只用于告诉用户「这次补了多少项」。
+   */
+  function fillBlanks(target, source, path = '') {
+    const filled = [];
+    if (!isObject(target) || !isObject(source)) return filled;
+    Object.keys(source).forEach(k => {
+      const p = path ? path + '.' + k : k;
+      const s = source[k];
+      // 模板里没有内容的键直接跳过，避免把空值写成「已填过」
+      if (isBlankValue(s)) return;
+      if (isObject(s)) {
+        if (!isObject(target[k])) target[k] = {};
+        filled.push(...fillBlanks(target[k], s, p));
+        return;
+      }
+      // 数组按整体套用：诊断列表、辅助检查列表这类，只要用户还没写就整组换成模板的。
+      // 不做逐元素合并——用户的 1 条和模板的 3 条混在一起，主次就乱了。
+      if (Array.isArray(s)) {
+        if (isBlankValue(target[k])) {
+          target[k] = cloneValue(s);
+          filled.push(p);
+        }
+        return;
+      }
+      if (isBlankValue(target[k])) {
+        target[k] = s;
+        filled.push(p);
+      }
+    });
+    return filled;
+  }
+
   /* ---------------------- 科室键的迁移 ---------------------- */
 
   /**
@@ -3953,6 +4108,7 @@ const RECORD_CORE = (() => {
   const api = {
     SCHEMA_VERSION, STORAGE_KEYS, SETTINGS_DEFAULTS,
     assertSafeKeys, deepMerge, normalizeDeptKey,
+    isBlankValue, cloneValue, fillBlanks,
     normalizeRecord, lookLikeRecord,
     uid, summarize, sortByUpdated, upsertRecord, removeRecord, findRecord,
     buildExport, parseImport, mergeImport, replaceImport,
@@ -3961,6 +4117,1580 @@ const RECORD_CORE = (() => {
   };
 
   return api;
+})();
+
+
+</script>
+<script>
+/* 模板病例数据 —— 由 tools/gen-templates.js 从 tools/tpl-parts/*.cjs 生成，请勿手改。
+ *
+ * 改模板的正确方式：改 tools/tpl-parts/<key>.cjs，然后 node tools/gen-templates.js。
+ * 共 6 个模板：chole, cirrhosis, obstruction, pancreatitis, pud, ugib
+ */
+var TEMPLATE_DATA = [
+  {
+    "key": "chole",
+    "dept": "digestive",
+    "name": "急性结石性胆囊炎",
+    "alias": [
+      "急性胆囊炎",
+      "胆囊炎",
+      "胆囊结石",
+      "胆石症",
+      "胆绞痛"
+    ],
+    "hint": "进食油腻后右上腹痛向右肩背放射，Murphy 征阳性，超声见胆囊壁增厚与结石",
+    "record": {
+      "basic": {
+        "marital": "已婚",
+        "nationality": "汉族",
+        "nativePlace": "浙江温州",
+        "birthPlace": "浙江温州",
+        "occupation": "小学教师",
+        "reliability": "可靠",
+        "chiefComplaint": "右上腹疼痛伴恶心呕吐2天",
+        "chiefComplaintDuration": "2",
+        "chiefComplaintDurationUnit": "天"
+      },
+      "hpi": {
+        "onset": "2天前晚餐进食油炸食物后1小时出现右上腹持续性胀痛，阵发性加重，程度中等",
+        "cause": "既往体检发现胆囊结石5年",
+        "symptoms": "疼痛位于右上腹，向右肩及右腰背部放射，改变体位及弯腰均不能缓解，右上腹拒按",
+        "relief": "自服「消炎利胆片」及局部热敷后无明显缓解",
+        "evolution": "1天前疼痛加重，牵涉至右肩背，夜间因疼痛不能入睡，遂来院急诊",
+        "accompanying": "伴恶心、呕吐胃内容物2次，呕吐后腹痛稍减轻；自觉发热，未测体温；无寒战",
+        "negativeDiscriminating": "无皮肤及巩膜黄染，无皮肤瘙痒，无寒战高热，无呕血黑便，无腹泻，无尿频尿痛，无胸痛",
+        "treatment": "急诊予禁食、解痉、静脉抗感染（头孢呋辛+甲硝唑），现疼痛较前减轻",
+        "generalCondition": "发病以来精神差，食欲明显减退，睡眠差，大小便正常，体重无明显变化",
+        "extra": ""
+      },
+      "ros": {
+        "gi": {
+          "abdominalPain": {
+            "checked": true,
+            "detail": "右上腹持续胀痛，向右肩背放射"
+          },
+          "nausea": {
+            "checked": true
+          },
+          "vomiting": {
+            "checked": true,
+            "detail": "呕吐胃内容物2次，吐后稍减轻"
+          },
+          "bloating": {
+            "checked": true,
+            "detail": "进食后明显"
+          },
+          "reflux": {
+            "checked": true,
+            "detail": "餐后为主"
+          },
+          "appetiteLoss": {
+            "checked": true,
+            "detail": "进食油腻后明显厌恶"
+          },
+          "jaundiceGi": {
+            "negative": true
+          },
+          "jaundice": {
+            "negative": true
+          },
+          "diarrhea": {
+            "negative": true
+          },
+          "constipation": {
+            "negative": true
+          },
+          "melena": {
+            "negative": true
+          },
+          "hematemesis": {
+            "negative": true
+          }
+        },
+        "resp": {
+          "fever": {
+            "checked": true,
+            "detail": "体温未测"
+          },
+          "chills": {
+            "negative": true
+          }
+        },
+        "cardio": {
+          "palpitation": {
+            "negative": true
+          }
+        },
+        "hemat": {
+          "fatigue": {
+            "negative": true
+          },
+          "pallorSkin": {
+            "negative": true
+          }
+        }
+      },
+      "pmh": {
+        "health": "平素体健",
+        "diseaseChecks": {
+          "胆囊结石": true
+        },
+        "diseaseDetail": "5年前体检超声发现胆囊结石，最大约1.2cm，偶有餐后右上腹不适，未行手术",
+        "longTermMeds": "无长期服药史",
+        "infection": "否认肝炎、结核等传染病史",
+        "surgery": "否认手术史",
+        "trauma": "否认外伤史",
+        "transfusion": "否认输血史",
+        "poisoning": "否认毒物接触史",
+        "vaccine": "按计划预防接种",
+        "allergy": "无",
+        "relatedHistory": "胆囊结石为本次急性胆囊炎的直接病因",
+        "otherTreatDiseases": "",
+        "special": ""
+      },
+      "personal": {
+        "residence": "浙江温州，否认疫区及地方病流行区久居史",
+        "smoking": "无",
+        "smokingAmount": "",
+        "drinking": "无",
+        "drinkingAmount": "",
+        "drugs": "否认铅、汞等重金属及有机磷农药接触史",
+        "environment": "",
+        "habits": "喜食油腻及油炸食物，运动少",
+        "sexualHistory": "否认不洁性接触史",
+        "occupationEnv": "从事小学教学工作，无粉尘及放射性物质接触"
+      },
+      "marriage": {
+        "status": "已婚",
+        "age": "26",
+        "spouseHealth": "配偶体健",
+        "sexLife": "正常",
+        "relation": "和睦"
+      },
+      "family": {
+        "diseaseChecks": {},
+        "other": "",
+        "deceased": "父母健在",
+        "threeGeneration": "两系三代否认遗传性疾病史",
+        "similarDisease": "",
+        "infectionHistory": "否认结核、肝炎、性病等传染性疾病史"
+      },
+      "pe": {
+        "vitals": {},
+        "general": {
+          "development": "发育正常",
+          "nutrition": "肥胖",
+          "conscious": "神志清楚，精神可",
+          "posture": "自主体位",
+          "face": "急性病容",
+          "cooperation": "查体合作"
+        },
+        "skin": {
+          "color": "全身皮肤黏膜无黄染、苍白、发绀",
+          "rash": "未见皮疹及出血点",
+          "elasticity": "皮肤弹性良好",
+          "lymph": "全身浅表淋巴结未触及肿大"
+        },
+        "head": {
+          "eyes": "眼睑无水肿，巩膜无黄染，双侧瞳孔等大等圆，对光反射灵敏"
+        },
+        "neck": {
+          "neckVessel": "颈静脉无充盈，颈动脉无异常搏动"
+        },
+        "chest": {
+          "chestShape": "胸廓对称，无畸形，肋间隙正常",
+          "lungAuscultation": "双肺呼吸音清，未闻及干湿性啰音及胸膜摩擦音",
+          "heartAuscultation": "心律齐，各瓣膜听诊区未闻及病理性杂音"
+        },
+        "abdomen": {
+          "abdInspect": "腹部平坦，未见腹壁静脉曲张，未见胃肠型及蠕动波",
+          "abdAuscultation": "肠鸣音正常，未闻及血管杂音",
+          "abdPercussion": "自左下腹起逆时针叩诊，肝区及双肾区无叩击痛，移动性浊音阴性",
+          "abdPalpation": "上腹部压痛，无反跳痛"
+        },
+        "special_digestive": {
+          "giTenderness": "右上腹压痛，胆囊点压痛",
+          "giRebound": "局部腹肌紧张",
+          "giGallbladderPalp": "Murphy征阳性",
+          "giLiverPalp": "肝肋下未触及，剑突下未触及，肝区无压痛及叩击痛",
+          "giBowelSound": "未闻及振水音及血管杂音"
+        }
+      },
+      "auxiliary": {
+        "items": [
+          {
+            "name": "腹部超声",
+            "result": "胆囊9.2×4.0cm，壁厚0.6cm，呈双层；腔内见多枚强回声伴声影，最大约1.2cm，颈部一枚结石嵌顿；胆总管内径0.5cm，未见结石；胰腺未见异常",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          },
+          {
+            "name": "血常规",
+            "result": "WBC 14.6×10⁹/L，N 87%，Hb 138g/L，PLT 232×10⁹/L",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          },
+          {
+            "name": "肝功能",
+            "result": "ALT 46U/L，AST 38U/L，TBil 22μmol/L，DBil 8μmol/L，Alb 41g/L",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          },
+          {
+            "name": "腹部CT",
+            "result": "胆囊增大，壁增厚水肿，胆囊周围脂肪间隙模糊，腔内见高密度结石影；未见胆总管扩张",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          }
+        ]
+      },
+      "diagnosis": {
+        "confirmed": [
+          "急性结石性胆囊炎",
+          "胆囊结石"
+        ]
+      }
+    }
+  },
+  {
+    "key": "cirrhosis",
+    "dept": "digestive",
+    "name": "肝硬化失代偿期（腹水）",
+    "alias": [
+      "肝硬化",
+      "腹水",
+      "肝腹水",
+      "失代偿期肝硬化",
+      "乙型肝炎肝硬化",
+      "门脉高压"
+    ],
+    "hint": "乙型肝炎病史，腹胀、尿少、双下肢水肿，脾大，移动性浊音阳性",
+    "record": {
+      "basic": {
+        "marital": "已婚",
+        "nationality": "汉族",
+        "nativePlace": "浙江温州",
+        "birthPlace": "浙江温州",
+        "occupation": "退休工人",
+        "reliability": "可靠",
+        "chiefComplaint": "腹胀伴双下肢水肿",
+        "chiefComplaintDuration": "1",
+        "chiefComplaintDurationUnit": "月"
+      },
+      "hpi": {
+        "onset": "1个月前无明显诱因出现腹胀，进食后加重，夜间平卧时明显，同时发现双踝部水肿，晨轻暮重",
+        "cause": "既往乙型病毒性肝炎20年，近3个月自行停用恩替卡韦，未再复查肝功能",
+        "symptoms": "腹胀进行性加重，腹围渐增大，尿量减至每日约800ml，双下肢凹陷性水肿由踝部向上发展至胫前",
+        "relief": "自服呋塞米20mg每日1次共3天，尿量增多、腹胀略减轻，停药后反复",
+        "evolution": "近1周腹胀明显加重，进食量减至平时一半，平地行走即感气促，夜间需垫高枕头方能入睡",
+        "accompanying": "伴乏力、食欲减退，刷牙时偶有牙龈出血，无鼻衄",
+        "negativeDiscriminating": "无呕血、黑便，无发热、腹痛，无皮肤瘙痒及陶土样大便，无神志淡漠、计算力下降及扑翼样震颤",
+        "treatment": "门诊予螺内酯40mg每日1次、呋塞米20mg每日1次口服，未行腹腔穿刺放液",
+        "generalCondition": "发病以来精神差，食欲明显减退，睡眠差，尿量减少，体重较前增加约4kg",
+        "extra": ""
+      },
+      "ros": {
+        "gi": {
+          "bloating": {
+            "checked": true,
+            "detail": "腹胀进行性加重，进食后明显"
+          },
+          "appetiteLoss": {
+            "checked": true,
+            "detail": "进食量减至平时一半"
+          },
+          "jaundiceGi": {
+            "checked": true,
+            "detail": "家属发现巩膜轻度发黄"
+          },
+          "jaundice": {
+            "checked": true,
+            "detail": "巩膜及皮肤轻度黄染"
+          },
+          "abdominalPain": {
+            "negative": true
+          },
+          "vomiting": {
+            "negative": true
+          },
+          "hematemesis": {
+            "negative": true
+          },
+          "melena": {
+            "negative": true
+          },
+          "diarrhea": {
+            "negative": true
+          },
+          "constipation": {
+            "negative": true
+          }
+        },
+        "cardio": {
+          "edemaCardio": {
+            "checked": true,
+            "detail": "双下肢凹陷性水肿，晨轻暮重"
+          }
+        },
+        "gu": {
+          "oliguria": {
+            "checked": true,
+            "detail": "每日尿量约800ml"
+          }
+        },
+        "hemat": {
+          "fatigue": {
+            "checked": true,
+            "detail": "明显乏力，日常活动受限"
+          },
+          "bleeding": {
+            "checked": true,
+            "detail": "刷牙时牙龈渗血，量少可自止"
+          },
+          "epistaxis": {
+            "negative": true
+          },
+          "purpura": {
+            "negative": true
+          }
+        },
+        "resp": {
+          "dyspnea": {
+            "checked": true,
+            "detail": "平地行走即气促，平卧加重"
+          },
+          "fever": {
+            "negative": true
+          }
+        },
+        "nervous": {
+          "sleepDisorder": {
+            "checked": true,
+            "detail": "夜间腹胀影响入睡"
+          },
+          "tremor": {
+            "negative": true
+          },
+          "memoryLoss": {
+            "negative": true
+          }
+        },
+        "endocrine": {
+          "weightGain": {
+            "checked": true,
+            "detail": "1个月内体重增加约4kg"
+          }
+        }
+      },
+      "pmh": {
+        "health": "一般",
+        "diseaseChecks": {
+          "病毒性肝炎": true
+        },
+        "diseaseDetail": "20年前体检发现 HBsAg 阳性，诊断「乙型病毒性肝炎」，未规律抗病毒治疗；5年前查腹部超声提示「肝实质回声增粗、脾大」，诊断「乙型肝炎肝硬化」，间断服恩替卡韦，近3个月自行停药",
+        "longTermMeds": "恩替卡韦0.5mg每日1次，间断服用，近3个月已停",
+        "infection": "乙型病毒性肝炎20年，否认结核、疟疾等传染病史",
+        "surgery": "否认手术史",
+        "trauma": "否认外伤史",
+        "transfusion": "否认输血史",
+        "poisoning": "否认长期饮酒及肝毒性药物、毒物接触史",
+        "vaccine": "按计划预防接种",
+        "allergy": "无",
+        "relatedHistory": "乙型肝炎后肝硬化是本次腹水、脾大及凝血功能减退的基础病因",
+        "otherTreatDiseases": "",
+        "special": ""
+      },
+      "personal": {
+        "residence": "出生并居住于浙江温州，否认疫区及地方病流行区久居史",
+        "smoking": "已戒",
+        "smokingAmount": "吸烟30年，每日约20支，5年前已戒烟",
+        "drinking": "无",
+        "drinkingAmount": "",
+        "drugs": "",
+        "environment": "",
+        "habits": "饮食偏咸，喜食腌制食品，近1个月因腹胀进食明显减少",
+        "sexualHistory": "否认不洁性接触史",
+        "occupationEnv": "退休前从事机械加工工作，无粉尘、毒物及放射性物质接触史"
+      },
+      "marriage": {
+        "status": "已婚",
+        "age": "26",
+        "spouseHealth": "配偶体健，HBsAg 阴性",
+        "sexLife": "近半年性欲减退，近1个月因腹胀进一步减少",
+        "relation": "和睦"
+      },
+      "family": {
+        "diseaseChecks": {
+          "病毒性肝炎": true,
+          "恶性肿瘤": true
+        },
+        "other": "",
+        "deceased": "父亲因肝癌去世，68岁；母亲健在",
+        "threeGeneration": "两系三代否认遗传性疾病史",
+        "similarDisease": "",
+        "infectionHistory": "母亲 HBsAg 阳性，家族中乙型肝炎呈聚集现象"
+      },
+      "pe": {
+        "vitals": {},
+        "general": {
+          "development": "发育正常",
+          "nutrition": "营养不良",
+          "conscious": "神志清楚，精神可",
+          "posture": "自主体位",
+          "face": "慢性病容",
+          "cooperation": "查体合作"
+        },
+        "skin": {
+          "color": "皮肤黏膜黄染",
+          "rash": "未见皮疹及出血点",
+          "elasticity": "皮肤弹性减退",
+          "lymph": "全身浅表淋巴结未触及肿大"
+        },
+        "head": {
+          "eyes": "巩膜黄染"
+        },
+        "neck": {
+          "neckVessel": "颈静脉无充盈，颈动脉无异常搏动"
+        },
+        "chest": {
+          "lungAuscultation": "双肺呼吸音清，未闻及干湿性啰音及胸膜摩擦音",
+          "heartAuscultation": "心律齐，各瓣膜听诊区未闻及病理性杂音"
+        },
+        "abdomen": {
+          "abdInspect": "腹部膨隆",
+          "abdAuscultation": "肠鸣音正常，未闻及血管杂音",
+          "abdPercussion": "移动性浊音阳性"
+        },
+        "spine": {
+          "limbs": "双下肢凹陷性水肿"
+        },
+        "special_digestive": {
+          "giExtra": "肝颈静脉回流征阴性",
+          "giAbdShape": "腹壁静脉曲张，血流方向自下而上",
+          "giTenderness": "上腹部压痛",
+          "giLiverPalp": "肝肋下未触及，剑突下未触及，肝区无压痛及叩击痛",
+          "giSpleenPalp": "脾肋下可触及，质硬",
+          "giFluidThrill": "液波震颤阳性",
+          "giShiftingDullness": "移动性浊音阳性"
+        }
+      },
+      "auxiliary": {
+        "items": [
+          {
+            "name": "血常规",
+            "result": "WBC 3.2×10⁹/L，N 58%，Hb 106g/L，PLT 62×10⁹/L，三系减少",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          },
+          {
+            "name": "肝功能",
+            "result": "ALT 68U/L，AST 94U/L，Alb 27g/L，TBil 46μmol/L，DBil 26μmol/L，ALP 168U/L，GGT 132U/L",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          },
+          {
+            "name": "凝血功能",
+            "result": "PT 17.8s，较正常对照延长 4.2s，INR 1.52，APTT 41s",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          },
+          {
+            "name": "乙肝五项",
+            "result": "HBsAg 阳性，HBeAg 阴性，抗-HBe 阳性，抗-HBc 阳性，抗-HBs 阴性",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          },
+          {
+            "name": "HBV-DNA",
+            "result": "3.6×10⁵ IU/ml",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          },
+          {
+            "name": "甲胎蛋白",
+            "result": "38ng/ml（轻度升高）",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          },
+          {
+            "name": "腹部超声",
+            "result": "肝体积缩小，表面呈锯齿状，实质回声增粗不均，门静脉内径 1.4cm，血流速度减慢；脾 15.2×6.8cm；腹腔内见大量无回声区，最深约 9.8cm",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          },
+          {
+            "name": "胃镜",
+            "result": "食管中下段可见 3 条曲张静脉，呈串珠样，红色征阳性（中度）；胃底未见明显曲张；门脉高压性胃病（轻度）",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          }
+        ]
+      },
+      "diagnosis": {
+        "confirmed": [
+          "乙型肝炎后肝硬化失代偿期",
+          "腹腔积液",
+          "食管胃底静脉曲张（中度）",
+          "脾功能亢进",
+          "低白蛋白血症"
+        ]
+      }
+    }
+  },
+  {
+    "key": "obstruction",
+    "dept": "digestive",
+    "name": "急性肠梗阻（粘连性）",
+    "alias": [
+      "肠梗阻",
+      "粘连性肠梗阻",
+      "机械性肠梗阻",
+      "肠粘连",
+      "痛吐胀闭"
+    ],
+    "hint": "腹部手术史，阵发性腹痛、呕吐、腹胀、停止排气排便，肠鸣音活跃、可闻及金属音",
+    "record": {
+      "basic": {
+        "marital": "已婚",
+        "nationality": "汉族",
+        "nativePlace": "浙江温州",
+        "birthPlace": "浙江温州",
+        "occupation": "建筑工人",
+        "reliability": "可靠",
+        "chiefComplaint": "腹痛伴腹胀、呕吐",
+        "chiefComplaintDuration": "2",
+        "chiefComplaintDurationUnit": "天"
+      },
+      "hpi": {
+        "onset": "2天前进食大量粗纤维食物后出现脐周阵发性绞痛，每5～10分钟发作一次，每次持续约1分钟，间歇期完全缓解",
+        "cause": "5年前曾行开腹阑尾切除术，术后常有腹部隐痛；本次发病前曾进食大量粗纤维食物并受凉",
+        "symptoms": "腹痛发作时脐周鼓起包块、可见肠型，疼痛缓解后包块消失；伴腹胀，进行性加重，腹围增大",
+        "relief": "屈膝侧卧位、腹部热敷可稍缓解，腹痛间歇期完全无痛",
+        "evolution": "1天前开始呕吐，初始为胃内容物，后为黄绿色液体，混有粪渣、有粪臭味，共呕吐4次，量共约600ml；起病后未再排气排便，腹胀进行性加重",
+        "accompanying": "伴恶心、呕吐，呕吐后腹痛可短暂减轻；伴口干、尿少，无发热、寒战",
+        "negativeDiscriminating": "无发热、寒战，无呕血、黑便及血便，无尿频尿痛，无腰背部放射痛，无停止排便后腹块固定不动",
+        "treatment": "急诊予禁食、胃肠减压（引出黄绿色液体约400ml）、静脉补液及抗感染治疗，腹痛较前减轻，仍未排气排便",
+        "generalCondition": "发病以来精神差，未进食，睡眠差，近1日尿量约400ml，体重无明显变化",
+        "extra": ""
+      },
+      "ros": {
+        "gi": {
+          "abdominalPain": {
+            "checked": true,
+            "detail": "脐周阵发性绞痛，发作时可见肠型"
+          },
+          "vomiting": {
+            "checked": true,
+            "detail": "呕吐4次，初为胃内容物，后为黄绿色液体、有粪臭味"
+          },
+          "nausea": {
+            "checked": true,
+            "detail": "腹痛发作时伴恶心"
+          },
+          "bloating": {
+            "checked": true,
+            "detail": "腹胀进行性加重，腹围增大"
+          },
+          "constipation": {
+            "checked": true,
+            "detail": "起病后停止排气排便2天"
+          },
+          "appetiteLoss": {
+            "checked": true,
+            "detail": "完全无食欲"
+          },
+          "diarrhea": {
+            "negative": true
+          },
+          "hematochezia": {
+            "negative": true
+          },
+          "melena": {
+            "negative": true
+          },
+          "hematemesis": {
+            "negative": true
+          }
+        },
+        "resp": {
+          "fever": {
+            "negative": true
+          }
+        },
+        "gu": {
+          "oliguria": {
+            "checked": true,
+            "detail": "近1日尿量约400ml"
+          },
+          "dysuria": {
+            "negative": true
+          }
+        },
+        "hemat": {
+          "fatigue": {
+            "checked": true,
+            "detail": "乏力，活动后明显"
+          }
+        }
+      },
+      "pmh": {
+        "health": "平素体健",
+        "diseaseChecks": {},
+        "diseaseDetail": "否认高血压、糖尿病、冠心病等慢性病史",
+        "longTermMeds": "无长期服药史",
+        "infection": "否认肝炎、结核等传染病史",
+        "surgery": "5年前因「急性阑尾炎」行开腹阑尾切除术，术后恢复可，右下腹留纵行手术瘢痕；否认其他手术史",
+        "trauma": "否认外伤史",
+        "transfusion": "否认输血史",
+        "poisoning": "否认毒物接触史",
+        "vaccine": "按计划预防接种",
+        "allergy": "无",
+        "relatedHistory": "腹部手术史形成的肠粘连是本次肠梗阻的解剖基础",
+        "otherTreatDiseases": "",
+        "special": ""
+      },
+      "personal": {
+        "residence": "出生并居住于浙江温州，否认疫区及地方病流行区久居史",
+        "smoking": "有",
+        "smokingAmount": "吸烟12年，每日约20支，未戒烟",
+        "drinking": "有",
+        "drinkingAmount": "饮啤酒每周2～3次，每次约500ml",
+        "drugs": "",
+        "environment": "",
+        "habits": "饮食偏粗糙，进食速度快，饮水少，饭后常立即从事体力劳动",
+        "sexualHistory": "否认不洁性接触史",
+        "occupationEnv": "从事建筑施工作业，体力劳动强度大，无粉尘及放射性物质接触史"
+      },
+      "marriage": {
+        "status": "已婚",
+        "age": "26",
+        "spouseHealth": "配偶体健",
+        "sexLife": "正常",
+        "relation": "和睦"
+      },
+      "family": {
+        "diseaseChecks": {},
+        "other": "",
+        "deceased": "父母健在",
+        "threeGeneration": "两系三代否认遗传性疾病史",
+        "similarDisease": "",
+        "infectionHistory": "否认结核、肝炎、性病等传染性疾病史"
+      },
+      "pe": {
+        "vitals": {},
+        "general": {
+          "development": "发育正常",
+          "nutrition": "营养中等",
+          "conscious": "神志清楚，精神差",
+          "posture": "强迫体位",
+          "face": "急性病容",
+          "cooperation": "查体合作"
+        },
+        "skin": {
+          "color": "全身皮肤黏膜无黄染、苍白、发绀",
+          "rash": "未见皮疹及出血点",
+          "elasticity": "皮肤弹性减退",
+          "lymph": "全身浅表淋巴结未触及肿大"
+        },
+        "head": {
+          "eyes": "眼睑无水肿，巩膜无黄染，双侧瞳孔等大等圆，对光反射灵敏"
+        },
+        "neck": {
+          "neckVessel": "颈静脉无充盈，颈动脉无异常搏动"
+        },
+        "chest": {
+          "lungAuscultation": "双肺呼吸音清，未闻及干湿性啰音及胸膜摩擦音",
+          "heartAuscultation": "心律齐，各瓣膜听诊区未闻及病理性杂音"
+        },
+        "abdomen": {
+          "abdInspect": "腹部膨隆",
+          "abdAuscultation": "肠鸣音活跃",
+          "abdPercussion": "鼓音区缩小"
+        },
+        "special_digestive": {
+          "giAbdShape": "可见胃肠型及蠕动波",
+          "giTenderness": "脐周压痛",
+          "giRebound": "全腹无反跳痛，腹肌柔软",
+          "giBowelSound": "可闻及金属音",
+          "giRectal": "直肠指检未触及肿物，指套无染血"
+        }
+      },
+      "auxiliary": {
+        "items": [
+          {
+            "name": "腹部立位平片",
+            "result": "中腹部可见多个阶梯状气液平面，小肠肠管明显扩张、最大内径约 3.5cm，结肠内气体减少",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          },
+          {
+            "name": "腹部CT",
+            "result": "小肠肠管扩张积液，移行带位于右下腹回盲部附近，局部肠管与前腹壁粘连，其远端肠管萎陷；未见明确肿物及肠壁缺血征象；腹腔少量积液",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          },
+          {
+            "name": "血常规",
+            "result": "WBC 11.2×10⁹/L，N 78%，Hb 148g/L，PLT 226×10⁹/L",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          },
+          {
+            "name": "电解质",
+            "result": "K⁺ 3.2mmol/L，Na⁺ 134mmol/L，Cl⁻ 92mmol/L，提示低钾低氯",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          },
+          {
+            "name": "肾功能",
+            "result": "Cr 88μmol/L，BUN 8.6mmol/L，乳酸 1.6mmol/L",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          },
+          {
+            "name": "腹部超声",
+            "result": "腹腔内见扩张肠管，内容物呈往返运动，肠蠕动增强；腹腔少量无回声区",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          }
+        ]
+      },
+      "diagnosis": {
+        "confirmed": [
+          "急性肠梗阻（粘连性，不完全性）",
+          "低钾血症",
+          "阑尾切除术后"
+        ]
+      }
+    }
+  },
+  {
+    "key": "pancreatitis",
+    "dept": "digestive",
+    "name": "急性胰腺炎（胆源性）",
+    "alias": [
+      "急性胰腺炎",
+      "胰腺炎",
+      "胆源性胰腺炎",
+      "胆石性胰腺炎",
+      "AP"
+    ],
+    "hint": "饱餐或饮酒后上腹持续剧痛，向腰背放射，弯腰抱膝减轻，呕吐后不缓解",
+    "record": {
+      "basic": {
+        "marital": "已婚",
+        "nationality": "汉族",
+        "nativePlace": "浙江温州",
+        "birthPlace": "浙江温州",
+        "occupation": "公司职员",
+        "reliability": "可靠",
+        "chiefComplaint": "上腹部疼痛伴恶心呕吐10小时",
+        "chiefComplaintDuration": "10",
+        "chiefComplaintDurationUnit": "小时"
+      },
+      "hpi": {
+        "onset": "10小时前晚餐饱食并饮白酒约150ml后出现上腹部持续性剧痛，呈刀割样，程度剧烈，难以忍受",
+        "cause": "既往胆囊结石病史",
+        "symptoms": "疼痛位于中上腹，向左腰背部放射，呈束带状，弯腰抱膝位可稍减轻，平卧及伸腰时加重",
+        "relief": "自服「山莨菪碱」后腹痛无缓解",
+        "evolution": "腹痛逐渐加重，频繁呕吐，呕吐后腹痛不见减轻，遂来急诊",
+        "accompanying": "伴恶心、呕吐胃内容物5～6次，量不多，无咖啡样物；伴腹胀，无发热、寒战",
+        "negativeDiscriminating": "无呕血、黑便，无腹泻，无黄疸，无胸闷、胸痛，无尿频尿痛",
+        "treatment": "急诊予禁食、胃肠减压、乳酸钠林格液静脉补液、盐酸布桂嗪止痛，现疼痛较前减轻",
+        "generalCondition": "发病以来精神差，未进食，睡眠差，小便量偏少，体重无明显变化",
+        "extra": ""
+      },
+      "ros": {
+        "gi": {
+          "abdominalPain": {
+            "checked": true,
+            "detail": "中上腹刀割样持续痛，向腰背放射"
+          },
+          "nausea": {
+            "checked": true
+          },
+          "vomiting": {
+            "checked": true,
+            "detail": "呕吐胃内容物5～6次，吐后腹痛不缓解"
+          },
+          "bloating": {
+            "checked": true,
+            "detail": "起病后逐渐加重"
+          },
+          "appetiteLoss": {
+            "checked": true,
+            "detail": "完全无食欲"
+          },
+          "hematemesis": {
+            "negative": true
+          },
+          "melena": {
+            "negative": true
+          },
+          "diarrhea": {
+            "negative": true
+          },
+          "constipation": {
+            "negative": true
+          },
+          "jaundiceGi": {
+            "negative": true
+          },
+          "reflux": {
+            "negative": true
+          }
+        },
+        "resp": {
+          "fever": {
+            "negative": true
+          },
+          "chills": {
+            "negative": true
+          }
+        },
+        "cardio": {
+          "palpitation": {
+            "negative": true
+          }
+        },
+        "hemat": {
+          "fatigue": {
+            "negative": true
+          },
+          "pallorSkin": {
+            "negative": true
+          }
+        }
+      },
+      "pmh": {
+        "health": "平素体健",
+        "diseaseChecks": {
+          "胆囊结石": true
+        },
+        "diseaseDetail": "3年前体检超声发现胆囊结石，最大直径约1.5cm，偶有右上腹隐痛，未行手术",
+        "longTermMeds": "无长期服药史",
+        "infection": "否认肝炎、结核等传染病史",
+        "surgery": "否认手术史",
+        "trauma": "否认外伤史",
+        "transfusion": "否认输血史",
+        "poisoning": "否认毒物接触史",
+        "vaccine": "按计划预防接种",
+        "allergy": "无",
+        "relatedHistory": "否认长期服用糖皮质激素、噻嗪类利尿剂及硫唑嘌呤等药物史",
+        "otherTreatDiseases": "",
+        "special": ""
+      },
+      "personal": {
+        "residence": "浙江温州，否认疫区及地方病流行区久居史",
+        "smoking": "无",
+        "smokingAmount": "",
+        "drinking": "有",
+        "drinkingAmount": "饮白酒每周4～5次，每次约150～250ml，发病前1天曾一次饮白酒约500ml",
+        "drugs": "否认铅、汞等重金属及有机磷农药接触史",
+        "environment": "",
+        "habits": "长期饮食不规律，喜油腻食物，常有暴饮暴食",
+        "sexualHistory": "否认不洁性接触史",
+        "occupationEnv": "办公室工作，无粉尘及放射性物质接触"
+      },
+      "marriage": {
+        "status": "已婚",
+        "age": "28",
+        "spouseHealth": "配偶体健",
+        "sexLife": "正常",
+        "relation": "和睦"
+      },
+      "family": {
+        "diseaseChecks": {},
+        "other": "",
+        "deceased": "父母健在",
+        "threeGeneration": "两系三代否认遗传性疾病史",
+        "similarDisease": "",
+        "infectionHistory": "否认结核、肝炎、性病等传染性疾病史"
+      },
+      "pe": {
+        "vitals": {},
+        "general": {
+          "development": "发育正常",
+          "nutrition": "营养中等",
+          "conscious": "神志清楚，精神差",
+          "posture": "强迫体位",
+          "face": "急性病容",
+          "cooperation": "查体合作"
+        },
+        "skin": {
+          "color": "全身皮肤黏膜无黄染、苍白、发绀",
+          "rash": "未见皮疹及出血点",
+          "elasticity": "皮肤弹性良好",
+          "lymph": "全身浅表淋巴结未触及肿大"
+        },
+        "head": {
+          "eyes": "眼睑无水肿，巩膜无黄染，双侧瞳孔等大等圆，对光反射灵敏"
+        },
+        "neck": {
+          "neckVessel": "颈静脉无充盈，颈动脉无异常搏动"
+        },
+        "chest": {
+          "chestShape": "胸廓对称，无畸形，肋间隙正常",
+          "lungAuscultation": "双肺呼吸音清，未闻及干湿性啰音及胸膜摩擦音",
+          "heartAuscultation": "心律齐，各瓣膜听诊区未闻及病理性杂音"
+        },
+        "abdomen": {
+          "abdInspect": "腹部膨隆",
+          "abdAuscultation": "肠鸣音减弱",
+          "abdPercussion": "自左下腹起逆时针叩诊，肝区及双肾区无叩击痛，移动性浊音阴性",
+          "abdPalpation": "上腹部压痛，无反跳痛"
+        },
+        "special_digestive": {
+          "giTenderness": "上腹部压痛",
+          "giRebound": "局部腹肌紧张",
+          "giLiverPalp": "肝肋下未触及，剑突下未触及，肝区无压痛及叩击痛",
+          "giGallbladderPalp": "胆囊未触及，Murphy征阴性，无胆囊触痛",
+          "giBowelSound": "肠鸣音减弱"
+        }
+      },
+      "auxiliary": {
+        "items": [
+          {
+            "name": "血淀粉酶",
+            "result": "1180U/L（参考值35～135U/L，超过正常上限3倍以上）",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          },
+          {
+            "name": "血脂肪酶",
+            "result": "1640U/L（参考值0～60U/L，超过正常上限3倍以上）",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          },
+          {
+            "name": "血常规",
+            "result": "WBC 13.8×10⁹/L，N 86%，Hb 152g/L，PLT 218×10⁹/L",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          },
+          {
+            "name": "腹部CT（增强）",
+            "result": "胰腺体积弥漫增大，实质密度不均，胰周脂肪间隙模糊并见条片状液性渗出，未见明确坏死区；胆囊内见高密度结石影，胆总管未见扩张",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          },
+          {
+            "name": "腹部超声",
+            "result": "胆囊8.6×3.8cm，壁厚0.3cm，腔内见多枚强回声伴声影，最大约1.5cm；胰腺显示不清（肠气干扰）",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          }
+        ]
+      },
+      "diagnosis": {
+        "confirmed": [
+          "急性胰腺炎（胆源性，轻症）",
+          "胆囊结石"
+        ]
+      }
+    }
+  },
+  {
+    "key": "pud",
+    "dept": "digestive",
+    "name": "消化性溃疡（十二指肠球部溃疡）",
+    "alias": [
+      "十二指肠溃疡",
+      "胃溃疡",
+      "消化性溃疡",
+      "DU",
+      "GU"
+    ],
+    "hint": "慢性、周期性、节律性上腹痛，空腹痛、夜间痛，进食后缓解",
+    "record": {
+      "basic": {
+        "marital": "已婚",
+        "nationality": "汉族",
+        "nativePlace": "浙江温州",
+        "birthPlace": "浙江温州",
+        "occupation": "公司职员",
+        "reliability": "可靠",
+        "chiefComplaint": "反复上腹部疼痛",
+        "chiefComplaintDuration": "2",
+        "chiefComplaintDurationUnit": "年"
+      },
+      "hpi": {
+        "onset": "2年前无明显诱因出现上腹部疼痛，位于剑突下偏右，呈烧灼样，程度中等，可忍受",
+        "cause": "多于季节交替、劳累及精神紧张时发作，进食辛辣食物后可诱发",
+        "symptoms": "疼痛多于餐后2～4小时出现，即空腹及夜间明显，进食或服用抗酸药后可缓解，每次持续约半小时至1小时，每周发作2～3次",
+        "relief": "进食、服用奥美拉唑后可缓解",
+        "evolution": "近1个月发作较前频繁，疼痛程度加重，夜间常被痛醒",
+        "accompanying": "伴反酸、嗳气，无恶心呕吐",
+        "negativeDiscriminating": "无呕血、黑便，无发热、黄疸，无体重明显下降",
+        "treatment": "曾于当地医院查胃镜示「十二指肠球部溃疡」，予奥美拉唑20mg每日1次口服，疗程6周，服药期间症状缓解，停药后复发",
+        "generalCondition": "发病以来精神、食欲尚可，睡眠因夜间疼痛受影响，大小便正常，体重无明显变化",
+        "extra": ""
+      },
+      "ros": {
+        "gi": {
+          "abdominalPain": {
+            "checked": true,
+            "detail": "剑突下偏右烧灼样痛，空腹痛、夜间痛"
+          },
+          "reflux": {
+            "checked": true,
+            "detail": "伴反酸、嗳气"
+          },
+          "nausea": {
+            "negative": true
+          },
+          "vomiting": {
+            "negative": true
+          },
+          "hematemesis": {
+            "negative": true
+          },
+          "melena": {
+            "negative": true
+          },
+          "diarrhea": {
+            "negative": true
+          },
+          "constipation": {
+            "negative": true
+          },
+          "jaundiceGi": {
+            "negative": true
+          },
+          "appetiteLoss": {
+            "negative": true
+          }
+        },
+        "hemat": {
+          "fatigue": {
+            "negative": true
+          },
+          "pallorSkin": {
+            "negative": true
+          }
+        },
+        "resp": {
+          "fever": {
+            "negative": true
+          }
+        },
+        "cardio": {
+          "palpitation": {
+            "negative": true
+          }
+        }
+      },
+      "pmh": {
+        "health": "平素体健",
+        "diseaseChecks": {},
+        "diseaseDetail": "否认高血压、糖尿病、冠心病等慢性病史",
+        "longTermMeds": "无长期服药史",
+        "infection": "否认肝炎、结核等传染病史",
+        "surgery": "否认手术史",
+        "trauma": "否认外伤史",
+        "transfusion": "否认输血史",
+        "poisoning": "否认毒物接触史",
+        "vaccine": "按计划预防接种",
+        "allergy": "无",
+        "relatedHistory": "否认长期服用非甾体抗炎药及糖皮质激素史",
+        "otherTreatDiseases": "",
+        "special": ""
+      },
+      "personal": {
+        "residence": "出生并居住于浙江温州，否认疫区及地方病流行区久居史",
+        "smoking": "有",
+        "smokingAmount": "吸烟10年，每日约10支，未戒烟",
+        "drinking": "有",
+        "drinkingAmount": "饮白酒每周2～3次，每次约100ml",
+        "drugs": "否认铅、汞等重金属及有机磷农药接触史",
+        "environment": "",
+        "habits": "饮食不规律，工作压力较大",
+        "sexualHistory": "否认不洁性接触史",
+        "occupationEnv": "办公室工作，无粉尘及放射性物质接触"
+      },
+      "marriage": {
+        "status": "已婚",
+        "age": "27",
+        "spouseHealth": "配偶体健",
+        "sexLife": "正常",
+        "relation": "和睦"
+      },
+      "family": {
+        "diseaseChecks": {},
+        "other": "",
+        "deceased": "父母健在",
+        "threeGeneration": "两系三代否认遗传性疾病史",
+        "similarDisease": "",
+        "infectionHistory": "否认结核、肝炎、性病等传染性疾病史"
+      },
+      "pe": {
+        "vitals": {},
+        "general": {
+          "development": "发育正常",
+          "nutrition": "营养中等",
+          "conscious": "神志清楚，精神可",
+          "posture": "自主体位",
+          "face": "面容自然",
+          "cooperation": "查体合作"
+        },
+        "skin": {
+          "color": "全身皮肤黏膜无黄染、苍白、发绀",
+          "rash": "未见皮疹及出血点",
+          "elasticity": "皮肤弹性良好",
+          "lymph": "全身浅表淋巴结未触及肿大"
+        },
+        "head": {
+          "eyes": "眼睑无水肿，巩膜无黄染，双侧瞳孔等大等圆，对光反射灵敏"
+        },
+        "neck": {
+          "neckVessel": "颈静脉无充盈，颈动脉无异常搏动"
+        },
+        "chest": {
+          "chestShape": "胸廓对称，无畸形，肋间隙正常",
+          "lungAuscultation": "双肺呼吸音清，未闻及干湿性啰音及胸膜摩擦音",
+          "heartAuscultation": "心律齐，各瓣膜听诊区未闻及病理性杂音"
+        },
+        "abdomen": {
+          "abdInspect": "腹部平坦，未见腹壁静脉曲张，未见胃肠型及蠕动波",
+          "abdAuscultation": "肠鸣音正常，未闻及血管杂音",
+          "abdPercussion": "自左下腹起逆时针叩诊，肝区及双肾区无叩击痛，移动性浊音阴性"
+        },
+        "special_digestive": {
+          "giTenderness": "上腹部压痛",
+          "giRebound": "全腹无反跳痛，腹肌柔软",
+          "giLiverPalp": "肝肋下未触及，剑突下未触及，肝区无压痛及叩击痛",
+          "giBowelSound": "未闻及振水音及血管杂音"
+        }
+      },
+      "auxiliary": {
+        "items": [
+          {
+            "name": "血常规",
+            "result": "Hb 128g/L，WBC 6.8×10⁹/L，N 63%，PLT 210×10⁹/L",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          },
+          {
+            "name": "粪便隐血",
+            "result": "阴性",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          },
+          {
+            "name": "胃镜",
+            "result": "十二指肠球部前壁可见一直径约1.0cm溃疡，覆白苔，周边黏膜充血水肿，球部变形；胃窦黏膜轻度充血",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          },
+          {
+            "name": "幽门螺杆菌检测（13C尿素呼气试验）",
+            "result": "阳性，DOB 18.6",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          }
+        ]
+      },
+      "diagnosis": {
+        "confirmed": [
+          "十二指肠球部溃疡（活动期，A1期）",
+          "幽门螺杆菌感染",
+          "慢性非萎缩性胃炎"
+        ]
+      }
+    }
+  },
+  {
+    "key": "ugib",
+    "dept": "digestive",
+    "name": "上消化道出血（消化性溃疡并出血）",
+    "alias": [
+      "上消化道出血",
+      "消化道出血",
+      "溃疡出血",
+      "十二指肠溃疡并出血",
+      "UGIB"
+    ],
+    "hint": "呕血、柏油样黑便，伴头晕心慌、贫血貌、肠鸣音活跃，需考虑消化性溃疡并上消化道出血",
+    "record": {
+      "basic": {
+        "marital": "已婚",
+        "nationality": "汉族",
+        "nativePlace": "浙江温州",
+        "birthPlace": "浙江温州",
+        "occupation": "公司职员",
+        "reliability": "可靠",
+        "chiefComplaint": "呕血、黑便",
+        "chiefComplaintDuration": "2",
+        "chiefComplaintDurationUnit": "天"
+      },
+      "hpi": {
+        "onset": "2天前无明显诱因出现柏油样黑便，共3次，每次量约150～200g",
+        "cause": "发病前1周因膝关节疼痛自行口服布洛芬缓释胶囊0.3g每日2次、阿司匹林肠溶片100mg每日1次",
+        "symptoms": "黑便质稀、有腥臭味；1天前呕吐咖啡渣样胃内容物2次，共约150ml，呕吐后上腹部烧灼感稍减轻",
+        "relief": "平卧休息后头晕可稍缓解，黑便及呕吐未见停止",
+        "evolution": "2天来黑便次数增多、转为稀糊状，头晕乏力加重，起身时眼前发黑，无晕厥",
+        "accompanying": "伴上腹部隐痛、反酸、心慌、出冷汗、口干",
+        "negativeDiscriminating": "无剧烈腹痛及腹膜刺激征，无咯血、牙龈出血及皮下瘀斑，无血尿，无体重明显下降",
+        "treatment": "未就诊，未服止血、抑酸药，仅进食少量米汤",
+        "generalCondition": "发病以来精神差，食欲下降，睡眠差，尿量减少，体重无明显下降",
+        "extra": ""
+      },
+      "ros": {
+        "gi": {
+          "abdominalPain": {
+            "checked": true,
+            "detail": "上腹部隐痛，多于空腹及夜间明显，进食后可缓解"
+          },
+          "reflux": {
+            "checked": true,
+            "detail": "多于餐后及夜间出现，服抑酸药后可稍缓解"
+          },
+          "nausea": {
+            "checked": true,
+            "detail": "未再呕吐，进食后上腹饱胀"
+          },
+          "hematemesis": {
+            "checked": true,
+            "detail": "呕吐咖啡渣样胃内容物2次，共约150ml"
+          },
+          "melena": {
+            "checked": true,
+            "detail": "排柏油样黑便3次，质稀"
+          },
+          "hematochezia": {
+            "negative": true
+          },
+          "constipation": {
+            "negative": true
+          },
+          "jaundiceGi": {
+            "negative": true
+          },
+          "appetiteLoss": {
+            "checked": true,
+            "detail": "食欲明显减退"
+          }
+        },
+        "hemat": {
+          "anemia": {
+            "checked": true,
+            "detail": "活动后加重，休息后可稍缓解"
+          },
+          "bleeding": {
+            "negative": true
+          },
+          "bruise": {
+            "negative": true
+          }
+        },
+        "resp": {
+          "fever": {
+            "negative": true
+          }
+        },
+        "cardio": {
+          "syncope": {
+            "negative": true
+          }
+        },
+        "nervous": {
+          "dizziness": {
+            "checked": true,
+            "detail": "多于体位改变时出现，伴眼前发黑"
+          }
+        }
+      },
+      "pmh": {
+        "health": "平素体健",
+        "diseaseChecks": {
+          "消化性溃疡": true
+        },
+        "diseaseDetail": "2年来反复上腹部疼痛，多于空腹及夜间发作，进食后可缓解，未系统诊治；否认其他慢性病史",
+        "longTermMeds": "近1年因膝关节疼痛间断口服布洛芬缓释胶囊0.3g每日2次，近3个月自行加服阿司匹林肠溶片100mg每日1次，否认糖皮质激素服用史",
+        "infection": "否认肝炎、结核等传染病史",
+        "surgery": "否认手术史",
+        "trauma": "否认外伤史",
+        "transfusion": "否认输血史",
+        "poisoning": "否认毒物接触史",
+        "vaccine": "按计划预防接种",
+        "allergy": "无",
+        "relatedHistory": "长期服用非甾体抗炎药及阿司匹林，为本次溃疡出血的重要诱因",
+        "otherTreatDiseases": "",
+        "special": ""
+      },
+      "personal": {
+        "residence": "浙江温州，否认疫区及地方病流行区旅居史",
+        "smoking": "无",
+        "drinking": "无",
+        "drugs": "否认铅、汞等重金属及有机磷农药接触史",
+        "environment": "",
+        "habits": "饮食欠规律，三餐不定时，夜间常加餐，工作压力较大",
+        "sexualHistory": "否认不洁性接触史",
+        "occupationEnv": "办公室工作，无粉尘、毒物及放射性物质接触史"
+      },
+      "marriage": {
+        "status": "已婚",
+        "age": "25",
+        "spouseHealth": "配偶体健",
+        "sexLife": "正常",
+        "relation": "和睦"
+      },
+      "family": {
+        "diseaseChecks": {},
+        "other": "",
+        "deceased": "父母健在",
+        "threeGeneration": "两系三代否认遗传性疾病史",
+        "similarDisease": "否认家族中消化性溃疡及消化道肿瘤病史",
+        "infectionHistory": "否认结核、肝炎、性病等传染性疾病史"
+      },
+      "pe": {
+        "vitals": {},
+        "general": {
+          "development": "发育正常",
+          "nutrition": "营养中等",
+          "conscious": "神志清楚，精神差",
+          "posture": "自主体位",
+          "face": "贫血面容",
+          "cooperation": "查体合作"
+        },
+        "skin": {
+          "color": "皮肤黏膜苍白",
+          "rash": "未见皮疹及出血点",
+          "elasticity": "皮肤弹性良好",
+          "lymph": "全身浅表淋巴结未触及肿大"
+        },
+        "head": {
+          "eyes": "眼睑无水肿，巩膜无黄染，双侧瞳孔等大等圆，对光反射灵敏"
+        },
+        "neck": {
+          "neckVessel": "颈静脉无充盈，颈动脉无异常搏动"
+        },
+        "chest": {
+          "chestShape": "胸廓对称，无畸形，肋间隙正常",
+          "lungAuscultation": "双肺呼吸音清，未闻及干湿性啰音及胸膜摩擦音",
+          "heartAuscultation": "心律齐，各瓣膜听诊区未闻及病理性杂音"
+        },
+        "abdomen": {
+          "abdInspect": "腹部平坦，未见腹壁静脉曲张，未见胃肠型及蠕动波",
+          "abdAuscultation": "肠鸣音活跃",
+          "abdPercussion": "自左下腹起逆时针叩诊，肝区及双肾区无叩击痛，移动性浊音阴性",
+          "abdPalpation": "上腹部压痛，无反跳痛"
+        },
+        "special_digestive": {
+          "giLiverPalp": "肝肋下未触及，剑突下未触及，肝区无压痛及叩击痛",
+          "giSpleenPalp": "脾脏未触及，脾区无摩擦感",
+          "giRectal": "直肠指检未触及肿物，指套无染血"
+        }
+      },
+      "auxiliary": {
+        "items": [
+          {
+            "name": "血常规",
+            "result": "血红蛋白 76g/L，RBC 2.68×10¹²/L，MCV 82fl，MCH 26pg；WBC 8.6×10⁹/L，N 71%；PLT 246×10⁹/L；网织红细胞 4.2%",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          },
+          {
+            "name": "粪便隐血",
+            "result": "阳性（＋＋）",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          },
+          {
+            "name": "凝血功能",
+            "result": "PT 12.6s，APTT 30.2s，INR 1.05",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          },
+          {
+            "name": "肝肾功能及电解质",
+            "result": "ALT 21U/L，AST 26U/L，总胆红素 14.6μmol/L，白蛋白 38g/L；BUN 11.2mmol/L，Cr 78μmol/L，K⁺ 3.6mmol/L",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          },
+          {
+            "name": "胃镜",
+            "result": "十二指肠球部前壁可见1.2cm×1.0cm溃疡，表面覆血痂，周边黏膜充血水肿，球部变形；胃腔内见少量咖啡色液体；胃窦黏膜轻度充血。Forrest Ⅱb级",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          },
+          {
+            "name": "幽门螺杆菌检测（胃镜下活检快速尿素酶试验）",
+            "result": "阳性",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          }
+        ]
+      },
+      "diagnosis": {
+        "confirmed": [
+          "十二指肠球部溃疡并出血（Forrest Ⅱb级）",
+          "失血性贫血（中度）",
+          "幽门螺杆菌感染",
+          "慢性非萎缩性胃炎"
+        ]
+      }
+    }
+  }
+];
+
+
+</script>
+<script>
+/* ============================================================
+ * 模板病例（TEMPLATES）
+ * ------------------------------------------------------------
+ * 学生选好科室后，可以挑一份「标准大病历初稿」，得到一个已经写满
+ * 典型病例内容的病历，再按自己实际问到的、查到的删改。
+ *
+ * 三条铁律：
+ *   1. 套用模板**只填空白的**，一个字都不覆盖。学生已经写的东西比他
+ *      随便点的模板更接近真相。
+ *   2. 模板不写患者身份（姓名/性别/年龄/住院号/床号）与生命体征数字。
+ *      那些只能由学生自己测、自己问。
+ *   3. 模板数据是数据，不是逻辑。这个文件只负责「查、套、报」。
+ *
+ * 依赖：SCHEMA（科室名）、RECORD_CORE（fillBlanks / cloneValue）。
+ * 数据来自 template-data.js（由 tools/gen-templates.js 生成）。
+ * ============================================================ */
+
+var TEMPLATES = (function () {
+  const DATA = (typeof TEMPLATE_DATA !== 'undefined' ? TEMPLATE_DATA : []);
+
+  /**
+   * 某个科室有哪些模板。general（通用/全科）返回空数组——
+   * 通用科没有「标准病例」这回事，只能从头问。
+   */
+  function listByDept(deptKey) {
+    const k = String(deptKey || '');
+    if (!k || k === 'general') return [];
+    // 所有模板都挂在具体科室下；不跨科室给，免得学生拿消化科的模板套儿科病历
+    return DATA.filter(t => t.dept === k);
+  }
+
+  function get(key) {
+    const k = String(key || '');
+    return DATA.find(t => t.key === k) || null;
+  }
+
+  function all() {
+    return DATA.slice();
+  }
+
+  /** 科室的中文名，用于界面文案与提示 */
+  function deptName(deptKey) {
+    const d = (SCHEMA.DEPARTMENTS || []).find(x => x.key === deptKey);
+    return d ? d.name : deptKey;
+  }
+
+  /**
+   * 把模板套进当前病历。返回 { filled: [...], count, skipped }：
+   *   filled  实际写入的字段路径（如 'hpi.onset'），用于给用户看「补了哪些」
+   *   count   写入项数
+   *   skipped 非空而未覆盖的路径（用于提示「这些是你自己写的，没动」）
+   *
+   * 注意：模板里的 record 是**完整对象**，但 fillBlanks 只填空位，
+   * 所以「先填一半再套模板」也不会把已填的内容冲掉。
+   */
+  function apply(record, key) {
+    const t = get(key);
+    if (!t || !record) return { filled: [], count: 0, skipped: [], ok: false };
+    if (!RECORD_CORE || !RECORD_CORE.fillBlanks) {
+      return { filled: [], count: 0, skipped: [], ok: false };
+    }
+
+    // 记录套用前的空/非空状态，用于统计「本来就有内容的没被动过」
+    const before = snapshotNonEmpty(record);
+
+    const filled = RECORD_CORE.fillBlanks(record, t.record);
+
+    // 套用时科室若还停在 general，顺手把模板的科室填上，否则专科查体出不来
+    if (t.dept && (!record.basic.department || record.basic.department === 'general')) {
+      record.basic.department = t.dept;
+      if (filled.indexOf('basic.department') < 0) filled.push('basic.department');
+    }
+
+    return {
+      ok: true,
+      filled,
+      count: filled.length,
+      skipped: before,
+      name: t.name,
+      dept: t.dept
+    };
+  }
+
+  /**
+   * 模板会填哪些路径（不实际写入）。用于界面预览「这份模板大概写了些什么」。
+   */
+  function previewPaths(key) {
+    const t = get(key);
+    if (!t) return [];
+    const out = [];
+    (function walk(node, path) {
+      if (!node || typeof node !== 'object') return;
+      Object.keys(node).forEach(k => {
+        const p = path ? path + '.' + k : k;
+        const v = node[k];
+        if (v && typeof v === 'object' && !Array.isArray(v)) walk(v, p);
+        else out.push(p);
+      });
+    })(t.record, '');
+    return out;
+  }
+
+  /** 记录里已经「有内容」的顶层-二级路径，用于报告「这些没动」 */
+  function snapshotNonEmpty(record) {
+    const out = [];
+    const isObj = v => v && typeof v === 'object' && !Array.isArray(v);
+    Object.keys(record || {}).forEach(k => {
+      if (!isObj(record[k])) return;
+      Object.keys(record[k]).forEach(k2 => {
+        const v = record[k][k2];
+        const nonEmpty = (typeof v === 'string' && v.trim() !== '')
+          || (Array.isArray(v) && v.length > 0)
+          || (isObj(v) && Object.keys(v).length > 0);
+        if (nonEmpty) out.push(k + '.' + k2);
+      });
+    });
+    return out;
+  }
+
+  return { listByDept, get, all, apply, previewPaths, deptName };
 })();
 
 
@@ -7229,7 +8959,11 @@ const GENERATOR = (() => {
     if (status === '未婚') return '未婚。';
     let s = status;
     if (m.age) s += `，${m.age}岁结婚`;
-    if (m.spouseHealth) s += `，配偶${stripTail(m.spouseHealth)}`;
+    // 学生常直接写「配偶体健」，再冠一次「配偶」就成了「配偶配偶体健」。
+    if (m.spouseHealth) {
+      const sp = stripTail(m.spouseHealth);
+      s += `，${/^配偶/.test(sp) ? sp : `配偶${sp}`}`;
+    }
     appendMarriageExtra(m, part => { s += `，${part}`; });
     return s + '。';
   }
@@ -9212,6 +10946,20 @@ const HINTS = (() => {
 
     /* ------------------------------ 消化 ------------------------------ */
     {
+      id: 'pud', name: '消化性溃疡（无出血）',
+      depts: ['digestive', 'general'],
+      // 必要条件给「节律性上腹痛」与「幽门螺杆菌/胃镜证据」任一条即可：
+      // 只有上腹痛没有检查的病例也该提示，那是学生最需要被提醒去做胃镜的时候。
+      must: ['ros:gi.abdominalPain', 'cc:上腹痛', 'aux:胃镜', 'aux:幽门螺杆菌'],
+      need: 3,
+      match: ['ros:gi.abdominalPain', 'ros:gi.reflux',
+        'pev:special_digestive.giTenderness=上腹部压痛',
+        'pev:abdomen.abdPalpation=上腹部压痛，无反跳痛',
+        'aux:胃镜', 'aux:幽门螺杆菌', 'aux:大便', 'risk:smoke'],
+      hint: '慢性、周期性、节律性上腹痛，空腹痛或夜间痛、进食后缓解，伴反酸嗳气，需考虑消化性溃疡。',
+      note: '可补充：胃镜（确诊金标准）、幽门螺杆菌检测（13C/14C 呼气试验或快速尿素酶）、粪便隐血、血常规。'
+    },
+    {
       id: 'ugib', name: '消化性溃疡 / 上消化道出血',
       depts: ['digestive', 'emergency', 'general'],
       must: ['ros:gi.hematemesis','ros:gi.melena'],
@@ -9227,6 +10975,7 @@ const HINTS = (() => {
       must: ['cc:上腹痛','ros:gi.vomiting','aux:淀粉酶','aux:脂肪酶'],
       need: 2,
       match: ['cc:上腹痛', 'cc:腹痛', 'ros:gi.vomiting', 'risk:alcohol', 'aux:淀粉酶', 'aux:脂肪酶',
+        'pev:special_digestive.giTenderness=上腹部压痛',
         'pev:abdomen.abdPalpation=上腹部压痛，无反跳痛'],
       hint: '饱食或饮酒后上腹剧痛放射至腰背、伴呕吐，需考虑急性胰腺炎。',
       note: '可补充：血/尿淀粉酶、脂肪酶、腹部CT、血脂、肝功能、电解质及血糖。'
@@ -9237,6 +10986,8 @@ const HINTS = (() => {
       must: ['aux:超声','pe:abdomen.abdPercussion','ros:gi.jaundiceGi'],
       need: 2,
       match: ['cc:右上腹痛', 'ros:gi.jaundiceGi', 'ros:gi.nausea', 'aux:超声',
+        'pev:special_digestive.giTenderness=右上腹压痛，胆囊点压痛',
+        'pev:special_digestive.giGallbladderPalp=Murphy征阳性',
         'pev:abdomen.abdPalpation=上腹部压痛，无反跳痛', 'pev:abdomen.abdPercussion=肝区叩击痛'],
       hint: '进食油腻后右上腹痛、放射至右肩背，需考虑胆囊炎/胆石症。',
       note: '可补充：腹部超声（首选）、血常规、肝功能、胆红素、腹部CT。'
@@ -9253,7 +11004,7 @@ const HINTS = (() => {
     },
     {
       id: 'obstruction', name: '肠梗阻',
-      depts: ['surgery', 'emergency', 'general'],
+      depts: ['digestive', 'surgery', 'emergency', 'general'],
       must: ['pe:abdomen.abdInspect','pe:abdomen.abdAuscultation','ros:gi.constipation'],
       need: 3,
       match: ['ros:gi.constipation', 'ros:gi.vomiting', 'cc:腹胀', 'cc:腹痛',
@@ -9684,7 +11435,16 @@ const HINTS = (() => {
     const ccKeys = ['发热', '咳嗽', '咳痰', '咯血', '呼吸困难', '气促', '喘息', '胸闷', '胸痛',
       '心悸', '上腹痛', '腹痛', '转移性右下腹痛', '右上腹痛', '腹泻', '呕吐', '腹胀', '黑便',
       '呕血', '黄疸', '水肿', '血尿', '头痛', '头晕', '乏力', '消瘦'];
-    ccKeys.forEach(k => { if (textAll.includes(k)) F.add('cc:' + k); });
+
+    // 主诉/现病史里的说法太活，「上腹部疼痛」「上腹隐痛」都不会包含子串「上腹痛」，
+    // 于是最常见的上腹痛连 cc:上腹痛 都命不中，消化性溃疡一条规则都触发不了。
+    // 这里先把写法拉平再匹配：腹部→腹、各种「X痛」→「痛」、疼痛→痛。
+    // 只影响 cc: 关键词，不影响 pev: 的精确匹配。
+    const flatCC = textAll
+      .replace(/腹部/g, '腹')
+      .replace(/疼痛/g, '痛')
+      .replace(/(隐|胀|绞|刺|钝|烧灼|灼|刀割|撕裂|牵扯|压榨|闷|跳|酸|胀)痛/g, '痛');
+    ccKeys.forEach(k => { if (flatCC.includes(k)) F.add('cc:' + k); });
 
     // 系统回顾阳性
     (SCHEMA.ROS || []).forEach(sys => {
@@ -9709,7 +11469,11 @@ const HINTS = (() => {
     if (per.smoking === '有' || per.smoking === '已戒') F.add('smoke:有');
     if (per.smoking === '有' || per.smoking === '已戒') F.add('risk:smoke');
     if (per.drinking === '有' || per.drinking === '已戒') F.add('risk:alcohol');
-    if (String((r.pmh || {}).trauma || '').trim()) F.add('trauma:有');
+    // 「外伤史」是自由文本，绝大多数人会写「否认外伤史」。
+    // 旧实现只要非空就加 trauma:有，于是「否认外伤史」的病人被当成有外伤，
+    // 骨折规则（must: trauma:有）就会凭空冒出来。必须认否定词。
+    const traumaText = String((r.pmh || {}).trauma || '').trim();
+    if (traumaText && !/^(否认|无|未|没有|不)/.test(traumaText)) F.add('trauma:有');
 
     // 生命体征
     const v = (r.pe || {}).vitals || {};
@@ -9793,8 +11557,9 @@ const HINTS = (() => {
     // 辅助检查关键词
     const auxText = (((r.auxiliary || {}).items) || [])
       .map(i => (i.name || '') + (i.result || '')).join(' ').toLowerCase();
-    ['胸片', '超声', '心电图', '血常规', '尿常规', '淀粉酶', '脂肪酶', '血红蛋白', '尿蛋白', '大便']
-      .forEach(k => { if (auxText.includes(k)) F.add('aux:' + k); });
+    ['胸片', '超声', '心电图', '血常规', '尿常规', '淀粉酶', '脂肪酶', '血红蛋白', '尿蛋白', '大便',
+      '胃镜', '幽门螺杆菌', '隐血', '腹部平片', '腹部ct']
+      .forEach(k => { if (auxText.includes(k.toLowerCase())) F.add('aux:' + (k === '腹部ct' ? 'CT' : k)); });
     if (auxText.includes('ct')) F.add('aux:CT');
 
     // 人口学
@@ -10143,6 +11908,64 @@ const APP = (() => {
 
   /* ========================= 各步骤渲染 ========================= */
 
+  /**
+   * 模板病例卡片。
+   *
+   * 为什么放在「科室」下面而不是另开一步：
+   *   模板是按科室来的，选了科室才知道该列哪些。放同一步省一次翻页，
+   *   而且学生本来就要在第一步填科室。
+   *
+   * 为什么默认折叠：模板是「可选的起点」。一进来就摊开一堆病种，会让人
+   *   以为必须先选一个才能往下走。
+   */
+  function renderTemplates() {
+    const deptKey = R.basic.department || 'general';
+    const list = (typeof TEMPLATES !== 'undefined' && TEMPLATES.listByDept)
+      ? TEMPLATES.listByDept(deptKey)
+      : [];
+
+    if (!list.length) {
+      // 通用科没有「标准病例」，说清楚比留个空卡片好
+      if (deptKey === 'general') {
+        return `<details class="card tpl-card" id="tplCard">
+          <summary>用模板开始（可选）<span class="tpl-count">先在上一张卡片选科室</span></summary>
+          <div class="hint">通用科不提供模板——不同系统的病差别太大，没有一份能通用的初稿。
+            选了具体科室后，这里会列出该科室的常见病种。</div>
+        </details>`;
+      }
+      return `<details class="card tpl-card" id="tplCard">
+        <summary>用模板开始（可选）<span class="tpl-count">本科室暂无模板</span></summary>
+        <div class="hint">目前只做了消化内科的模板，其他科室会陆续加。你可以直接从
+          <b>一般项目</b>开始自己写。</div>
+      </details>`;
+    }
+
+    const items = list.map(t => {
+      // 别名里经常把病名本身又写一遍（「急性胆囊炎」的别名里也有「急性胆囊炎」），
+      // 名字里已经含的就别再重复列一遍，否则标题后面拖一串自我重复的字。
+      const seen = String(t.name || '').toLowerCase();
+      const alias = (t.alias || []).filter(a => {
+        const k = String(a || '').trim().toLowerCase();
+        return k && !seen.includes(k);
+      });
+      const aliases = alias.length
+        ? `<span class="tpl-alias">又叫：${esc(alias.join('、'))}</span>` : '';
+      return `<button class="tpl-item" data-tpl="${esc(t.key)}">
+        <span class="tpl-name">${esc(t.name)}</span>
+        ${aliases}
+        ${t.hint ? `<span class="tpl-hint">${esc(t.hint)}</span>` : ''}
+      </button>`;
+    }).join('');
+
+    return `<details class="card tpl-card" id="tplCard">
+      <summary>用模板开始（可选）<span class="tpl-count">${list.length} 个病种</span></summary>
+      <div class="hint">选一个病种，工具会填好一份<b>典型病例</b>的病历初稿（现病史、既往史、
+        查体、辅助检查、诊断都写了）。<b>然后必须按你实际问到的改</b>——它是模板，不是你的病人。</div>
+      <div class="tpl-list">${items}</div>
+      <div class="hint">套用只补空白项：你已经写过的内容一个字都不会被覆盖。</div>
+    </details>`;
+  }
+
   function renderBasic() {
     const b = R.basic;
     return `
@@ -10152,6 +11975,8 @@ const APP = (() => {
           hint: '选择科室后，体格检查会自动追加该科室的专科查体项目。'
         })}
       </div>
+
+      ${renderTemplates()}
 
       <div class="card">
         <div class="card-title">一般项目</div>
@@ -11570,6 +13395,50 @@ const APP = (() => {
     render();
   }
 
+  /**
+   * 套用模板病例。
+   *
+   * 三条行为约定：
+   *   1. 只补空白项。已经写过的内容一个字都不动——学生自己写的东西
+   *      永远比他随手点的模板更接近真相。
+   *   2. 套用前明确告知「这是模板，不是你的病人」，并要求确认。
+   *      病历是法律文书，让学生糊里糊涂提交一份「标准病例」是害他。
+   *   3. 套完留在原步骤、滚回顶部，用 toast 报「补了多少项」，
+   *      不自动跳到下一步——学生通常想先看看都写了什么。
+   */
+  function applyTemplate(tplKey) {
+    if (typeof TEMPLATES === 'undefined' || !TEMPLATES.get) return;
+    const t = TEMPLATES.get(tplKey);
+    if (!t) return;
+
+    const ok = window.confirm(
+      `套用模板：${t.name}\n\n` +
+      '这会把一份典型病例的内容填进**空白项**（现病史、既往史、查体、辅助检查、诊断等），' +
+      '你已经写过的内容不会被覆盖。\n\n' +
+      '套完之后必须按你实际问到的、查到的逐条改——模板是教学用的标准病例，不是你的病人。\n\n' +
+      '确定套用吗？'
+    );
+    if (!ok) return;
+
+    const before = R.basic.chiefComplaint || R.hpi.symptoms || '';
+    const res = TEMPLATES.apply(R, tplKey);
+    if (!res || !res.ok) { toast('套用失败，模板数据可能不完整'); return; }
+
+    // 模板没写科室而当前是通用科时，apply 会把科室补上；此时要提示，
+    // 否则学生不知道自己的科室被改了。
+    const deptChanged = (R.basic.department === t.dept)
+      && (res.filled.indexOf('basic.department') >= 0);
+
+    saveCurrent();
+    render();
+    window.scrollTo({ top: 0, behavior: 'instant' });
+
+    const parts = [`已套用「${t.name}」，填入 ${res.count} 项`];
+    if (deptChanged) parts.push(`科室已设为${TEMPLATES.deptName(t.dept)}`);
+    if (before) parts.push('你原先写的内容没有被覆盖');
+    toast(parts.join('；'));
+  }
+
   /* ========================= 渲染主循环 ========================= */
 
   let GENERATED = null;
@@ -11796,9 +13665,15 @@ const APP = (() => {
 
     // 点击事件（委托）
     document.addEventListener('click', e => {
-      const t = e.target.closest('[data-seg],[data-check],[data-ros],[data-rosneg],[data-pequick],[data-pecheck],[data-pall],[data-act],[data-addhint],[data-auxdel],[data-diagdel],[data-jump],[data-dismiss-alert],[data-view],[data-checkjump],[data-arrdel],[data-arrstrdel],[data-focusadd],[data-focusdel]');
+      const t = e.target.closest('[data-seg],[data-check],[data-ros],[data-rosneg],[data-pequick],[data-pecheck],[data-pall],[data-act],[data-addhint],[data-auxdel],[data-diagdel],[data-jump],[data-dismiss-alert],[data-view],[data-checkjump],[data-arrdel],[data-arrstrdel],[data-focusadd],[data-focusdel],[data-tpl]');
       if (!t) return;
       const ds = t.dataset;
+
+      // 套用模板病例
+      if (ds.tpl !== undefined) {
+        applyTemplate(ds.tpl);
+        return;
+      }
 
       // 生成视图切换（大病历 / 首次病程录 / 出院记录）
       if (ds.view !== undefined) {
@@ -12656,6 +14531,9 @@ const APP = (() => {
       stepIndexOf,
       getStepKey: () => (STEPS[step] || {}).key,
       getSettings: () => settings,
+      // 模板病例：供测试直接调用（界面走 data-tpl 点击）
+      applyTemplate,
+      templatesOf: dept => (typeof TEMPLATES !== 'undefined' ? TEMPLATES.listByDept(dept) : []),
       // 生成视图：仅供测试断言三种视图各自可复制，不参与业务
       setOutputView: v => { OUT_VIEW = v; },
       getOutputView: () => OUT_VIEW,

@@ -287,6 +287,64 @@ const APP = (() => {
 
   /* ========================= 各步骤渲染 ========================= */
 
+  /**
+   * 模板病例卡片。
+   *
+   * 为什么放在「科室」下面而不是另开一步：
+   *   模板是按科室来的，选了科室才知道该列哪些。放同一步省一次翻页，
+   *   而且学生本来就要在第一步填科室。
+   *
+   * 为什么默认折叠：模板是「可选的起点」。一进来就摊开一堆病种，会让人
+   *   以为必须先选一个才能往下走。
+   */
+  function renderTemplates() {
+    const deptKey = R.basic.department || 'general';
+    const list = (typeof TEMPLATES !== 'undefined' && TEMPLATES.listByDept)
+      ? TEMPLATES.listByDept(deptKey)
+      : [];
+
+    if (!list.length) {
+      // 通用科没有「标准病例」，说清楚比留个空卡片好
+      if (deptKey === 'general') {
+        return `<details class="card tpl-card" id="tplCard">
+          <summary>用模板开始（可选）<span class="tpl-count">先在上一张卡片选科室</span></summary>
+          <div class="hint">通用科不提供模板——不同系统的病差别太大，没有一份能通用的初稿。
+            选了具体科室后，这里会列出该科室的常见病种。</div>
+        </details>`;
+      }
+      return `<details class="card tpl-card" id="tplCard">
+        <summary>用模板开始（可选）<span class="tpl-count">本科室暂无模板</span></summary>
+        <div class="hint">目前只做了消化内科的模板，其他科室会陆续加。你可以直接从
+          <b>一般项目</b>开始自己写。</div>
+      </details>`;
+    }
+
+    const items = list.map(t => {
+      // 别名里经常把病名本身又写一遍（「急性胆囊炎」的别名里也有「急性胆囊炎」），
+      // 名字里已经含的就别再重复列一遍，否则标题后面拖一串自我重复的字。
+      const seen = String(t.name || '').toLowerCase();
+      const alias = (t.alias || []).filter(a => {
+        const k = String(a || '').trim().toLowerCase();
+        return k && !seen.includes(k);
+      });
+      const aliases = alias.length
+        ? `<span class="tpl-alias">又叫：${esc(alias.join('、'))}</span>` : '';
+      return `<button class="tpl-item" data-tpl="${esc(t.key)}">
+        <span class="tpl-name">${esc(t.name)}</span>
+        ${aliases}
+        ${t.hint ? `<span class="tpl-hint">${esc(t.hint)}</span>` : ''}
+      </button>`;
+    }).join('');
+
+    return `<details class="card tpl-card" id="tplCard">
+      <summary>用模板开始（可选）<span class="tpl-count">${list.length} 个病种</span></summary>
+      <div class="hint">选一个病种，工具会填好一份<b>典型病例</b>的病历初稿（现病史、既往史、
+        查体、辅助检查、诊断都写了）。<b>然后必须按你实际问到的改</b>——它是模板，不是你的病人。</div>
+      <div class="tpl-list">${items}</div>
+      <div class="hint">套用只补空白项：你已经写过的内容一个字都不会被覆盖。</div>
+    </details>`;
+  }
+
   function renderBasic() {
     const b = R.basic;
     return `
@@ -296,6 +354,8 @@ const APP = (() => {
           hint: '选择科室后，体格检查会自动追加该科室的专科查体项目。'
         })}
       </div>
+
+      ${renderTemplates()}
 
       <div class="card">
         <div class="card-title">一般项目</div>
@@ -1714,6 +1774,50 @@ const APP = (() => {
     render();
   }
 
+  /**
+   * 套用模板病例。
+   *
+   * 三条行为约定：
+   *   1. 只补空白项。已经写过的内容一个字都不动——学生自己写的东西
+   *      永远比他随手点的模板更接近真相。
+   *   2. 套用前明确告知「这是模板，不是你的病人」，并要求确认。
+   *      病历是法律文书，让学生糊里糊涂提交一份「标准病例」是害他。
+   *   3. 套完留在原步骤、滚回顶部，用 toast 报「补了多少项」，
+   *      不自动跳到下一步——学生通常想先看看都写了什么。
+   */
+  function applyTemplate(tplKey) {
+    if (typeof TEMPLATES === 'undefined' || !TEMPLATES.get) return;
+    const t = TEMPLATES.get(tplKey);
+    if (!t) return;
+
+    const ok = window.confirm(
+      `套用模板：${t.name}\n\n` +
+      '这会把一份典型病例的内容填进**空白项**（现病史、既往史、查体、辅助检查、诊断等），' +
+      '你已经写过的内容不会被覆盖。\n\n' +
+      '套完之后必须按你实际问到的、查到的逐条改——模板是教学用的标准病例，不是你的病人。\n\n' +
+      '确定套用吗？'
+    );
+    if (!ok) return;
+
+    const before = R.basic.chiefComplaint || R.hpi.symptoms || '';
+    const res = TEMPLATES.apply(R, tplKey);
+    if (!res || !res.ok) { toast('套用失败，模板数据可能不完整'); return; }
+
+    // 模板没写科室而当前是通用科时，apply 会把科室补上；此时要提示，
+    // 否则学生不知道自己的科室被改了。
+    const deptChanged = (R.basic.department === t.dept)
+      && (res.filled.indexOf('basic.department') >= 0);
+
+    saveCurrent();
+    render();
+    window.scrollTo({ top: 0, behavior: 'instant' });
+
+    const parts = [`已套用「${t.name}」，填入 ${res.count} 项`];
+    if (deptChanged) parts.push(`科室已设为${TEMPLATES.deptName(t.dept)}`);
+    if (before) parts.push('你原先写的内容没有被覆盖');
+    toast(parts.join('；'));
+  }
+
   /* ========================= 渲染主循环 ========================= */
 
   let GENERATED = null;
@@ -1940,9 +2044,15 @@ const APP = (() => {
 
     // 点击事件（委托）
     document.addEventListener('click', e => {
-      const t = e.target.closest('[data-seg],[data-check],[data-ros],[data-rosneg],[data-pequick],[data-pecheck],[data-pall],[data-act],[data-addhint],[data-auxdel],[data-diagdel],[data-jump],[data-dismiss-alert],[data-view],[data-checkjump],[data-arrdel],[data-arrstrdel],[data-focusadd],[data-focusdel]');
+      const t = e.target.closest('[data-seg],[data-check],[data-ros],[data-rosneg],[data-pequick],[data-pecheck],[data-pall],[data-act],[data-addhint],[data-auxdel],[data-diagdel],[data-jump],[data-dismiss-alert],[data-view],[data-checkjump],[data-arrdel],[data-arrstrdel],[data-focusadd],[data-focusdel],[data-tpl]');
       if (!t) return;
       const ds = t.dataset;
+
+      // 套用模板病例
+      if (ds.tpl !== undefined) {
+        applyTemplate(ds.tpl);
+        return;
+      }
 
       // 生成视图切换（大病历 / 首次病程录 / 出院记录）
       if (ds.view !== undefined) {
@@ -2800,6 +2910,9 @@ const APP = (() => {
       stepIndexOf,
       getStepKey: () => (STEPS[step] || {}).key,
       getSettings: () => settings,
+      // 模板病例：供测试直接调用（界面走 data-tpl 点击）
+      applyTemplate,
+      templatesOf: dept => (typeof TEMPLATES !== 'undefined' ? TEMPLATES.listByDept(dept) : []),
       // 生成视图：仅供测试断言三种视图各自可复制，不参与业务
       setOutputView: v => { OUT_VIEW = v; },
       getOutputView: () => OUT_VIEW,
