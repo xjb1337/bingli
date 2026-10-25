@@ -22,7 +22,7 @@ const BOOK = [
   ['颜色', ['skin.color']],
   ['温度湿度弹性', ['skin.elasticity']],
   ['皮疹瘀点紫癜', ['skin.rash']],
-  ['蜘蛛痣肝掌', ['skin.rash']],
+  ['蜘蛛痣肝掌', ['skin.spider']],
   ['毛发', ['head.hair']],
   // 淋巴结
   ['浅表淋巴结', ['skin.lymph']],

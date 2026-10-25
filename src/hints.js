@@ -220,7 +220,10 @@ const HINTS = (() => {
       need: 2,
       match: ['pmh:肝硬化', 'pmh:病毒性肝炎', 'ros:gi.bloating', 'ros:gi.jaundiceGi',
         'pev:abdomen.abdPercussion=移动性浊音阳性', 'pev:abdomen.abdInspect=腹壁静脉曲张',
-        'pev:abdomen.abdInspect=腹部膨隆'],
+        'pev:abdomen.abdInspect=腹部膨隆',
+        // 蜘蛛痣与肝掌是门脉高压最有价值的体表体征。这里用 key 级（pe:）而不是值级（pev:），
+        // 因为 schema 给了「可见蜘蛛痣 / 肝掌阳性 / 两者都有」三个选项，值级只能匹配其中一个。
+        'pe:skin.spider'],
       hint: '肝病背景 + 腹水、侧支循环开放，需考虑肝硬化。',
       note: '可补充：肝功能、凝血功能、血氨、腹部超声（门脉宽度、脾大）、胃镜评估静脉曲张。'
     },

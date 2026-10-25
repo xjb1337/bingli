@@ -46,6 +46,9 @@ const BOOK_ITEMS = [
   ['皮肤颜色', ['skin.color']],
   ['温度湿度弹性', ['skin.elasticity']],
   ['皮疹瘀点紫癜', ['skin.rash']],
+  // 教材第三篇第二章第二节「皮肤检查」第七小节：蜘蛛痣与肝掌。
+  // 归在皮肤，不在腹部——肝硬化最有价值的体表体征就靠这一项记。
+  ['蜘蛛痣与肝掌', ['skin.spider']],
   ['毛发', ['head.hair']],
   // 淋巴结（教材把它单列在皮肤之后）
   ['浅表淋巴结', ['skin.lymph']],
@@ -164,6 +167,57 @@ test('腹部查体次序是视→听→叩→触，教材第189 页有明文', (
   abd.items.forEach((it, i) => {
     if (it.parent === 'abdPalpation') assert.ok(i > iPalp, `${it.key} 应在 abdPalpation 之后`);
   });
+});
+
+test('蜘蛛痣与肝掌归在皮肤检查，不在腹部', () => {
+  // 《诊断学》第10版 第三篇第二章第二节「皮肤检查」第七小节：蜘蛛痣与肝掌。
+  // 这是肝硬化最有价值的体表体征，曾经被误放进消化专科的 giExtra 里——
+  // 那是个单选字段，写蜘蛛痣就会把「肝颈静脉回流征阴性」挤掉，
+  // 而后者恰好是鉴别心源性腹水的关键阴性。
+  const skin = S.PE_COMMON.find(x => x.key === 'skin');
+  const item = skin.items.find(it => it.key === 'spider');
+  assert.ok(item, '皮肤组里应该有「蜘蛛痣与肝掌」这一项');
+  assert.equal(item.default, '未见蜘蛛痣及肝掌');
+  // 三个阳性写法都要能选到，模板里「可见蜘蛛痣，肝掌阳性」才选得出来
+  ['可见蜘蛛痣', '肝掌阳性', '可见蜘蛛痣，肝掌阳性']
+    .forEach(v => assert.ok(item.options.includes(v), `缺选项：${v}`));
+
+  // 消化专科的 giExtra 里不许再出现——它挤掉肝颈静脉回流征
+  const gi = S.findPEItem('special_digestive.giExtra');
+  gi.options.forEach(o => assert.ok(!/蜘蛛痣|肝掌/.test(o),
+    `giExtra 是单选字段，不该塞进「${o}」`));
+  assert.ok(gi.options.includes('肝颈静脉回流征阴性'), '心源性腹水的关键阴性不能丢');
+});
+
+test('蜘蛛痣能推动肝硬化提示，单独一个蜘蛛痣不会凭空下诊断', () => {
+  const H = globalThis.HINTS;
+  const scoreOf = rec => {
+    const hit = H.analyze(rec).find(x => x.id === 'ci');
+    return hit ? hit.score : 0;
+  };
+
+  // 肝硬化模板里有肝病背景 + 蜘蛛痣，应该命中 ci
+  const r = S.emptyRecord();
+  globalThis.TEMPLATES.apply(r, 'cirrhosis');
+  const withSpider = scoreOf(r);
+  assert.ok(withSpider > 0, `肝硬化模板应命中 ci，实际 ${withSpider}`);
+
+  // 关键：把蜘蛛痣拿掉，ci 的得分必须下降。
+  // 只断言「top3 里有 ci」是不够的——模板里还有腹水、腹壁静脉曲张、
+  // 肝炎病史好几条证据，删掉蜘蛛痣照样命中，测试会假通过（变异自检抓到过）。
+  const without = S.emptyRecord();
+  globalThis.TEMPLATES.apply(without, 'cirrhosis');
+  delete without.pe.skin.spider;
+  assert.ok(scoreOf(without) < withSpider,
+    `蜘蛛痣必须能加分：有=${withSpider}，无=${scoreOf(without)}，两者相同说明规则没接上`);
+
+  // 只有蜘蛛痣、没有任何肝病背景：ci 的 must 不满足，不能给提示
+  const bare = S.emptyRecord();
+  bare.basic.department = 'digestive';
+  bare.pe.skin = { spider: '可见蜘蛛痣' };
+  S.setPeChecked(bare, 'skin', 'spider', true);
+  const ids = H.analyze(bare).map(x => x.id);
+  assert.ok(!ids.includes('ci'), '只有蜘蛛痣不能直接提示肝硬化');
 });
 
 test('生命体征包含了教材要求的全部测量项', () => {
