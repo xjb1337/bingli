@@ -164,7 +164,9 @@ const GENERATOR = (() => {
   function ageWithUnit(basic) {
     const raw = stripTail((basic || {}).age);
     if (!raw) return '';
-    return /[岁月天周时]/.test(raw) ? raw : raw + '岁';
+    // 「日龄」必须单独认：14日龄 只匹配到「日」也可，但「日龄岁」这种输出
+    // 是把 14日龄 当成 14 岁又补了一个单位。日、天、周、月、时都算已有单位。
+    return /[岁月天周时日]/.test(raw) ? raw : raw + '岁';
   }
 
   /** 中文数字转数值（年龄常见写法「十四」「二十三」「一百」够用即可） */
@@ -1073,6 +1075,34 @@ const GENERATOR = (() => {
   }
 
   /**
+   * 一个生命体征的「有效值」——正文、摘要、首次病程 O 段、诊断提示共用这一个口径。
+   *
+   * 旧实现各写各的：正文用「完整数字 + VITAL_RANGE」双重校验，另外三处直接
+   * parseFloat。于是 parseFloat('38foo') 得 38、parseFloat('999') 得 999，
+   * 一份 T 999℃ 的病历，体格检查那行写着「T ／℃」，摘要却写着「查体：T 999℃」，
+   * 同一份病历自己跟自己打架。
+   *
+   * 这里把「怎么算有效」定死：
+   *   ① 必须是完整的十进制数字（`38foo`、`38℃`、`３８` 全不算）；
+   *   ② 必须落在 VITAL_RANGE 的可信区间内（拦多打一位的那种手误）。
+   * 两条都过才返回数字，否则返回 null，调用方一律当作「没填」。
+   *
+   * @param {object} v record.pe.vitals
+   * @param {string} key VITAL_RANGE 里的键名
+   * @returns {{raw:string, num:number}|null}
+   */
+  function vitalNum(v, key) {
+    const raw = vitalValue((v || {})[key]);
+    if (!raw) return null;
+    if (!/^-?\d+(\.\d+)?$/.test(raw)) return null;
+    const num = Number(raw);
+    if (!isFinite(num)) return null;
+    const rng = VITAL_RANGE[key];
+    if (rng && (num < rng[0] || num > rng[1])) return null;
+    return { raw, num };
+  }
+
+  /**
    * 生命体征行。
    *
    * ⚠️ 本轮改动（缺陷2第4条）：旧实现「有一项才输出一行」，空记录时整行不存在，
@@ -1099,13 +1129,8 @@ const GENERATOR = (() => {
      * 离谱的数字他多半看不见。
      */
     const safe = k => {
-      const raw = vitalValue(v[k]);
-      if (!raw) return PH;
-      const rng = VITAL_RANGE[k];
-      if (!rng) return raw;
-      if (!/^-?\d+(\.\d+)?$/.test(raw)) return PH;   // 不是数字，写了也是错
-      const n = Number(raw);
-      return n >= rng[0] && n <= rng[1] ? raw : PH;
+      const hit = vitalNum(v, k);
+      return hit ? hit.raw : PH;
     };
     const parts = [
       `T ${safe('temperature')}℃`,
@@ -1725,14 +1750,19 @@ const GENERATOR = (() => {
     const abn = abnormalPE(r);
     const v = (r.pe || {}).vitals || {};
     const abnormalVitals = [];
-    const t = parseFloat(v.temperature);
-    if (!isNaN(t) && t >= 37.3) abnormalVitals.push(`T ${v.temperature}℃`);
-    const p = parseFloat(v.pulse);
-    if (!isNaN(p) && (p > 100 || p < 60)) abnormalVitals.push(`P ${v.pulse}次/分`);
-    const rr = parseFloat(v.respiration);
-    if (!isNaN(rr) && (rr > 20 || rr < 12)) abnormalVitals.push(`R ${v.respiration}次/分`);
-    const sbp = parseFloat(v.sbp), dbp = parseFloat(v.dbp);
-    if (!isNaN(sbp) && (sbp >= 140 || sbp < 90)) abnormalVitals.push(`BP ${v.sbp || '—'}/${v.dbp || '—'}mmHg`);
+    // 一律走 vitalNum：它已经保证「完整数字 + 在可信范围内」。
+    // 这里只判断临床阈值，不再自己 parseFloat——两套解析必然写出互相矛盾的病历。
+    const t = vitalNum(v, 'temperature');
+    if (t && t.num >= 37.3) abnormalVitals.push(`T ${t.raw}℃`);
+    const p = vitalNum(v, 'pulse');
+    if (p && (p.num > 100 || p.num < 60)) abnormalVitals.push(`P ${p.raw}次/分`);
+    const rr = vitalNum(v, 'respiration');
+    if (rr && (rr.num > 20 || rr.num < 12)) abnormalVitals.push(`R ${rr.raw}次/分`);
+    const sbp = vitalNum(v, 'sbp'), dbp = vitalNum(v, 'dbp');
+    if (sbp && (sbp.num >= 140 || sbp.num < 90)) {
+      // 舒张压无效时不能把原始字符串抄进来，否则 T 380 的摘要里冒出「BP 152/999」
+      abnormalVitals.push(`BP ${sbp.raw}/${dbp ? dbp.raw : '—'}mmHg`);
+    }
     const peAll = abnormalVitals.concat(abn.map(a => a.text).filter(Boolean));
     // 心率去重：查体描述里已经写了「心率108次/分」时，不要再pushed一个「P 108次/分」
     const dedup = dedupeClauses(peAll.filter((txt, i) => {
@@ -1933,15 +1963,16 @@ const GENERATOR = (() => {
     const abn = abnormalPE(r);
     const v = (r.pe || {}).vitals || {};
     const parts = [];
-    const t = parseFloat(v.temperature);
-    if (!isNaN(t) && t >= 37.3) parts.push(`T ${v.temperature}℃`);
-    const p = parseFloat(v.pulse);
-    if (!isNaN(p) && (p > 100 || p < 60)) parts.push(`P ${v.pulse}次/分`);
-    const rr = parseFloat(v.respiration);
-    if (!isNaN(rr) && (rr > 20 || rr < 12)) parts.push(`R ${v.respiration}次/分`);
-    const sbp = parseFloat(v.sbp);
-    if (!isNaN(sbp) && (sbp >= 140 || sbp < 90)) {
-      parts.push(`BP ${v.sbp || '—'}/${v.dbp || '—'}mmHg`);
+    // 与 buildVitals / draftSummary 同一口径（vitalNum），只保留临床阈值判断
+    const t = vitalNum(v, 'temperature');
+    if (t && t.num >= 37.3) parts.push(`T ${t.raw}℃`);
+    const p = vitalNum(v, 'pulse');
+    if (p && (p.num > 100 || p.num < 60)) parts.push(`P ${p.raw}次/分`);
+    const rr = vitalNum(v, 'respiration');
+    if (rr && (rr.num > 20 || rr.num < 12)) parts.push(`R ${rr.raw}次/分`);
+    const sbp = vitalNum(v, 'sbp'), dbp = vitalNum(v, 'dbp');
+    if (sbp && (sbp.num >= 140 || sbp.num < 90)) {
+      parts.push(`BP ${sbp.raw}/${dbp ? dbp.raw : '—'}mmHg`);
     }
     const texts = dedupeClauses(parts.concat(abn.map(a => a.text).filter(Boolean)));
     // 缺陷B3（已复现）：一个查体项都没勾时，这里原本写「未见与诊断相关的阳性体征」，
@@ -2172,18 +2203,50 @@ const GENERATOR = (() => {
    * 出院医嘱拆成药物、非药物、生活指导、复诊时间四句，对应评分表括号里的四项。
    * =================================================================== */
 
-  /** 住院天数：两个 'YYYY-MM-DD' 之差；算不出来返回 0 */
+  /**
+   * 严格的日期解析：只认 `YYYY-MM-DD`（月、日允许一位数），且必须是真实存在的日期。
+   *
+   * 为什么不能只用 `new Date(y, m-1, d)`：JS 会把越界的日期**静默归一化**，
+   * `new Date(2026, 1, 31)` 得到的是 3 月 3 日。于是「入院 2026-02-31、出院 2026-03-05」
+   * 会算出 4 天住院——一个根本不存在的入院日期凭空产生了住院天数，
+   * 而 validate() 那边只报了「日期不真实」，两处结论互相矛盾。
+   *
+   * 所以这里构造完必须回验年月日，且一律用 UTC 构造，避免本地时区/夏令时
+   * 让两个日期之间差出 23 或 25 小时、进而把天数算少或算多。
+   *
+   * @param {string} s 日期文本
+   * @returns {{y:number, mo:number, d:number, stamp:number}|null} stamp 为 UTC 零点毫秒
+   */
+  function parseDateStrict(s) {
+    const t = stripTail(s);
+    if (!t) return null;
+    // 锚定整串：旧实现是 `(\d{4})\D?(\d{1,2})\D?(\d{1,2})` 且没有 ^$，
+    // 「xx2026-09-28」这种前面带杂字的也能匹配上。
+    const m = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (!m) return null;
+    const y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
+    if (mo < 1 || mo > 12) return null;
+    if (d < 1 || d > 31) return null;
+    const dt = new Date(Date.UTC(y, mo - 1, d));
+    if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) {
+      return null;   // 2026-02-31、非闰年的 02-29 都走这条
+    }
+    return { y, mo, d, stamp: dt.getTime() };
+  }
+
+  /**
+   * 住院天数：两个 'YYYY-MM-DD' 之差；算不出来返回 0。
+   *
+   * 用 parseDateStrict 而不是 `new Date(...)`：无效日期不能算出天数。
+   * 返回 0 同时覆盖三种情形——同一天出院、出院早于入院、日期本身不合法，
+   * 调用方不显示「住院天数」即可，validate() 会单独说明是哪一种。
+   */
   function hospitalDays(admitDate, dischargeDate) {
-    const parse = s => {
-      const m = String(s || '').match(/(\d{4})\D?(\d{1,2})\D?(\d{1,2})/);
-      if (!m) return null;
-      const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
-      return isNaN(d.getTime()) ? null : d;
-    };
-    const a = parse(admitDate);
-    const b = parse(dischargeDate);
+    const a = parseDateStrict(admitDate);
+    const b = parseDateStrict(dischargeDate);
     if (!a || !b) return 0;
-    const diff = Math.round((b - a) / 86400000);
+    // 两端都是 UTC 零点，直接相减不受运行机器时区影响
+    const diff = Math.round((b.stamp - a.stamp) / 86400000);
     return diff > 0 ? diff : 0;
   }
 
@@ -2733,7 +2796,12 @@ const GENERATOR = (() => {
     draftCaseSummary, draftObjectivePE, draftObjectiveAux, draftBasisDetail,
     diffRelatedToDiagnosis, diagnosisList, auxItems, hospitalDays,
     mergeIntoHistory,
-    joinSentences, stripTail, SECTION_ORDER
+    joinSentences, stripTail, SECTION_ORDER,
+    // 生命体征的唯一有效值口径：正文 / 摘要 / O 段 / hints 都调它
+    vitalValue, vitalNum,
+    // 年龄的三个读法：显示用（带单位原样输出）、判儿童用、称呼用。
+    // 三者必须对同一个年龄给出自洽的答案，所以一并导出给测试盯着。
+    ageWithUnit, ageYears, subjectOf
   };
 })();
 

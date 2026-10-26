@@ -976,6 +976,90 @@ const HINTS = (() => {
     'abdomen.spleenPalpation=脾肋下可触及': ['pev:abdomen.abdPalpation=脾肋下可触及']
   };
 
+  /* ---------------------- 否定的作用范围 ---------------------- */
+  //
+  // 病历里「发热但无咳嗽」这种写法很常见：一句话里既有阳性也有阴性。
+  // 早先的做法是「分句以否定词开头就丢掉整个分句」，于是「发热但无咳嗽」里的
+  // 咳嗽照样被子串匹配命中、被算成阳性，「咳嗽但不发热」里的发热也一样——
+  // 诊断提示据此多报一个候选、多给一分。单靠往否定词表里加词治不了这个病，
+  // 因为问题不在词表，在于「这个『无』管到哪儿为止」没算清楚。
+  //
+  // 现在的规则（tests/generator.test.cjs 里每条都有对应断言）：
+  //   · 句号、分号、换行是硬边界，否定不跨句；
+  //   · 「但/但是/然而/不过/却/反而」是否定的转折，转折之后重新判定；
+  //   · 顿号不算边界：「无咳嗽、咳痰」「否认咳嗽及咳痰」整段被否定，两项都不算阳性；
+  //   · 逗号是边界但不继承否定：「无胸痛，咳嗽3天」里的咳嗽仍算阳性——
+  //     病历里这种写法几乎总是「先列一串阴性、再说真正的阳性」；
+  //   · 「伴/并/且/及/和/与/同时」只是并列连接词，剥掉它再看开头是不是否定词，
+  //     所以「伴无咳嗽」「并否认咯血」照样算否定；
+  //   · 症状后面的「不」不当否定用：「发热不退」「咳嗽不止」里的发热、咳嗽仍是阳性。
+  const NEG_PREFIX = /^(?:无明显|无明|未见明显|未见异常|未出现|未见|否认有|否认|没有|无|未|不)/;
+  // 这几个词以「不/无」开头但不是在否定症状，误判会把「不明原因发热」整段丢掉
+  const NEG_EXCEPT = /^(?:不明原因|不明诱因|原因不明|不详|不洁|不规则)/;
+  // 现病史起病那一栏几乎每份病历都以「无明显诱因出现…」「无诱因出现…」开头，
+  // 这里的「无」否定的是诱因，不是后面的症状。先把这个短语剥掉再判，
+  // 否则「无明显诱因出现发热3天」里的发热会被自己这句话吃掉——
+  // 那等于所有正规写法的现病史都不产生关键词。
+  const CAUSE_PHRASE = /^无(?:明显|何|任何)?(?:诱因|原因|明确诱因|明显原因)/;
+  const TURN_WORD = /^(?:但是|但|然而|不过|却|反而)$/;
+  const TURN_SPLIT = /(但是|但|然而|不过|却|反而)/;
+  const CONNECT_HEAD = /^(?:同时|另外|此外|并且|伴有|伴|并|且|亦|也|还|仍|尚|又|和|及|与)/;
+  // 「伴无咳嗽」这种连接词后面直接跟否定的情形，先在这里切开
+  const CONNECT_NEG_SPLIT = /(?=(?:同时|另外|此外|伴有|伴|并|且)(?:无|未|不|否认|没有|未见))/;
+  // 没有任何标点、阳性后面直接接否定的写法：「发热无咳嗽」「腹痛3天未缓解」。
+  // 只在「无/未/否认/没有/未见」前切，不切「不」——「不适」「不良」「不断」
+  // 里的「不」太多，切了会把正常句子切碎。
+  // 「发热不退」「咳嗽不止」不受影响：切出来的后半段本来就不含症状词。
+  const MID_NEG_SPLIT = /(?<=[^，,。；;、\s])(?=无|未|否认|没有|未见)/;
+
+  function segIsNegated(seg) {
+    let t = String(seg || '').trim();
+    if (!t) return false;
+    // 剥掉并列连接词，看真正的开头是什么
+    for (let i = 0; i < 3; i++) {
+      const m = t.match(CONNECT_HEAD);
+      if (!m) break;
+      t = t.slice(m[0].length).trim();
+    }
+    if (!t) return false;
+    if (NEG_EXCEPT.test(t)) return false;
+    // 「无诱因」「无明显原因」剥掉后看剩下的部分
+    let rest = t;
+    while (CAUSE_PHRASE.test(rest)) rest = rest.replace(CAUSE_PHRASE, '').trim();
+    if (rest !== t) return rest ? NEG_PREFIX.test(rest) && !NEG_EXCEPT.test(rest) : false;
+    return NEG_PREFIX.test(t);
+  }
+
+  function positiveNarrative(text) {
+    const out = [];
+    String(text || '').split(/[。；;\n]/).forEach(sentence => {
+      // 先按转折词切开：转折之后重新判定，所以直接切成互不影响的几块
+      const chunks = [];
+      let buf = '';
+      sentence.split(TURN_SPLIT).forEach(piece => {
+        if (TURN_WORD.test(piece)) { chunks.push(buf); buf = ''; }
+        else buf += piece;
+      });
+      chunks.push(buf);
+      chunks.forEach(chunk => {
+        // 逗号是边界但不继承否定；顿号留在段内，整段一起判
+        String(chunk || '').split(/[，,]/).forEach(rawSeg => {
+          String(rawSeg || '').split(CONNECT_NEG_SPLIT).forEach(seg => {
+            // 再切一次「阳性后面紧跟否定」的写法，切出来的后半段会在
+            // segIsNegated 里被认成否定段
+            String(seg || '').split(MID_NEG_SPLIT).forEach(sub => {
+              const t = String(sub || '').trim();
+              if (!t) return;
+              if (segIsNegated(t)) return;
+              out.push(t);
+            });
+          });
+        });
+      });
+    });
+    return out.join('，');
+  }
+
   /* ---------------------- 从病历中抽取"发现" ---------------------- */
 
   function extractFindings(r) {
@@ -983,20 +1067,17 @@ const HINTS = (() => {
     const b = r.basic || {};
 
     // 主诉 + 现病史关键词
-    // 注意：先剔除否定从句（"无咯血、盗汗""否认胸痛"），否则阴性描述会被误判为阳性
-    // 刻意不纳入 hpi.negativeDiscriminating：它是整段阴性病史，"无咯血、盗汗、消瘦"
-    // 按顿号切开后「盗汗」「消瘦」会丢掉否定前缀，反而被误判成阳性。
+    // 字段之间用「。」连接：字段边界就是句子边界，一个字段里的「无」不可能跑到
+    // 下一个字段去否定那里的阳性（主诉写「发热3天」、现病史写「无明显诱因」，
+    // 发热不该被那个「无」吃掉）。
+    // 刻意不纳入 hpi.negativeDiscriminating：它是整段阴性病史。
     const rawText = [
       b.chiefComplaint || '',
       (r.hpi || {}).onset || '', (r.hpi || {}).cause || '',
       (r.hpi || {}).symptoms || '', (r.hpi || {}).relief || '',
       (r.hpi || {}).evolution || '', (r.hpi || {}).accompanying || ''
-    ].join('，');
-    const NEG_RE = /^(无|未|不|否认|没有|未见|未出现|无明显|无明|否认有)/;
-    const textAll = rawText
-      .split(/[，,。；;、\n]/)
-      .filter(clause => clause.trim() && !NEG_RE.test(clause.trim()))
-      .join('，');
+    ].join('。');
+    const textAll = positiveNarrative(rawText);
 
     const ccKeys = ['发热', '咳嗽', '咳痰', '咯血', '呼吸困难', '气促', '喘息', '胸闷', '胸痛',
       '心悸', '上腹痛', '腹痛', '转移性右下腹痛', '右上腹痛', '腹泻', '呕吐', '腹胀', '黑便',
@@ -1053,28 +1134,33 @@ const HINTS = (() => {
     if (traumaText && !/^(否认|无|未|没有|不)/.test(traumaText)) F.add('trauma:有');
 
     // 生命体征
+    // 有效值统一交给 GENERATOR.vitalNum 判断：它要求完整数字 + 在可信范围内。
+    // 原来四处都是 parseFloat，于是 T 999℃ 会在体格检查里写成「T ／℃」
+    // （buildVitals 已经挡了），却在诊断提示里给出 vital:tempUp，两边打架。
     const v = (r.pe || {}).vitals || {};
-    const t = parseFloat(v.temperature);
-    if (!isNaN(t)) {
-      if (t >= 37.3) F.add('vital:tempUp');
-      if (t <= 36) F.add('vital:tempDown');
+    const vital = k => (typeof GENERATOR !== 'undefined' && GENERATOR.vitalNum)
+      ? GENERATOR.vitalNum(v, k) : null;
+    const tv = vital('temperature');
+    if (tv) {
+      if (tv.num >= 37.3) F.add('vital:tempUp');
+      if (tv.num <= 36) F.add('vital:tempDown');
     }
-    const p = parseFloat(v.pulse);
-    if (!isNaN(p)) {
-      if (p > 100) F.add('vital:tachy');
-      if (p < 60) F.add('vital:brady');
+    const pv = vital('pulse');
+    if (pv) {
+      if (pv.num > 100) F.add('vital:tachy');
+      if (pv.num < 60) F.add('vital:brady');
     }
-    const rr = parseFloat(v.respiration);
-    if (!isNaN(rr) && rr > 20) F.add('vital:tachypnea');
-    const sbp = parseFloat(v.sbp), dbp = parseFloat(v.dbp);
-    if (!isNaN(sbp)) {
-      if (sbp >= 140) { F.add('vital:bpUp'); F.add('risk:htn'); }
-      if (sbp < 90) F.add('vital:bpDown');
+    const rv = vital('respiration');
+    if (rv && rv.num > 20) F.add('vital:tachypnea');
+    const sv = vital('sbp'), dv = vital('dbp');
+    if (sv) {
+      if (sv.num >= 140) { F.add('vital:bpUp'); F.add('risk:htn'); }
+      if (sv.num < 90) F.add('vital:bpDown');
     }
-    if (!isNaN(dbp) && dbp >= 90) F.add('vital:bpUp');
-    const hgt = parseFloat(v.height), wgt = parseFloat(v.weight);
-    if (!isNaN(hgt) && !isNaN(wgt) && hgt > 0) {
-      const bmi = wgt / Math.pow(hgt / 100, 2);
+    if (dv && dv.num >= 90) F.add('vital:bpUp');
+    const hv = vital('height'), wv = vital('weight');
+    if (hv && wv) {
+      const bmi = wv.num / Math.pow(hv.num / 100, 2);
       if (bmi >= 28) F.add('vital:bmiHigh');
       if (bmi < 18.5) F.add('vital:bmiLow');
     }

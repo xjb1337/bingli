@@ -228,6 +228,145 @@ test('否定表述不被计为阳性发现', () => {
   assert.equal(findings.has('cc:发热'), false);
 });
 
+/* ---- 否定的作用范围：否定词只管到下一个边界 ----
+ * 旧实现只丢掉「以否定词开头」的整段分句，剩下的部分做子串匹配。
+ * 于是「发热但无咳嗽」里的咳嗽照样算阳性——病人明明说了不咳。 */
+
+/** 只关心主诉/现病史产生的 cc: 发现，避免被 ROS/查体干扰 */
+function ccFindings(r) {
+  return [...HINTS.extractFindings(r)].filter(x => x.startsWith('cc:'));
+}
+
+function withNarrative(text) {
+  const r = makeRecord('respiratory');
+  r.basic.chiefComplaint = '';
+  r.hpi.onset = '';
+  r.hpi.cause = '';
+  r.hpi.symptoms = '';
+  r.hpi.relief = '';
+  r.hpi.evolution = '';
+  r.hpi.accompanying = text;
+  return r;
+}
+
+test('转折词后的否定只管后面那个症状：「发热但无咳嗽」', () => {
+  const f = ccFindings(withNarrative('发热但无咳嗽'));
+  assert.ok(f.includes('cc:发热'), '发热应为阳性');
+  assert.ok(!f.includes('cc:咳嗽'), '咳嗽应为阴性');
+});
+
+test('否定在后、阳性在前：「咳嗽但不发热」', () => {
+  const f = ccFindings(withNarrative('咳嗽但不发热'));
+  assert.ok(f.includes('cc:咳嗽'), '咳嗽应为阳性');
+  assert.ok(!f.includes('cc:发热'), '发热应为阴性');
+});
+
+test('「伴无咳嗽」这类口语写法也要认出否定', () => {
+  const f = ccFindings(withNarrative('发热，伴无咳嗽'));
+  assert.ok(f.includes('cc:发热'));
+  assert.ok(!f.includes('cc:咳嗽'));
+});
+
+test('「否认」管辖两个并列症状：「否认咳嗽及咳痰」', () => {
+  const f = ccFindings(withNarrative('否认咳嗽及咳痰'));
+  assert.ok(!f.includes('cc:咳嗽'), '咳嗽应被否认');
+  assert.ok(!f.includes('cc:咳痰'), '咳痰应被否认');
+});
+
+test('顿号并列继承否定，转折后恢复阳性：「无咳嗽、咳痰，但发热」', () => {
+  const f = ccFindings(withNarrative('无咳嗽、咳痰，但发热'));
+  assert.ok(!f.includes('cc:咳嗽'), '咳嗽应被否认');
+  assert.ok(!f.includes('cc:咳痰'), '咳痰应被否认');
+  assert.ok(f.includes('cc:发热'), '转折后发热应为阳性');
+});
+
+test('症状词后面的「不」不是否定：「发热不退」仍是发热', () => {
+  const f = ccFindings(withNarrative('发热不退'));
+  assert.ok(f.includes('cc:发热'), '「不退」是病程描述，不是否定发热');
+});
+
+test('「无明显诱因出现…」否定的是诱因，不是症状', () => {
+  // 现病史的起病一栏几乎每份病历都以这句话开头。把「无」当成否定整个分句，
+  // 等于所有正规写法都不产生关键词——这是修复否定作用域时最容易踩的坑。
+  const cases = [
+    ['无明显诱因出现发热3天', 'cc:发热'],
+    ['无诱因出现咳嗽', 'cc:咳嗽'],
+    ['无任何诱因出现胸痛', 'cc:胸痛'],
+    ['无明显原因出现水肿', 'cc:水肿']
+  ];
+  cases.forEach(([text, want]) => {
+    const f = ccFindings(withNarrative(text));
+    assert.ok(f.includes(want), `${text} 应产生 ${want}，实际只有 ${f.join('|') || '（空）'}`);
+  });
+});
+
+test('以「不」开头但并非否定的短语：不明原因发热、不洁饮食后腹泻', () => {
+  const f1 = ccFindings(withNarrative('不明原因发热'));
+  assert.ok(f1.includes('cc:发热'), '「不明原因」是修饰语，不是在否认发热');
+  const f2 = ccFindings(withNarrative('不洁饮食后腹泻'));
+  assert.ok(f2.includes('cc:腹泻'), '「不洁饮食」是在说诱因');
+});
+
+test('逗号是边界但不继承否定：「无胸痛，咳嗽3天」里的咳嗽仍是阳性', () => {
+  const f = ccFindings(withNarrative('无胸痛，咳嗽3天'));
+  assert.ok(!f.includes('cc:胸痛'), '胸痛应被否定');
+  assert.ok(f.includes('cc:咳嗽'), '逗号后面的咳嗽是阳性');
+});
+
+test('不带标点的「发热无咳嗽」也要切得开', () => {
+  // 有人习惯一口气写完不加逗号。整段按开头有没有否定词来判断的话，
+  // 这段以「发热」开头，于是否定被整段忽略，咳嗽照样算阳性。
+  const f = ccFindings(withNarrative('发热无咳嗽'));
+  assert.ok(f.includes('cc:发热'), '发热是阳性');
+  assert.ok(!f.includes('cc:咳嗽'), '「无咳嗽」应被否定，哪怕前面没有逗号');
+});
+
+test('病程描述里的「未/不」不会把症状一起否掉', () => {
+  const f1 = ccFindings(withNarrative('腹痛3天未缓解'));
+  assert.ok(f1.includes('cc:腹痛'), '「未缓解」说的是病程，不是在否认腹痛');
+  const f2 = ccFindings(withNarrative('咳嗽不止'));
+  assert.ok(f2.includes('cc:咳嗽'), '「不止」是程度描述');
+});
+
+test('「不适」「不良」这类以「不」开头的常用词不被当成否定切点', () => {
+  const f = ccFindings(withNarrative('肠道不适，发热2天'));
+  assert.ok(f.includes('cc:发热'), '切否定切点不能把正常句子切碎');
+});
+
+test('否定词只在自己那句里生效，不跨字段抵消阳性', () => {
+  // 主诉写阳性、既往史写阴性，是最常见的写法。
+  // 旧实现把两段用逗号拼在一起再处理，一个「无」能把隔壁字段的阳性吃掉。
+  const r = makeRecord('respiratory');
+  r.basic.chiefComplaint = '发热3天';
+  r.hpi.onset = '3天前无明显诱因出现发热';
+  r.hpi.accompanying = '无咳嗽';
+  const f = ccFindings(r);
+  assert.ok(f.includes('cc:发热'), '主诉里的发热不能被现病史的「无」抵消');
+  assert.ok(!f.includes('cc:咳嗽'));
+});
+
+test('阴性症状不会让诊断提示多出候选或涨分', () => {
+  // 「咳嗽但不发热」和「咳嗽」相比，多出来的只有那个被否定的「发热」。
+  // 若否定失效，cap 这类 toHaveFever 的规则会因为 cc:发热 而涨分。
+  const base = makeRecord('respiratory');
+  base.basic.chiefComplaint = '咳嗽';
+  base.hpi.onset = '3天前出现咳嗽';
+  base.hpi.symptoms = '咳嗽';
+  base.ros.resp = { cough: { checked: true }, sputum: { checked: true } };
+
+  const negated = makeRecord('respiratory');
+  negated.basic.chiefComplaint = '咳嗽';
+  negated.hpi.onset = '3天前出现咳嗽';
+  negated.hpi.symptoms = '咳嗽';
+  negated.hpi.accompanying = '但无发热';
+  negated.ros.resp = { cough: { checked: true }, sputum: { checked: true } };
+
+  const a = HINTS.analyze(base);
+  const b = HINTS.analyze(negated);
+  const scoreOf = list => (list.find(x => x.id === 'cap') || {}).score || 0;
+  assert.equal(scoreOf(b), scoreOf(a), '阴性症状不该给同一条规则加分');
+});
+
 test('健康人不产生任何诊断提示', () => {
   const r = makeRecord('general');
   r.basic.gender = '男';

@@ -96,18 +96,43 @@ const APP = (() => {
   }
 
   /* ========================= 存储（委托给 core） ========================= */
+  //
+  // 写入锁：loadCurrent / loadList 一旦发现「key 在、但读不出来」，就把对应槽锁上，
+  // 之后任何写入都被最底层的 saveCurrent / saveList 挡回去。
+  // 为什么必须锁在最底层：自动保存（10 秒定时器）、beforeunload、事件委托里
+  // 那一堆「改完立刻 saveCurrent()」的调用点、普通保存按钮、导入合并……
+  // 只要有一处漏了，「空白病历覆盖掉损坏原文」就发生了，用户的旧病历彻底没了。
+  // 锁只能由用户明确操作解除：清除损坏槽从头写、或导入备份替换。
+  let currentSaveBlocked = false;
+  let listSaveBlocked = false;
+  let corruptCurrentRaw = '';
+  let corruptListRaw = '';
 
   function loadList() {
     const res = CORE.loadList(localStorage);
-    LIST = res.list;
-    if (!res.ok && res.corrupt) {
+    if (res.ok) {
+      LIST = res.list;
+      listSaveBlocked = false;
+      corruptListRaw = '';
+    } else if (res.corrupt) {
       // 关键：损坏时不覆盖原存档，提示用户先导出/备份
-      storageAlert = '本地病历列表读取失败，已保留原始数据未做修改。请勿在此状态下继续保存，建议联系技术支持或导出手工备份。';
+      LIST = res.list;
+      listSaveBlocked = true;
+      corruptListRaw = String(res.raw == null ? '' : res.raw);
+      storageAlert = '本地病历列表读取失败，已保留原始数据未做修改、也不再自动写回。'
+        + '请先导出原始数据留底，再决定是否新建列表。';
+    } else {
+      LIST = res.list;
     }
     return res;
   }
 
   function saveList() {
+    if (listSaveBlocked) {
+      storageAlert = '病历列表读不出来，已停止写入以免覆盖原数据。'
+        + '请先在下方导出原始数据或新建列表，再继续保存。';
+      return false;
+    }
     const ok = CORE.safeSet(localStorage, K.list, JSON.stringify(LIST));
     if (!ok) {
       // 保存失败必须让用户看见，不能假装已保存
@@ -118,6 +143,12 @@ const APP = (() => {
   }
 
   function saveCurrent() {
+    if (currentSaveBlocked) {
+      // 静默拒绝：这条路径会被定时器和 beforeunload 频繁触发，
+      // 每次都改 storageAlert 会把用户正在读的提示刷成别的内容。
+      // 告警在 loadCurrent 时已经写过一次，横幅会一直挂在那儿。
+      return false;
+    }
     if (!R) return false;
     const ok = CORE.safeSet(localStorage, K.current, JSON.stringify(R));
     if (!ok) storageAlert = '当前病历自动保存失败，存储空间可能已满。';
@@ -126,11 +157,43 @@ const APP = (() => {
 
   function loadCurrent() {
     const res = CORE.loadCurrent(localStorage, SCHEMA.emptyRecord, deptKeys());
-    if (res.ok && res.record) { R = res.record; return true; }
-    if (!res.ok) {
-      storageAlert = '正在编辑的病历无法读取（' + (res.reason || '存档损坏') + '），已为你新建空白病历，原数据保留未动。';
+    if (res.ok) {
+      if (res.record) { R = res.record; }
+      currentSaveBlocked = false;
+      corruptCurrentRaw = '';
+      return !!res.record;
     }
+    // res.corrupt：不是「没有存档」，是「有存档但读不出来」。这两种必须分开，
+    // 早先只用一个真假值表示，导致损坏时被当成第一次使用，空白病历直接写回去。
+    currentSaveBlocked = true;
+    corruptCurrentRaw = String(res.raw == null ? '' : res.raw);
+    storageAlert = '正在编辑的病历无法读取（' + (res.reason || '存档损坏') + '）。'
+      + '原数据保留未动，自动保存已暂停——当前编辑的内容尚未写入本机。'
+      + '请先导出原始数据留底，再选择「新建空白病历」。';
     return false;
+  }
+
+  // 用户明确确认后的解锁路径：清掉损坏槽、开始新病历。
+  // 调用点会先弹 confirm 并把原始字符串给用户下载，所以这里不再二次确认。
+  function discardCorruptCurrent() {
+    if (!currentSaveBlocked) return false;
+    try { localStorage.removeItem(K.current); } catch (e) { /* 删不掉也不能把锁解开 */ }
+    currentSaveBlocked = false;
+    corruptCurrentRaw = '';
+    R = SCHEMA.emptyRecord();
+    if (!R.basic.recordDate) R.basic.recordDate = todayStr();
+    storageAlert = '';
+    return saveCurrent();
+  }
+
+  function discardCorruptList() {
+    if (!listSaveBlocked) return false;
+    try { localStorage.removeItem(K.list); } catch (e) { /* 同上 */ }
+    listSaveBlocked = false;
+    corruptListRaw = '';
+    LIST = [];
+    storageAlert = '';
+    return saveList();
   }
 
   function loadSettings() {
@@ -1911,8 +1974,16 @@ const APP = (() => {
 
     // 存储异常必须让用户看到，不能静默
     const banner = storageAlert
-      ? `<div class="storage-alert" id="storageAlert">⚠️ ${esc(storageAlert)}
-           <button type="button" class="alert-x" data-dismiss-alert>知道了</button></div>`
+      ? `<div class="storage-alert" id="storageAlert">
+           <div class="alert-msg">⚠️ ${esc(storageAlert)}</div>
+           <div class="alert-btns">
+             ${currentSaveBlocked ? '<button type="button" class="alert-act" data-export-corrupt="current">导出原始损坏数据</button>' : ''}
+             ${currentSaveBlocked ? '<button type="button" class="alert-act" data-discard-corrupt="current">新建空白病历</button>' : ''}
+             ${listSaveBlocked ? '<button type="button" class="alert-act" data-export-corrupt="list">导出原始列表</button>' : ''}
+             ${listSaveBlocked ? '<button type="button" class="alert-act" data-discard-corrupt="list">新建空列表</button>' : ''}
+             <button type="button" class="alert-x" data-dismiss-alert>知道了</button>
+           </div>
+         </div>`
       : '';
     $('#content').innerHTML = banner + body;
 
@@ -2151,7 +2222,7 @@ const APP = (() => {
 
     // 点击事件（委托）
     document.addEventListener('click', e => {
-      const t = e.target.closest('[data-seg],[data-check],[data-ros],[data-rosneg],[data-pequick],[data-pecheck],[data-pall],[data-act],[data-addhint],[data-auxdel],[data-diagdel],[data-jump],[data-dismiss-alert],[data-view],[data-checkjump],[data-arrdel],[data-arrstrdel],[data-focusadd],[data-focusdel],[data-tpl]');
+      const t = e.target.closest('[data-seg],[data-check],[data-ros],[data-rosneg],[data-pequick],[data-pecheck],[data-pall],[data-act],[data-addhint],[data-auxdel],[data-diagdel],[data-jump],[data-dismiss-alert],[data-export-corrupt],[data-discard-corrupt],[data-view],[data-checkjump],[data-arrdel],[data-arrstrdel],[data-focusadd],[data-focusdel],[data-tpl]');
       if (!t) return;
       const ds = t.dataset;
 
@@ -2397,11 +2468,37 @@ const APP = (() => {
         return;
       }
 
-      // 关闭存储告警
+      // 关闭存储告警（只关横幅，不解锁——锁只能靠明确的重建动作解除）
       if (ds.dismissAlert !== undefined) {
         storageAlert = '';
         const el = document.getElementById('storageAlert');
         if (el) el.remove();
+        return;
+      }
+
+      // 导出损坏的原始数据：原文逐字节给出去，不做任何加工
+      if (ds.exportCorrupt !== undefined) {
+        const which = ds.exportCorrupt === 'list' ? 'list' : 'current';
+        const raw = which === 'list' ? corruptListRaw : corruptCurrentRaw;
+        if (!raw) { toast('没有可导出的原始数据'); return; }
+        const name = which === 'list'
+          ? `损坏的病历列表_原始数据_${SCHEMA.todayStr()}.txt`
+          : `损坏的当前病历_原始数据_${SCHEMA.todayStr()}.txt`;
+        downloadBlob(raw, name, 'text/plain');
+        toast('原始数据已导出，请留好这份文件');
+        return;
+      }
+
+      // 明确确认后清除损坏槽、解除写入锁
+      if (ds.discardCorrupt !== undefined) {
+        const which = ds.discardCorrupt === 'list' ? 'list' : 'current';
+        const ok = confirm(which === 'list'
+          ? '新建空列表？损坏的原始列表会被清除，且无法恢复。建议先点「导出原始列表」留底。'
+          : '新建空白病历？损坏的原始病历会被清除，且无法恢复。建议先点「导出原始损坏数据」留底。');
+        if (!ok) return;
+        if (which === 'list') discardCorruptList(); else discardCorruptCurrent();
+        toast(which === 'list' ? '已新建空列表' : '已新建空白病历，可以开始写了');
+        render();
         return;
       }
 
@@ -2816,14 +2913,32 @@ const APP = (() => {
   function saveToLibrary() {
     if (!R) return false;
     loadList();
+    // 列表读不出来、或当前病历读不出来，一律什么都不写。
+    // 否则会「列表写不进去、当前病历写进去了」（或反过来），用户看到的是
+    // 「保存失败」，实际上数据已经被改了一半——下次打开就分不清哪份是新的。
+    // 宁可什么都不动，也不留一个半截状态。
+    if (listSaveBlocked || currentSaveBlocked) {
+      storageAlert = listSaveBlocked
+        ? '病历列表读不出来，已停止写入以免覆盖原数据。这次保存没有写入任何内容，'
+          + '当前编辑的病历也保持原样。请先导出原始数据或新建列表。'
+        : '当前病历读不出来，已停止写入以免覆盖损坏的原始数据。这次保存没有写入任何内容。'
+          + '请先导出原始数据，或确认后新建空白病历。';
+      return false;
+    }
+    const before = { id: R.id, updatedAt: R.updatedAt };
     const res = CORE.upsertRecord(LIST, R, new Date().toISOString());
     LIST = res.list;
     R.id = res.id;
     R.updatedAt = LIST.find(x => x.id === res.id).updatedAt;
     const okList = saveList();
     const okCur = saveCurrent();
-    if (!okList) return false;
-    if (okCur) storageAlert = '';
+    if (!okList || !okCur) {
+      // 库没写成，内存里的 id 也退回去，免得下次保存把这份当成另一份
+      R.id = before.id;
+      R.updatedAt = before.updatedAt;
+      return false;
+    }
+    storageAlert = '';
     return true;
   }
 
@@ -2878,6 +2993,32 @@ const APP = (() => {
     input.click();
   }
 
+  /**
+   * 把导入结果落盘，返回 { ok, res }。
+   * 单独抽出来是因为「合并」和「替换」对写入锁的态度相反：
+   *   · 合并要读现有列表，列表读不出来时读到的空数组会覆盖掉原来的记录 → 一律不写
+   *   · 替换是用户明确选择的破坏行为，是列表损坏时唯一允许覆盖的入口 → 先解锁再写
+   */
+  function applyImport(mode, records) {
+    loadList();
+    if (mode === 'merge') {
+      if (listSaveBlocked) {
+        storageAlert = '病历列表读不出来，已停止合并导入以免覆盖原数据。'
+          + '这次导入没有写入任何内容。请先导出原始列表或新建列表。';
+        return { ok: false, blocked: true };
+      }
+      const res = CORE.mergeImport(LIST, records);
+      LIST = res.list;
+      return { ok: saveList(), res };
+    }
+    if (listSaveBlocked) {
+      listSaveBlocked = false;
+      corruptListRaw = '';
+    }
+    LIST = CORE.replaceImport(records);
+    return { ok: saveList(), replaced: LIST.length };
+  }
+
   /** 导入预览：显示条数与摘要，让用户选择合并或替换 */
   function previewImport(parsed) {
     const rows = parsed.records.map(r => {
@@ -2905,19 +3046,20 @@ const APP = (() => {
       wrap.addEventListener('click', ev => {
         const mode = ev.target.dataset.import;
         if (!mode) return;
-        loadList();
-        if (mode === 'merge') {
-          const res = CORE.mergeImport(LIST, parsed.records);
-          LIST = res.list;
-          saveList();
-          wrap.remove();
-          toast(`已导入：新增 ${res.added}，更新 ${res.updated}，跳过 ${res.skipped}`);
-        } else {
+        if (mode === 'replace') {
           if (!confirm('替换会清空当前列表中的全部病历，确定继续？')) return;
-          LIST = CORE.replaceImport(parsed.records);
-          saveList();
-          wrap.remove();
-          toast(`已替换为导入的 ${LIST.length} 份病历`);
+          // 列表已损坏时多问一句，并提示先留底
+          if (listSaveBlocked && !confirm('现有列表已经读不出来，替换会连原始数据一起清掉。'
+            + '建议先点顶部横幅里的「导出原始列表」留底。仍要继续？')) return;
+        }
+        const out = applyImport(mode, parsed.records);
+        wrap.remove();
+        if (mode === 'merge') {
+          toast(out.ok
+            ? `已导入：新增 ${out.res.added}，更新 ${out.res.updated}，跳过 ${out.res.skipped}`
+            : '导入没有写入，请查看页面顶部提示');
+        } else {
+          toast(out.ok ? `已替换为导入的 ${out.replaced} 份病历` : '替换没有写入，请查看页面顶部提示');
         }
         openList();
       });
@@ -3033,7 +3175,17 @@ const APP = (() => {
       // 步骤导航：界面走 stepbar 点击，测试直接断言状态判定
       stepState,
       openNav,
-      navRowsHtml: () => navRowsHtml()
+      navRowsHtml: () => navRowsHtml(),
+      // 存储写入锁：测试要能直接触发自动保存、普通保存，并读到锁状态
+      saveCurrent, saveWithFeedback, saveList,
+      currentSaveBlocked: () => currentSaveBlocked,
+      listSaveBlocked: () => listSaveBlocked,
+      corruptCurrentRaw: () => corruptCurrentRaw,
+      corruptListRaw: () => corruptListRaw,
+      storageAlertText: () => storageAlert,
+      discardCorruptCurrent, discardCorruptList,
+      // 导入合并/替换的落盘入口：列表损坏时合并必须整单不写，替换要能解锁
+      applyImport
     }
   };
 })();

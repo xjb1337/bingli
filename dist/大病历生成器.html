@@ -1242,21 +1242,38 @@ footer .btn:disabled {
   font-size: calc(13px * var(--fs-scale));
   line-height: 1.55;
   display: flex;
-  align-items: flex-start;
-  gap: 10px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
 }
 
+/* 文案和按钮各占一行：412px 屏上四个按钮横着放进同一行会挤成一团，
+   换行后每个按钮仍然要够到 44px 的点击高度 */
+.storage-alert .alert-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.storage-alert .alert-act,
 .storage-alert .alert-x {
-  margin-left: auto;
   flex-shrink: 0;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid #d93025;
   background: #fff;
   color: #a50e0e;
   border-radius: 6px;
-  padding: 3px 8px;
+  padding: 0 12px;
   font-size: calc(12px * var(--fs-scale));
   cursor: pointer;
   font-family: inherit;
+}
+
+.storage-alert .alert-x {
+  margin-left: auto;
 }
 
 /* ===========================================================
@@ -1595,7 +1612,8 @@ footer .btn:disabled {
   .tag-score { background: #3c4043; color: var(--gray-5); }
 
   .storage-alert { background: var(--score-bad-bg); border-color: var(--score-bad); color: var(--score-bad); }
-  .storage-alert .alert-x { background: #2c2c2c; border-color: var(--score-bad); color: var(--score-bad); }
+  .storage-alert .alert-x,
+  .storage-alert .alert-act { background: #2c2c2c; border-color: var(--score-bad); color: var(--score-bad); }
 
   .live-preview { background: var(--blue-light); color: var(--blue-dark); }
   .hint-note { background: #2c2c2c; }
@@ -4077,6 +4095,14 @@ const RECORD_CORE = (() => {
 
   /**
    * 载入当前正在编辑的病历，失败时返回 reason 供界面提示
+   *
+   * 三种结果必须分得开，界面靠它们决定「能不能写回」：
+   *   { ok:true, fresh:true }  —— key 根本不存在（第一次用），写回去是安全的
+   *   { ok:true, record }      —— 读出来了
+   *   { ok:false, corrupt:true, raw } —— key 在、但读不出来，raw 是原文，
+   *                                      界面要留着它给用户导出，并且停止写入
+   * 早先只用 ok 一个布尔值，调用方分不清「没有存档」和「存档坏了」，
+   * 于是空白病历被当成正常的空存档保存，把损坏的原文整个覆盖掉。
    */
   function loadCurrent(storage, emptyRecord, validDeptKeys) {
     const rawText = storage.getItem(STORAGE_KEYS.current);
@@ -4085,12 +4111,12 @@ const RECORD_CORE = (() => {
     try {
       parsed = JSON.parse(rawText);
     } catch (e) {
-      return { ok: false, record: null, corrupt: true, reason: '正在编辑的病历存档已损坏' };
+      return { ok: false, record: null, corrupt: true, raw: rawText, reason: '正在编辑的病历存档已损坏' };
     }
     try {
       return { ok: true, record: normalizeRecord(parsed, emptyRecord, validDeptKeys) };
     } catch (e) {
-      return { ok: false, record: null, corrupt: true, reason: e.message };
+      return { ok: false, record: null, corrupt: true, raw: rawText, reason: e.message };
     }
   }
 
@@ -21107,7 +21133,9 @@ const GENERATOR = (() => {
   function ageWithUnit(basic) {
     const raw = stripTail((basic || {}).age);
     if (!raw) return '';
-    return /[岁月天周时]/.test(raw) ? raw : raw + '岁';
+    // 「日龄」必须单独认：14日龄 只匹配到「日」也可，但「日龄岁」这种输出
+    // 是把 14日龄 当成 14 岁又补了一个单位。日、天、周、月、时都算已有单位。
+    return /[岁月天周时日]/.test(raw) ? raw : raw + '岁';
   }
 
   /** 中文数字转数值（年龄常见写法「十四」「二十三」「一百」够用即可） */
@@ -22016,6 +22044,34 @@ const GENERATOR = (() => {
   }
 
   /**
+   * 一个生命体征的「有效值」——正文、摘要、首次病程 O 段、诊断提示共用这一个口径。
+   *
+   * 旧实现各写各的：正文用「完整数字 + VITAL_RANGE」双重校验，另外三处直接
+   * parseFloat。于是 parseFloat('38foo') 得 38、parseFloat('999') 得 999，
+   * 一份 T 999℃ 的病历，体格检查那行写着「T ／℃」，摘要却写着「查体：T 999℃」，
+   * 同一份病历自己跟自己打架。
+   *
+   * 这里把「怎么算有效」定死：
+   *   ① 必须是完整的十进制数字（`38foo`、`38℃`、`３８` 全不算）；
+   *   ② 必须落在 VITAL_RANGE 的可信区间内（拦多打一位的那种手误）。
+   * 两条都过才返回数字，否则返回 null，调用方一律当作「没填」。
+   *
+   * @param {object} v record.pe.vitals
+   * @param {string} key VITAL_RANGE 里的键名
+   * @returns {{raw:string, num:number}|null}
+   */
+  function vitalNum(v, key) {
+    const raw = vitalValue((v || {})[key]);
+    if (!raw) return null;
+    if (!/^-?\d+(\.\d+)?$/.test(raw)) return null;
+    const num = Number(raw);
+    if (!isFinite(num)) return null;
+    const rng = VITAL_RANGE[key];
+    if (rng && (num < rng[0] || num > rng[1])) return null;
+    return { raw, num };
+  }
+
+  /**
    * 生命体征行。
    *
    * ⚠️ 本轮改动（缺陷2第4条）：旧实现「有一项才输出一行」，空记录时整行不存在，
@@ -22042,13 +22098,8 @@ const GENERATOR = (() => {
      * 离谱的数字他多半看不见。
      */
     const safe = k => {
-      const raw = vitalValue(v[k]);
-      if (!raw) return PH;
-      const rng = VITAL_RANGE[k];
-      if (!rng) return raw;
-      if (!/^-?\d+(\.\d+)?$/.test(raw)) return PH;   // 不是数字，写了也是错
-      const n = Number(raw);
-      return n >= rng[0] && n <= rng[1] ? raw : PH;
+      const hit = vitalNum(v, k);
+      return hit ? hit.raw : PH;
     };
     const parts = [
       `T ${safe('temperature')}℃`,
@@ -22668,14 +22719,19 @@ const GENERATOR = (() => {
     const abn = abnormalPE(r);
     const v = (r.pe || {}).vitals || {};
     const abnormalVitals = [];
-    const t = parseFloat(v.temperature);
-    if (!isNaN(t) && t >= 37.3) abnormalVitals.push(`T ${v.temperature}℃`);
-    const p = parseFloat(v.pulse);
-    if (!isNaN(p) && (p > 100 || p < 60)) abnormalVitals.push(`P ${v.pulse}次/分`);
-    const rr = parseFloat(v.respiration);
-    if (!isNaN(rr) && (rr > 20 || rr < 12)) abnormalVitals.push(`R ${v.respiration}次/分`);
-    const sbp = parseFloat(v.sbp), dbp = parseFloat(v.dbp);
-    if (!isNaN(sbp) && (sbp >= 140 || sbp < 90)) abnormalVitals.push(`BP ${v.sbp || '—'}/${v.dbp || '—'}mmHg`);
+    // 一律走 vitalNum：它已经保证「完整数字 + 在可信范围内」。
+    // 这里只判断临床阈值，不再自己 parseFloat——两套解析必然写出互相矛盾的病历。
+    const t = vitalNum(v, 'temperature');
+    if (t && t.num >= 37.3) abnormalVitals.push(`T ${t.raw}℃`);
+    const p = vitalNum(v, 'pulse');
+    if (p && (p.num > 100 || p.num < 60)) abnormalVitals.push(`P ${p.raw}次/分`);
+    const rr = vitalNum(v, 'respiration');
+    if (rr && (rr.num > 20 || rr.num < 12)) abnormalVitals.push(`R ${rr.raw}次/分`);
+    const sbp = vitalNum(v, 'sbp'), dbp = vitalNum(v, 'dbp');
+    if (sbp && (sbp.num >= 140 || sbp.num < 90)) {
+      // 舒张压无效时不能把原始字符串抄进来，否则 T 380 的摘要里冒出「BP 152/999」
+      abnormalVitals.push(`BP ${sbp.raw}/${dbp ? dbp.raw : '—'}mmHg`);
+    }
     const peAll = abnormalVitals.concat(abn.map(a => a.text).filter(Boolean));
     // 心率去重：查体描述里已经写了「心率108次/分」时，不要再pushed一个「P 108次/分」
     const dedup = dedupeClauses(peAll.filter((txt, i) => {
@@ -22876,15 +22932,16 @@ const GENERATOR = (() => {
     const abn = abnormalPE(r);
     const v = (r.pe || {}).vitals || {};
     const parts = [];
-    const t = parseFloat(v.temperature);
-    if (!isNaN(t) && t >= 37.3) parts.push(`T ${v.temperature}℃`);
-    const p = parseFloat(v.pulse);
-    if (!isNaN(p) && (p > 100 || p < 60)) parts.push(`P ${v.pulse}次/分`);
-    const rr = parseFloat(v.respiration);
-    if (!isNaN(rr) && (rr > 20 || rr < 12)) parts.push(`R ${v.respiration}次/分`);
-    const sbp = parseFloat(v.sbp);
-    if (!isNaN(sbp) && (sbp >= 140 || sbp < 90)) {
-      parts.push(`BP ${v.sbp || '—'}/${v.dbp || '—'}mmHg`);
+    // 与 buildVitals / draftSummary 同一口径（vitalNum），只保留临床阈值判断
+    const t = vitalNum(v, 'temperature');
+    if (t && t.num >= 37.3) parts.push(`T ${t.raw}℃`);
+    const p = vitalNum(v, 'pulse');
+    if (p && (p.num > 100 || p.num < 60)) parts.push(`P ${p.raw}次/分`);
+    const rr = vitalNum(v, 'respiration');
+    if (rr && (rr.num > 20 || rr.num < 12)) parts.push(`R ${rr.raw}次/分`);
+    const sbp = vitalNum(v, 'sbp'), dbp = vitalNum(v, 'dbp');
+    if (sbp && (sbp.num >= 140 || sbp.num < 90)) {
+      parts.push(`BP ${sbp.raw}/${dbp ? dbp.raw : '—'}mmHg`);
     }
     const texts = dedupeClauses(parts.concat(abn.map(a => a.text).filter(Boolean)));
     // 缺陷B3（已复现）：一个查体项都没勾时，这里原本写「未见与诊断相关的阳性体征」，
@@ -23115,18 +23172,50 @@ const GENERATOR = (() => {
    * 出院医嘱拆成药物、非药物、生活指导、复诊时间四句，对应评分表括号里的四项。
    * =================================================================== */
 
-  /** 住院天数：两个 'YYYY-MM-DD' 之差；算不出来返回 0 */
+  /**
+   * 严格的日期解析：只认 `YYYY-MM-DD`（月、日允许一位数），且必须是真实存在的日期。
+   *
+   * 为什么不能只用 `new Date(y, m-1, d)`：JS 会把越界的日期**静默归一化**，
+   * `new Date(2026, 1, 31)` 得到的是 3 月 3 日。于是「入院 2026-02-31、出院 2026-03-05」
+   * 会算出 4 天住院——一个根本不存在的入院日期凭空产生了住院天数，
+   * 而 validate() 那边只报了「日期不真实」，两处结论互相矛盾。
+   *
+   * 所以这里构造完必须回验年月日，且一律用 UTC 构造，避免本地时区/夏令时
+   * 让两个日期之间差出 23 或 25 小时、进而把天数算少或算多。
+   *
+   * @param {string} s 日期文本
+   * @returns {{y:number, mo:number, d:number, stamp:number}|null} stamp 为 UTC 零点毫秒
+   */
+  function parseDateStrict(s) {
+    const t = stripTail(s);
+    if (!t) return null;
+    // 锚定整串：旧实现是 `(\d{4})\D?(\d{1,2})\D?(\d{1,2})` 且没有 ^$，
+    // 「xx2026-09-28」这种前面带杂字的也能匹配上。
+    const m = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (!m) return null;
+    const y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
+    if (mo < 1 || mo > 12) return null;
+    if (d < 1 || d > 31) return null;
+    const dt = new Date(Date.UTC(y, mo - 1, d));
+    if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) {
+      return null;   // 2026-02-31、非闰年的 02-29 都走这条
+    }
+    return { y, mo, d, stamp: dt.getTime() };
+  }
+
+  /**
+   * 住院天数：两个 'YYYY-MM-DD' 之差；算不出来返回 0。
+   *
+   * 用 parseDateStrict 而不是 `new Date(...)`：无效日期不能算出天数。
+   * 返回 0 同时覆盖三种情形——同一天出院、出院早于入院、日期本身不合法，
+   * 调用方不显示「住院天数」即可，validate() 会单独说明是哪一种。
+   */
   function hospitalDays(admitDate, dischargeDate) {
-    const parse = s => {
-      const m = String(s || '').match(/(\d{4})\D?(\d{1,2})\D?(\d{1,2})/);
-      if (!m) return null;
-      const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
-      return isNaN(d.getTime()) ? null : d;
-    };
-    const a = parse(admitDate);
-    const b = parse(dischargeDate);
+    const a = parseDateStrict(admitDate);
+    const b = parseDateStrict(dischargeDate);
     if (!a || !b) return 0;
-    const diff = Math.round((b - a) / 86400000);
+    // 两端都是 UTC 零点，直接相减不受运行机器时区影响
+    const diff = Math.round((b.stamp - a.stamp) / 86400000);
     return diff > 0 ? diff : 0;
   }
 
@@ -23676,7 +23765,12 @@ const GENERATOR = (() => {
     draftCaseSummary, draftObjectivePE, draftObjectiveAux, draftBasisDetail,
     diffRelatedToDiagnosis, diagnosisList, auxItems, hospitalDays,
     mergeIntoHistory,
-    joinSentences, stripTail, SECTION_ORDER
+    joinSentences, stripTail, SECTION_ORDER,
+    // 生命体征的唯一有效值口径：正文 / 摘要 / O 段 / hints 都调它
+    vitalValue, vitalNum,
+    // 年龄的三个读法：显示用（带单位原样输出）、判儿童用、称呼用。
+    // 三者必须对同一个年龄给出自洽的答案，所以一并导出给测试盯着。
+    ageWithUnit, ageYears, subjectOf
   };
 })();
 
@@ -24661,6 +24755,90 @@ const HINTS = (() => {
     'abdomen.spleenPalpation=脾肋下可触及': ['pev:abdomen.abdPalpation=脾肋下可触及']
   };
 
+  /* ---------------------- 否定的作用范围 ---------------------- */
+  //
+  // 病历里「发热但无咳嗽」这种写法很常见：一句话里既有阳性也有阴性。
+  // 早先的做法是「分句以否定词开头就丢掉整个分句」，于是「发热但无咳嗽」里的
+  // 咳嗽照样被子串匹配命中、被算成阳性，「咳嗽但不发热」里的发热也一样——
+  // 诊断提示据此多报一个候选、多给一分。单靠往否定词表里加词治不了这个病，
+  // 因为问题不在词表，在于「这个『无』管到哪儿为止」没算清楚。
+  //
+  // 现在的规则（tests/generator.test.cjs 里每条都有对应断言）：
+  //   · 句号、分号、换行是硬边界，否定不跨句；
+  //   · 「但/但是/然而/不过/却/反而」是否定的转折，转折之后重新判定；
+  //   · 顿号不算边界：「无咳嗽、咳痰」「否认咳嗽及咳痰」整段被否定，两项都不算阳性；
+  //   · 逗号是边界但不继承否定：「无胸痛，咳嗽3天」里的咳嗽仍算阳性——
+  //     病历里这种写法几乎总是「先列一串阴性、再说真正的阳性」；
+  //   · 「伴/并/且/及/和/与/同时」只是并列连接词，剥掉它再看开头是不是否定词，
+  //     所以「伴无咳嗽」「并否认咯血」照样算否定；
+  //   · 症状后面的「不」不当否定用：「发热不退」「咳嗽不止」里的发热、咳嗽仍是阳性。
+  const NEG_PREFIX = /^(?:无明显|无明|未见明显|未见异常|未出现|未见|否认有|否认|没有|无|未|不)/;
+  // 这几个词以「不/无」开头但不是在否定症状，误判会把「不明原因发热」整段丢掉
+  const NEG_EXCEPT = /^(?:不明原因|不明诱因|原因不明|不详|不洁|不规则)/;
+  // 现病史起病那一栏几乎每份病历都以「无明显诱因出现…」「无诱因出现…」开头，
+  // 这里的「无」否定的是诱因，不是后面的症状。先把这个短语剥掉再判，
+  // 否则「无明显诱因出现发热3天」里的发热会被自己这句话吃掉——
+  // 那等于所有正规写法的现病史都不产生关键词。
+  const CAUSE_PHRASE = /^无(?:明显|何|任何)?(?:诱因|原因|明确诱因|明显原因)/;
+  const TURN_WORD = /^(?:但是|但|然而|不过|却|反而)$/;
+  const TURN_SPLIT = /(但是|但|然而|不过|却|反而)/;
+  const CONNECT_HEAD = /^(?:同时|另外|此外|并且|伴有|伴|并|且|亦|也|还|仍|尚|又|和|及|与)/;
+  // 「伴无咳嗽」这种连接词后面直接跟否定的情形，先在这里切开
+  const CONNECT_NEG_SPLIT = /(?=(?:同时|另外|此外|伴有|伴|并|且)(?:无|未|不|否认|没有|未见))/;
+  // 没有任何标点、阳性后面直接接否定的写法：「发热无咳嗽」「腹痛3天未缓解」。
+  // 只在「无/未/否认/没有/未见」前切，不切「不」——「不适」「不良」「不断」
+  // 里的「不」太多，切了会把正常句子切碎。
+  // 「发热不退」「咳嗽不止」不受影响：切出来的后半段本来就不含症状词。
+  const MID_NEG_SPLIT = /(?<=[^，,。；;、\s])(?=无|未|否认|没有|未见)/;
+
+  function segIsNegated(seg) {
+    let t = String(seg || '').trim();
+    if (!t) return false;
+    // 剥掉并列连接词，看真正的开头是什么
+    for (let i = 0; i < 3; i++) {
+      const m = t.match(CONNECT_HEAD);
+      if (!m) break;
+      t = t.slice(m[0].length).trim();
+    }
+    if (!t) return false;
+    if (NEG_EXCEPT.test(t)) return false;
+    // 「无诱因」「无明显原因」剥掉后看剩下的部分
+    let rest = t;
+    while (CAUSE_PHRASE.test(rest)) rest = rest.replace(CAUSE_PHRASE, '').trim();
+    if (rest !== t) return rest ? NEG_PREFIX.test(rest) && !NEG_EXCEPT.test(rest) : false;
+    return NEG_PREFIX.test(t);
+  }
+
+  function positiveNarrative(text) {
+    const out = [];
+    String(text || '').split(/[。；;\n]/).forEach(sentence => {
+      // 先按转折词切开：转折之后重新判定，所以直接切成互不影响的几块
+      const chunks = [];
+      let buf = '';
+      sentence.split(TURN_SPLIT).forEach(piece => {
+        if (TURN_WORD.test(piece)) { chunks.push(buf); buf = ''; }
+        else buf += piece;
+      });
+      chunks.push(buf);
+      chunks.forEach(chunk => {
+        // 逗号是边界但不继承否定；顿号留在段内，整段一起判
+        String(chunk || '').split(/[，,]/).forEach(rawSeg => {
+          String(rawSeg || '').split(CONNECT_NEG_SPLIT).forEach(seg => {
+            // 再切一次「阳性后面紧跟否定」的写法，切出来的后半段会在
+            // segIsNegated 里被认成否定段
+            String(seg || '').split(MID_NEG_SPLIT).forEach(sub => {
+              const t = String(sub || '').trim();
+              if (!t) return;
+              if (segIsNegated(t)) return;
+              out.push(t);
+            });
+          });
+        });
+      });
+    });
+    return out.join('，');
+  }
+
   /* ---------------------- 从病历中抽取"发现" ---------------------- */
 
   function extractFindings(r) {
@@ -24668,20 +24846,17 @@ const HINTS = (() => {
     const b = r.basic || {};
 
     // 主诉 + 现病史关键词
-    // 注意：先剔除否定从句（"无咯血、盗汗""否认胸痛"），否则阴性描述会被误判为阳性
-    // 刻意不纳入 hpi.negativeDiscriminating：它是整段阴性病史，"无咯血、盗汗、消瘦"
-    // 按顿号切开后「盗汗」「消瘦」会丢掉否定前缀，反而被误判成阳性。
+    // 字段之间用「。」连接：字段边界就是句子边界，一个字段里的「无」不可能跑到
+    // 下一个字段去否定那里的阳性（主诉写「发热3天」、现病史写「无明显诱因」，
+    // 发热不该被那个「无」吃掉）。
+    // 刻意不纳入 hpi.negativeDiscriminating：它是整段阴性病史。
     const rawText = [
       b.chiefComplaint || '',
       (r.hpi || {}).onset || '', (r.hpi || {}).cause || '',
       (r.hpi || {}).symptoms || '', (r.hpi || {}).relief || '',
       (r.hpi || {}).evolution || '', (r.hpi || {}).accompanying || ''
-    ].join('，');
-    const NEG_RE = /^(无|未|不|否认|没有|未见|未出现|无明显|无明|否认有)/;
-    const textAll = rawText
-      .split(/[，,。；;、\n]/)
-      .filter(clause => clause.trim() && !NEG_RE.test(clause.trim()))
-      .join('，');
+    ].join('。');
+    const textAll = positiveNarrative(rawText);
 
     const ccKeys = ['发热', '咳嗽', '咳痰', '咯血', '呼吸困难', '气促', '喘息', '胸闷', '胸痛',
       '心悸', '上腹痛', '腹痛', '转移性右下腹痛', '右上腹痛', '腹泻', '呕吐', '腹胀', '黑便',
@@ -24738,28 +24913,33 @@ const HINTS = (() => {
     if (traumaText && !/^(否认|无|未|没有|不)/.test(traumaText)) F.add('trauma:有');
 
     // 生命体征
+    // 有效值统一交给 GENERATOR.vitalNum 判断：它要求完整数字 + 在可信范围内。
+    // 原来四处都是 parseFloat，于是 T 999℃ 会在体格检查里写成「T ／℃」
+    // （buildVitals 已经挡了），却在诊断提示里给出 vital:tempUp，两边打架。
     const v = (r.pe || {}).vitals || {};
-    const t = parseFloat(v.temperature);
-    if (!isNaN(t)) {
-      if (t >= 37.3) F.add('vital:tempUp');
-      if (t <= 36) F.add('vital:tempDown');
+    const vital = k => (typeof GENERATOR !== 'undefined' && GENERATOR.vitalNum)
+      ? GENERATOR.vitalNum(v, k) : null;
+    const tv = vital('temperature');
+    if (tv) {
+      if (tv.num >= 37.3) F.add('vital:tempUp');
+      if (tv.num <= 36) F.add('vital:tempDown');
     }
-    const p = parseFloat(v.pulse);
-    if (!isNaN(p)) {
-      if (p > 100) F.add('vital:tachy');
-      if (p < 60) F.add('vital:brady');
+    const pv = vital('pulse');
+    if (pv) {
+      if (pv.num > 100) F.add('vital:tachy');
+      if (pv.num < 60) F.add('vital:brady');
     }
-    const rr = parseFloat(v.respiration);
-    if (!isNaN(rr) && rr > 20) F.add('vital:tachypnea');
-    const sbp = parseFloat(v.sbp), dbp = parseFloat(v.dbp);
-    if (!isNaN(sbp)) {
-      if (sbp >= 140) { F.add('vital:bpUp'); F.add('risk:htn'); }
-      if (sbp < 90) F.add('vital:bpDown');
+    const rv = vital('respiration');
+    if (rv && rv.num > 20) F.add('vital:tachypnea');
+    const sv = vital('sbp'), dv = vital('dbp');
+    if (sv) {
+      if (sv.num >= 140) { F.add('vital:bpUp'); F.add('risk:htn'); }
+      if (sv.num < 90) F.add('vital:bpDown');
     }
-    if (!isNaN(dbp) && dbp >= 90) F.add('vital:bpUp');
-    const hgt = parseFloat(v.height), wgt = parseFloat(v.weight);
-    if (!isNaN(hgt) && !isNaN(wgt) && hgt > 0) {
-      const bmi = wgt / Math.pow(hgt / 100, 2);
+    if (dv && dv.num >= 90) F.add('vital:bpUp');
+    const hv = vital('height'), wv = vital('weight');
+    if (hv && wv) {
+      const bmi = wv.num / Math.pow(hv.num / 100, 2);
       if (bmi >= 28) F.add('vital:bmiHigh');
       if (bmi < 18.5) F.add('vital:bmiLow');
     }
@@ -25005,18 +25185,43 @@ const APP = (() => {
   }
 
   /* ========================= 存储（委托给 core） ========================= */
+  //
+  // 写入锁：loadCurrent / loadList 一旦发现「key 在、但读不出来」，就把对应槽锁上，
+  // 之后任何写入都被最底层的 saveCurrent / saveList 挡回去。
+  // 为什么必须锁在最底层：自动保存（10 秒定时器）、beforeunload、事件委托里
+  // 那一堆「改完立刻 saveCurrent()」的调用点、普通保存按钮、导入合并……
+  // 只要有一处漏了，「空白病历覆盖掉损坏原文」就发生了，用户的旧病历彻底没了。
+  // 锁只能由用户明确操作解除：清除损坏槽从头写、或导入备份替换。
+  let currentSaveBlocked = false;
+  let listSaveBlocked = false;
+  let corruptCurrentRaw = '';
+  let corruptListRaw = '';
 
   function loadList() {
     const res = CORE.loadList(localStorage);
-    LIST = res.list;
-    if (!res.ok && res.corrupt) {
+    if (res.ok) {
+      LIST = res.list;
+      listSaveBlocked = false;
+      corruptListRaw = '';
+    } else if (res.corrupt) {
       // 关键：损坏时不覆盖原存档，提示用户先导出/备份
-      storageAlert = '本地病历列表读取失败，已保留原始数据未做修改。请勿在此状态下继续保存，建议联系技术支持或导出手工备份。';
+      LIST = res.list;
+      listSaveBlocked = true;
+      corruptListRaw = String(res.raw == null ? '' : res.raw);
+      storageAlert = '本地病历列表读取失败，已保留原始数据未做修改、也不再自动写回。'
+        + '请先导出原始数据留底，再决定是否新建列表。';
+    } else {
+      LIST = res.list;
     }
     return res;
   }
 
   function saveList() {
+    if (listSaveBlocked) {
+      storageAlert = '病历列表读不出来，已停止写入以免覆盖原数据。'
+        + '请先在下方导出原始数据或新建列表，再继续保存。';
+      return false;
+    }
     const ok = CORE.safeSet(localStorage, K.list, JSON.stringify(LIST));
     if (!ok) {
       // 保存失败必须让用户看见，不能假装已保存
@@ -25027,6 +25232,12 @@ const APP = (() => {
   }
 
   function saveCurrent() {
+    if (currentSaveBlocked) {
+      // 静默拒绝：这条路径会被定时器和 beforeunload 频繁触发，
+      // 每次都改 storageAlert 会把用户正在读的提示刷成别的内容。
+      // 告警在 loadCurrent 时已经写过一次，横幅会一直挂在那儿。
+      return false;
+    }
     if (!R) return false;
     const ok = CORE.safeSet(localStorage, K.current, JSON.stringify(R));
     if (!ok) storageAlert = '当前病历自动保存失败，存储空间可能已满。';
@@ -25035,11 +25246,43 @@ const APP = (() => {
 
   function loadCurrent() {
     const res = CORE.loadCurrent(localStorage, SCHEMA.emptyRecord, deptKeys());
-    if (res.ok && res.record) { R = res.record; return true; }
-    if (!res.ok) {
-      storageAlert = '正在编辑的病历无法读取（' + (res.reason || '存档损坏') + '），已为你新建空白病历，原数据保留未动。';
+    if (res.ok) {
+      if (res.record) { R = res.record; }
+      currentSaveBlocked = false;
+      corruptCurrentRaw = '';
+      return !!res.record;
     }
+    // res.corrupt：不是「没有存档」，是「有存档但读不出来」。这两种必须分开，
+    // 早先只用一个真假值表示，导致损坏时被当成第一次使用，空白病历直接写回去。
+    currentSaveBlocked = true;
+    corruptCurrentRaw = String(res.raw == null ? '' : res.raw);
+    storageAlert = '正在编辑的病历无法读取（' + (res.reason || '存档损坏') + '）。'
+      + '原数据保留未动，自动保存已暂停——当前编辑的内容尚未写入本机。'
+      + '请先导出原始数据留底，再选择「新建空白病历」。';
     return false;
+  }
+
+  // 用户明确确认后的解锁路径：清掉损坏槽、开始新病历。
+  // 调用点会先弹 confirm 并把原始字符串给用户下载，所以这里不再二次确认。
+  function discardCorruptCurrent() {
+    if (!currentSaveBlocked) return false;
+    try { localStorage.removeItem(K.current); } catch (e) { /* 删不掉也不能把锁解开 */ }
+    currentSaveBlocked = false;
+    corruptCurrentRaw = '';
+    R = SCHEMA.emptyRecord();
+    if (!R.basic.recordDate) R.basic.recordDate = todayStr();
+    storageAlert = '';
+    return saveCurrent();
+  }
+
+  function discardCorruptList() {
+    if (!listSaveBlocked) return false;
+    try { localStorage.removeItem(K.list); } catch (e) { /* 同上 */ }
+    listSaveBlocked = false;
+    corruptListRaw = '';
+    LIST = [];
+    storageAlert = '';
+    return saveList();
   }
 
   function loadSettings() {
@@ -26820,8 +27063,16 @@ const APP = (() => {
 
     // 存储异常必须让用户看到，不能静默
     const banner = storageAlert
-      ? `<div class="storage-alert" id="storageAlert">⚠️ ${esc(storageAlert)}
-           <button type="button" class="alert-x" data-dismiss-alert>知道了</button></div>`
+      ? `<div class="storage-alert" id="storageAlert">
+           <div class="alert-msg">⚠️ ${esc(storageAlert)}</div>
+           <div class="alert-btns">
+             ${currentSaveBlocked ? '<button type="button" class="alert-act" data-export-corrupt="current">导出原始损坏数据</button>' : ''}
+             ${currentSaveBlocked ? '<button type="button" class="alert-act" data-discard-corrupt="current">新建空白病历</button>' : ''}
+             ${listSaveBlocked ? '<button type="button" class="alert-act" data-export-corrupt="list">导出原始列表</button>' : ''}
+             ${listSaveBlocked ? '<button type="button" class="alert-act" data-discard-corrupt="list">新建空列表</button>' : ''}
+             <button type="button" class="alert-x" data-dismiss-alert>知道了</button>
+           </div>
+         </div>`
       : '';
     $('#content').innerHTML = banner + body;
 
@@ -27060,7 +27311,7 @@ const APP = (() => {
 
     // 点击事件（委托）
     document.addEventListener('click', e => {
-      const t = e.target.closest('[data-seg],[data-check],[data-ros],[data-rosneg],[data-pequick],[data-pecheck],[data-pall],[data-act],[data-addhint],[data-auxdel],[data-diagdel],[data-jump],[data-dismiss-alert],[data-view],[data-checkjump],[data-arrdel],[data-arrstrdel],[data-focusadd],[data-focusdel],[data-tpl]');
+      const t = e.target.closest('[data-seg],[data-check],[data-ros],[data-rosneg],[data-pequick],[data-pecheck],[data-pall],[data-act],[data-addhint],[data-auxdel],[data-diagdel],[data-jump],[data-dismiss-alert],[data-export-corrupt],[data-discard-corrupt],[data-view],[data-checkjump],[data-arrdel],[data-arrstrdel],[data-focusadd],[data-focusdel],[data-tpl]');
       if (!t) return;
       const ds = t.dataset;
 
@@ -27306,11 +27557,37 @@ const APP = (() => {
         return;
       }
 
-      // 关闭存储告警
+      // 关闭存储告警（只关横幅，不解锁——锁只能靠明确的重建动作解除）
       if (ds.dismissAlert !== undefined) {
         storageAlert = '';
         const el = document.getElementById('storageAlert');
         if (el) el.remove();
+        return;
+      }
+
+      // 导出损坏的原始数据：原文逐字节给出去，不做任何加工
+      if (ds.exportCorrupt !== undefined) {
+        const which = ds.exportCorrupt === 'list' ? 'list' : 'current';
+        const raw = which === 'list' ? corruptListRaw : corruptCurrentRaw;
+        if (!raw) { toast('没有可导出的原始数据'); return; }
+        const name = which === 'list'
+          ? `损坏的病历列表_原始数据_${SCHEMA.todayStr()}.txt`
+          : `损坏的当前病历_原始数据_${SCHEMA.todayStr()}.txt`;
+        downloadBlob(raw, name, 'text/plain');
+        toast('原始数据已导出，请留好这份文件');
+        return;
+      }
+
+      // 明确确认后清除损坏槽、解除写入锁
+      if (ds.discardCorrupt !== undefined) {
+        const which = ds.discardCorrupt === 'list' ? 'list' : 'current';
+        const ok = confirm(which === 'list'
+          ? '新建空列表？损坏的原始列表会被清除，且无法恢复。建议先点「导出原始列表」留底。'
+          : '新建空白病历？损坏的原始病历会被清除，且无法恢复。建议先点「导出原始损坏数据」留底。');
+        if (!ok) return;
+        if (which === 'list') discardCorruptList(); else discardCorruptCurrent();
+        toast(which === 'list' ? '已新建空列表' : '已新建空白病历，可以开始写了');
+        render();
         return;
       }
 
@@ -27725,14 +28002,32 @@ const APP = (() => {
   function saveToLibrary() {
     if (!R) return false;
     loadList();
+    // 列表读不出来、或当前病历读不出来，一律什么都不写。
+    // 否则会「列表写不进去、当前病历写进去了」（或反过来），用户看到的是
+    // 「保存失败」，实际上数据已经被改了一半——下次打开就分不清哪份是新的。
+    // 宁可什么都不动，也不留一个半截状态。
+    if (listSaveBlocked || currentSaveBlocked) {
+      storageAlert = listSaveBlocked
+        ? '病历列表读不出来，已停止写入以免覆盖原数据。这次保存没有写入任何内容，'
+          + '当前编辑的病历也保持原样。请先导出原始数据或新建列表。'
+        : '当前病历读不出来，已停止写入以免覆盖损坏的原始数据。这次保存没有写入任何内容。'
+          + '请先导出原始数据，或确认后新建空白病历。';
+      return false;
+    }
+    const before = { id: R.id, updatedAt: R.updatedAt };
     const res = CORE.upsertRecord(LIST, R, new Date().toISOString());
     LIST = res.list;
     R.id = res.id;
     R.updatedAt = LIST.find(x => x.id === res.id).updatedAt;
     const okList = saveList();
     const okCur = saveCurrent();
-    if (!okList) return false;
-    if (okCur) storageAlert = '';
+    if (!okList || !okCur) {
+      // 库没写成，内存里的 id 也退回去，免得下次保存把这份当成另一份
+      R.id = before.id;
+      R.updatedAt = before.updatedAt;
+      return false;
+    }
+    storageAlert = '';
     return true;
   }
 
@@ -27787,6 +28082,32 @@ const APP = (() => {
     input.click();
   }
 
+  /**
+   * 把导入结果落盘，返回 { ok, res }。
+   * 单独抽出来是因为「合并」和「替换」对写入锁的态度相反：
+   *   · 合并要读现有列表，列表读不出来时读到的空数组会覆盖掉原来的记录 → 一律不写
+   *   · 替换是用户明确选择的破坏行为，是列表损坏时唯一允许覆盖的入口 → 先解锁再写
+   */
+  function applyImport(mode, records) {
+    loadList();
+    if (mode === 'merge') {
+      if (listSaveBlocked) {
+        storageAlert = '病历列表读不出来，已停止合并导入以免覆盖原数据。'
+          + '这次导入没有写入任何内容。请先导出原始列表或新建列表。';
+        return { ok: false, blocked: true };
+      }
+      const res = CORE.mergeImport(LIST, records);
+      LIST = res.list;
+      return { ok: saveList(), res };
+    }
+    if (listSaveBlocked) {
+      listSaveBlocked = false;
+      corruptListRaw = '';
+    }
+    LIST = CORE.replaceImport(records);
+    return { ok: saveList(), replaced: LIST.length };
+  }
+
   /** 导入预览：显示条数与摘要，让用户选择合并或替换 */
   function previewImport(parsed) {
     const rows = parsed.records.map(r => {
@@ -27814,19 +28135,20 @@ const APP = (() => {
       wrap.addEventListener('click', ev => {
         const mode = ev.target.dataset.import;
         if (!mode) return;
-        loadList();
-        if (mode === 'merge') {
-          const res = CORE.mergeImport(LIST, parsed.records);
-          LIST = res.list;
-          saveList();
-          wrap.remove();
-          toast(`已导入：新增 ${res.added}，更新 ${res.updated}，跳过 ${res.skipped}`);
-        } else {
+        if (mode === 'replace') {
           if (!confirm('替换会清空当前列表中的全部病历，确定继续？')) return;
-          LIST = CORE.replaceImport(parsed.records);
-          saveList();
-          wrap.remove();
-          toast(`已替换为导入的 ${LIST.length} 份病历`);
+          // 列表已损坏时多问一句，并提示先留底
+          if (listSaveBlocked && !confirm('现有列表已经读不出来，替换会连原始数据一起清掉。'
+            + '建议先点顶部横幅里的「导出原始列表」留底。仍要继续？')) return;
+        }
+        const out = applyImport(mode, parsed.records);
+        wrap.remove();
+        if (mode === 'merge') {
+          toast(out.ok
+            ? `已导入：新增 ${out.res.added}，更新 ${out.res.updated}，跳过 ${out.res.skipped}`
+            : '导入没有写入，请查看页面顶部提示');
+        } else {
+          toast(out.ok ? `已替换为导入的 ${out.replaced} 份病历` : '替换没有写入，请查看页面顶部提示');
         }
         openList();
       });
@@ -27942,7 +28264,17 @@ const APP = (() => {
       // 步骤导航：界面走 stepbar 点击，测试直接断言状态判定
       stepState,
       openNav,
-      navRowsHtml: () => navRowsHtml()
+      navRowsHtml: () => navRowsHtml(),
+      // 存储写入锁：测试要能直接触发自动保存、普通保存，并读到锁状态
+      saveCurrent, saveWithFeedback, saveList,
+      currentSaveBlocked: () => currentSaveBlocked,
+      listSaveBlocked: () => listSaveBlocked,
+      corruptCurrentRaw: () => corruptCurrentRaw,
+      corruptListRaw: () => corruptListRaw,
+      storageAlertText: () => storageAlert,
+      discardCorruptCurrent, discardCorruptList,
+      // 导入合并/替换的落盘入口：列表损坏时合并必须整单不写，替换要能解锁
+      applyImport
     }
   };
 })();

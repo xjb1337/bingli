@@ -502,6 +502,14 @@ const RECORD_CORE = (() => {
 
   /**
    * 载入当前正在编辑的病历，失败时返回 reason 供界面提示
+   *
+   * 三种结果必须分得开，界面靠它们决定「能不能写回」：
+   *   { ok:true, fresh:true }  —— key 根本不存在（第一次用），写回去是安全的
+   *   { ok:true, record }      —— 读出来了
+   *   { ok:false, corrupt:true, raw } —— key 在、但读不出来，raw 是原文，
+   *                                      界面要留着它给用户导出，并且停止写入
+   * 早先只用 ok 一个布尔值，调用方分不清「没有存档」和「存档坏了」，
+   * 于是空白病历被当成正常的空存档保存，把损坏的原文整个覆盖掉。
    */
   function loadCurrent(storage, emptyRecord, validDeptKeys) {
     const rawText = storage.getItem(STORAGE_KEYS.current);
@@ -510,12 +518,12 @@ const RECORD_CORE = (() => {
     try {
       parsed = JSON.parse(rawText);
     } catch (e) {
-      return { ok: false, record: null, corrupt: true, reason: '正在编辑的病历存档已损坏' };
+      return { ok: false, record: null, corrupt: true, raw: rawText, reason: '正在编辑的病历存档已损坏' };
     }
     try {
       return { ok: true, record: normalizeRecord(parsed, emptyRecord, validDeptKeys) };
     } catch (e) {
-      return { ok: false, record: null, corrupt: true, reason: e.message };
+      return { ok: false, record: null, corrupt: true, raw: rawText, reason: e.message };
     }
   }
 

@@ -352,20 +352,20 @@ E:\bingli\
 
 ```powershell
 node build.js                      # 先构建
-node --test tests/*.test.cjs       # 全部单元测试（505 项，约 3 秒）
+node --test tests/*.test.cjs       # 全部单元测试（554 项，约 4 秒）
 npm run coverage                   # 只看核心逻辑的覆盖率
 ```
 
 | 测试文件 | 覆盖内容 |
 |---|---|
 | `tests/core.test.cjs` | 存档迁移、损坏保护、原型污染、导入导出、合并策略、科室名容错（50 项） |
-| `tests/generator.test.cjs` | 14 个科室章节完整性、专科查体隔离、婚育史分支、否定表述、质控规则（65 项） |
+| `tests/generator.test.cjs` | 14 个科室章节完整性、专科查体隔离、婚育史分支、否定作用域（含「发热但无咳嗽」「伴无咳嗽」「发热无咳嗽」）、质控规则（79 项） |
 | `tests/generator.scoring.test.cjs` | 评分表对齐：腹部次序、父项让位、SOAP、出院记录、hints 别名与旧存档兼容（29 项） |
 | `tests/special-pe.test.cjs` | 勾选制语义、专科去重、140 个配置扫残句（82 项） |
 | `tests/textbook-align.test.cjs` | 对齐《诊断学》第10版：63 个书写项目无遗漏、腹部次序、一般状况词序、默认描述不许编数字（14 项） |
 | `tests/textbook-record.test.cjs` | 病历书写规范：一般状况连写、生育史四项式、婚姻史、家族史、诊断主次与签名（26 项） |
 | `tests/abnormal-pe.test.cjs` | 阳性体征识别的 42 条手工真值表（每条注明为何应为阳性/阴性） |
-| `tests/app.test.cjs` | 沙箱内跑真实产物：保存失败可见、损坏不覆盖、11 步流程、步骤持久化（28 项） |
+| `tests/app.test.cjs` | 沙箱内跑真实产物：保存失败可见、损坏存档写入锁（自动保存/卸载/普通保存/导入合并都绕不过）、显式恢复、11 步流程、步骤持久化（42 项） |
 | `tests/review-regression.test.cjs` | 独立评审发现的 7 类缺陷的回归防线，防止修复被改回（11 项） |
 | `tests/validate.test.cjs` | 「写了肯定不对」类校验：生命体征范围、血压写反、日期真实性、科室与年龄、矛盾提示的准确率（21 项） |
 | `tests/templates.test.cjs` | 模板病例：产物与源文件同步、不写身份与体征、查体值必须在可选项里、只补空白、科室不串（17 项） |
@@ -373,6 +373,7 @@ npm run coverage                   # 只看核心逻辑的覆盖率
 | `tests/depth.test.cjs` | 问诊深度自查：该报的报、不该报的不许报（41 条反例）、判据边界、笔记里的真实病例（47 项） |
 | `tests/field-reach.test.cjs` | 字段落地：填进去的字必须真出现在病历里（男性子女情况、婚姻史缺状况、时长写正文、月经生育史分节、切科室不残留）（19 项） |
 | `tests/psychiatry.test.cjs` | 精神科：科室路由、MSE 十项勾哪写哪、切科室不残留、病前性格与应激事件、新增 ROS 症状（20 项） |
+| `tests/data-integrity.test.cjs` | 同一条数字在不同章节说法一致：生命体征有效值口径、年龄单位（日龄）、住院天数的严格日期（21 项） |
 | `tests/artifact.test.cjs` | 产物与源码逐行比对，防止改了源码忘记重新打包（16 项） |
 
 浏览器端到端（需要图形界面，可选）：
@@ -392,7 +393,7 @@ node test/samples.js          # 重新生成示例病历
 **审计工具**（不只是「能不能用」，而是「哪里看着不对」）：
 
 ```powershell
-node tools/verify-ui-audit.js     # 空病历 12 页：对比度、溢出、文案、边界输入
+node tools/verify-ui-audit.js     # 空病历 11 页：对比度、溢出、文案、边界输入
 node tools/verify-touch-data.js   # 有数据态：量那些只有填了内容才出现的按钮
 node tools/check-field-reach.js   # 85 个字段逐个填值，看有没有「填了等于没填」
 node tools/check-top1.js          # 56 份模板的诊断提示 top1 命中率

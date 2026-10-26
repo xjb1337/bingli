@@ -1232,21 +1232,38 @@ footer .btn:disabled {
   font-size: calc(13px * var(--fs-scale));
   line-height: 1.55;
   display: flex;
-  align-items: flex-start;
-  gap: 10px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
 }
 
+/* 文案和按钮各占一行：412px 屏上四个按钮横着放进同一行会挤成一团，
+   换行后每个按钮仍然要够到 44px 的点击高度 */
+.storage-alert .alert-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.storage-alert .alert-act,
 .storage-alert .alert-x {
-  margin-left: auto;
   flex-shrink: 0;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid #d93025;
   background: #fff;
   color: #a50e0e;
   border-radius: 6px;
-  padding: 3px 8px;
+  padding: 0 12px;
   font-size: calc(12px * var(--fs-scale));
   cursor: pointer;
   font-family: inherit;
+}
+
+.storage-alert .alert-x {
+  margin-left: auto;
 }
 
 /* ===========================================================
@@ -1585,7 +1602,8 @@ footer .btn:disabled {
   .tag-score { background: #3c4043; color: var(--gray-5); }
 
   .storage-alert { background: var(--score-bad-bg); border-color: var(--score-bad); color: var(--score-bad); }
-  .storage-alert .alert-x { background: #2c2c2c; border-color: var(--score-bad); color: var(--score-bad); }
+  .storage-alert .alert-x,
+  .storage-alert .alert-act { background: #2c2c2c; border-color: var(--score-bad); color: var(--score-bad); }
 
   .live-preview { background: var(--blue-light); color: var(--blue-dark); }
   .hint-note { background: #2c2c2c; }

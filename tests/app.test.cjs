@@ -121,6 +121,10 @@ function boot(opts = {}) {
   const document = makeFakeDocument();
   const toasts = [];
   const confirms = [];
+  // 定时器与 window 事件回调必须能手动触发，否则「自动保存」「关闭页面前保存」
+  // 这两条最可能覆盖损坏存档的路径在测试里根本走不到。
+  const intervals = [];
+  const timeouts = [];
 
   const storage = {
     getItem: k => (memory.has(k) ? memory.get(k) : null),
@@ -151,9 +155,9 @@ function boot(opts = {}) {
     isNaN,
     parseFloat,
     parseInt,
-    setTimeout: () => 1,
+    setTimeout: fn => { timeouts.push(fn); return timeouts.length; },
     clearTimeout: () => {},
-    setInterval: () => 1,
+    setInterval: fn => { intervals.push(fn); return intervals.length; },
     clearInterval: () => {},
     requestAnimationFrame: fn => { try { fn(); } catch (e) {} return 1; },
     scrollTo: () => {},
@@ -196,6 +200,10 @@ function boot(opts = {}) {
     storage,
     toasts,
     confirms,
+    /** 定时器回调（自动保存用），测试里手动触发 */
+    intervals,
+    /** window 上的事件回调（beforeunload 用），测试里手动触发 */
+    fireWindow: type => (document._listeners.get('win::' + type) || []).forEach(fn => fn({})),
     /** 记录 CSS 变量 --fs-scale 的最终值 */
     fontScale: document._fontScale.value,
     /** 直接执行表达式（用于取内部状态） */
@@ -279,6 +287,172 @@ test('损坏的病历列表不被覆盖', () => {
   const app = boot({ initial: { [KEYS.list]: corrupt } });
   app.run('APP._test.loadList()');
   assert.equal(app.memory.get(KEYS.list), corrupt);
+});
+
+test('损坏的当前病历：自动保存不会把它冲掉', () => {
+  // 启动时读到损坏数据只是第一道关。真正危险的是之后那条 setInterval——
+  // 它每隔十秒调一次 saveCurrent()，而那时 R 已经是一份空白病历，
+  // 一次回调就能把用户的原始数据换成 {"basic":{...}}，且毫无提示。
+  const corrupt = '{"broken": [';
+  const app = boot({ initial: { [KEYS.current]: corrupt } });
+  assert.ok(app.intervals.length > 0, '应注册了自动保存定时器');
+  app.intervals.forEach(fn => fn());
+  assert.equal(app.memory.get(KEYS.current), corrupt, '自动保存不应覆盖损坏数据');
+});
+
+test('损坏的当前病历：关闭页面前的保存不会把它冲掉', () => {
+  const corrupt = '{"broken": [';
+  const app = boot({ initial: { [KEYS.current]: corrupt } });
+  app.fireWindow('beforeunload');
+  assert.equal(app.memory.get(KEYS.current), corrupt, 'beforeunload 不应覆盖损坏数据');
+});
+
+test('损坏的当前病历：用户点保存也不算成功，原始数据不被替换', () => {
+  const corrupt = '{"broken": [';
+  const app = boot({ initial: { [KEYS.current]: corrupt } });
+  app.run('APP.getRecord().basic.name = "新填的"');
+  const ok = app.run('APP._test.saveWithFeedback()');
+  assert.equal(ok, false, '写入被锁时必须返回失败，不能假装已保存');
+  assert.equal(app.memory.get(KEYS.current), corrupt, '普通保存也不许覆盖损坏数据');
+  const toastText = app.el('#toast').textContent;
+  assert.match(toastText, /失败/, '应提示保存失败');
+});
+
+test('写入锁期间明确告诉用户：当前编辑的内容还没存下来', () => {
+  const corrupt = '{"broken": [';
+  const app = boot({ initial: { [KEYS.current]: corrupt } });
+  const html = app.document.querySelector('#content').innerHTML;
+  assert.match(html, /未写入|尚未保存|没有保存|未持久化/, '必须说清编辑内容还没落盘');
+});
+
+test('有效存档时自动保存照常工作，没有被锁死', () => {
+  const r = JSON.parse(JSON.stringify(app_schema().emptyRecord()));
+  r.basic.name = '张三';
+  r.basic.chiefComplaint = '咳嗽';
+  const app = boot({ initial: { [KEYS.current]: JSON.stringify(r) } });
+  app.run('APP.getRecord().basic.chiefComplaint = "改过的主诉"');
+  app.intervals.forEach(fn => fn());
+  const saved = app.stored(KEYS.current);
+  assert.equal(saved.basic.chiefComplaint, '改过的主诉', '正常存档应能自动保存');
+});
+
+test('根本没有当前病历（第一次打开）时，自动保存照常写入', () => {
+  const app = boot();
+  app.run('APP.getRecord().basic.name = "新病人"');
+  app.intervals.forEach(fn => fn());
+  const saved = app.stored(KEYS.current);
+  assert.equal(saved.basic.name, '新病人', '全新的病历不该被锁');
+});
+
+test('用户明确清除损坏存档后解除写入锁，新数据可以保存', () => {
+  const corrupt = '{"broken": [';
+  const app = boot({ initial: { [KEYS.current]: corrupt } });
+  app.run('APP._test.discardCorruptCurrent()');
+  assert.notEqual(app.memory.get(KEYS.current), corrupt, '确认清除后才允许覆盖');
+  app.run('APP.getRecord().basic.name = "重新开始"');
+  app.intervals.forEach(fn => fn());
+  const saved = app.stored(KEYS.current);
+  assert.equal(saved.basic.name, '重新开始', '解锁后自动保存应恢复');
+});
+
+test('损坏的病历列表：普通保存不会把原始列表冲成空数组', () => {
+  // saveToLibrary() 里先 loadList()，损坏时 LIST 变成 []，
+  // 接着 saveList() 就把这个 [] 写回去——用户几十份病历一次点击全没了。
+  const corrupt = '[{"id": broken';
+  const app = boot({ initial: { [KEYS.list]: corrupt } });
+  app.run('APP.getRecord().basic.name = "张三"');
+  const ok = app.run('APP._test.saveToLibrary()');
+  assert.equal(ok, false, '列表写入被锁时整次保存都算失败');
+  assert.equal(app.memory.get(KEYS.list), corrupt, '原始列表必须原样保留');
+});
+
+test('损坏列表时不许出现「只改了一半」的假成功：当前病历也不写', () => {
+  const corrupt = '[{"id": broken';
+  const app = boot({ initial: { [KEYS.list]: corrupt } });
+  app.run('APP.getRecord().basic.name = "张三"');
+  app.run('APP._test.saveToLibrary()');
+  assert.equal(app.memory.get(KEYS.current), undefined, '列表失败时不应单独写当前病历');
+});
+
+test('损坏原文被原样留着手边，用户可以先导出再决定', () => {
+  // 恢复路径的第一半：把原始的损坏字符串原样交出去，一个字都不加工。
+  // 只有用户确认清除，才允许丢（下一条测试）。
+  const corrupt = '{"broken": [';
+  const app = boot({ initial: { [KEYS.current]: corrupt } });
+  assert.equal(app.run('APP._test.currentSaveBlocked()'), true);
+  assert.equal(app.run('APP._test.corruptCurrentRaw()'), corrupt, '导出的必须是原始字节');
+  assert.match(app.run('APP._test.storageAlertText()'), /导出/, '横幅里要告诉用户能导出');
+});
+
+test('损坏列表的原文同样原样留着', () => {
+  // 列表是懒加载的：启动时不读，第一次用到（点「病历」/保存）才读。
+  // 读坏的那一刻同样要留原文、上锁。
+  const corrupt = '[{"id": broken';
+  const app = boot({ initial: { [KEYS.list]: corrupt } });
+  app.run('APP._test.loadList()');
+  assert.equal(app.run('APP._test.listSaveBlocked()'), true);
+  assert.equal(app.run('APP._test.corruptListRaw()'), corrupt);
+  assert.equal(app.memory.get(KEYS.list), corrupt);
+});
+
+test('损坏列表时合并导入整单不写，原始列表逐字节不变', () => {
+  // 合并要读现有列表。列表损坏时 loadList() 给的是空数组，
+  // 若照常合并再写回，用户原有几十份病历就被「空 + 导入的几份」替掉了。
+  const corrupt = '[{"id": broken';
+  const app = boot({ initial: { [KEYS.list]: corrupt } });
+  const out = app.run(`(function () {
+    const r = SCHEMA.emptyRecord();
+    r.basic.name = '导入进来的';
+    const bundle = RECORD_CORE.buildExport([{ id: 'imp-' + r.basic.name, updatedAt: new Date().toISOString(), data: r }], new Date().toISOString());
+    const parsed = RECORD_CORE.parseImport(JSON.stringify(bundle), SCHEMA.emptyRecord, SCHEMA.DEPARTMENTS.map(d => d.key));
+    return APP._test.applyImport('merge', parsed.records);
+  })()`);
+  assert.equal(out.ok, false, '合并导入必须报告失败');
+  assert.equal(out.blocked, true, '应标记为被写入锁挡下，好让调用方区分失败原因');
+  assert.equal(app.memory.get(KEYS.list), corrupt, '原始列表必须原样保留');
+  assert.match(app.run('APP._test.storageAlertText()'), /没有写入|停止合并/);
+});
+
+test('损坏列表时「替换全部」是用户明确确认后才允许的覆盖入口', () => {
+  // 替换是破坏性操作，也是列表损坏时唯一能走出来的路：
+  // 用户确认后应解除锁定并真的写进去。
+  const corrupt = '[{"id": broken';
+  const app = boot({ initial: { [KEYS.list]: corrupt } });
+  const out = app.run(`(function () {
+    const r = SCHEMA.emptyRecord();
+    r.basic.name = '替换进来的';
+    const bundle = RECORD_CORE.buildExport([{ id: 'imp-' + r.basic.name, updatedAt: new Date().toISOString(), data: r }], new Date().toISOString());
+    const parsed = RECORD_CORE.parseImport(JSON.stringify(bundle), SCHEMA.emptyRecord, SCHEMA.DEPARTMENTS.map(d => d.key));
+    return APP._test.applyImport('replace', parsed.records);
+  })()`);
+  assert.equal(out.ok, true, '替换应当写入成功');
+  assert.equal(out.replaced, 1);
+  const saved = JSON.parse(app.memory.get(KEYS.list));
+  assert.equal(saved.length, 1);
+  assert.equal(saved[0].data.basic.name, '替换进来的');
+  assert.equal(app.run('APP._test.listSaveBlocked()'), false, '替换后应解除列表写入锁');
+});
+
+test('正常列表上合并导入照常工作，现有病历不被丢掉', () => {
+  const SCHEMA = app_schema();
+  const existing = SCHEMA.emptyRecord();
+  existing.basic.name = '原来就有的';
+  existing.id = 'keep-me';
+  existing.updatedAt = '2020-01-01T00:00:00.000Z';
+  // 列表里每一条的真实形状是 { id, updatedAt, schemaVersion, basic, data }
+  const entry = { id: 'keep-me', updatedAt: existing.updatedAt, basic: existing.basic, data: existing };
+  const app = boot({ initial: { [KEYS.list]: JSON.stringify([entry]) } });
+  const out = app.run(`(function () {
+    const r = SCHEMA.emptyRecord();
+    r.basic.name = '新导入的';
+    const bundle = RECORD_CORE.buildExport([{ id: 'imp-' + r.basic.name, updatedAt: new Date().toISOString(), data: r }], new Date().toISOString());
+    const parsed = RECORD_CORE.parseImport(JSON.stringify(bundle), SCHEMA.emptyRecord, SCHEMA.DEPARTMENTS.map(d => d.key));
+    return APP._test.applyImport('merge', parsed.records);
+  })()`);
+  assert.equal(out.ok, true);
+  assert.equal(out.res.added, 1);
+  const saved = JSON.parse(app.memory.get(KEYS.list));
+  assert.deepEqual(saved.map(x => x.data.basic.name).sort(), ['新导入的', '原来就有的'].sort());
 });
 
 /* ======================= 载入与规范化 ======================= */
