@@ -357,6 +357,44 @@ test('沙箱内不发起网络请求', () => {
   assert.ok(app.document.querySelector('#content').innerHTML.length > 0);
 });
 
+test('录入步骤顺序与病历章节顺序一致：既往史在系统回顾之前', () => {
+  const app = boot();
+  // vm 沙箱里的数组 prototype 与宿主不同，deepStrictEqual 会因原型不等而失败，
+  // 所以先转成宿主数组再比。
+  const keys = Array.from(app.run('APP.STEPS.map(s => s.key)'));
+  // 用户反馈过「顺序有误，应该先既往史再系统回顾」。
+  // 《诊断学》第10版的住院病历书写顺序也是既往史在前——系统回顾是
+  // 既往史的补充追问，排在它后面才讲得通。写死整个数组，是防止以后
+  // 有人改步骤时只顾一处、把顺序又改乱。
+  assert.deepEqual(keys, [
+    'basic', 'hpi', 'pmh', 'ros', 'personal', 'marriage',
+    'family', 'pe', 'aux', 'summary', 'check', 'output'
+  ]);
+});
+
+test('录入步骤顺序与 SECTION_ORDER 的病史部分一一对应', () => {
+  // 步骤顺序如果和生成病历的章节顺序不一致，学生就会在「系统回顾」页
+  // 填一个病历里排在「既往史」前面的东西，翻回来对不上号。
+  const { bootGlobals } = require('./bootstrap.cjs');
+  const G = bootGlobals().GENERATOR;
+  const sec = Array.from(G.SECTION_ORDER);
+  const app = boot();
+  const keys = Array.from(app.run('APP.STEPS.map(s => s.key)'));
+
+  const map = {
+    basic: '一般项目', hpi: '现病史', pmh: '既往史', ros: '系统回顾',
+    personal: '个人史', marriage: '婚姻史', family: '家庭史',
+    pe: '体格检查', aux: '实验室检查', summary: '摘要'
+  };
+  const pairs = keys.filter(k => map[k]).map(k => [k, sec.indexOf(map[k])]);
+  const idx = pairs.map(p => p[1]);
+  assert.ok(idx.every(i => i >= 0), `章节名都要能在 SECTION_ORDER 里找到：${JSON.stringify(pairs)}`);
+  // 用字符串比而不是 deepEqual：bootGlobals 加载的模块与本测试不在同一个 realm，
+  // 数组原型不同，deepStrictEqual 会因原型不等而报「看起来一模一样」的错。
+  const sorted = [...idx].sort((a, b) => a - b);
+  assert.equal(idx.join(','), sorted.join(','), `步骤顺序应与章节顺序一致，实际：${JSON.stringify(pairs)}`);
+});
+
 /* ======================= 记住上次停留的步骤 ======================= */
 
 test('stepIndexOf 认得出步骤键，认不出来的一律回第 0 步', () => {
@@ -395,4 +433,83 @@ test('切换步骤后立即写回设置，生成页不记', () => {
   app.run('APP._test.gotoStep("output")');
   // 生成页只是输出，记它等于下次打开先看一屏只读的文字
   assert.equal(app.stored(KEYS.settings).lastStep, 'summary');
+});
+
+/* ======================= 步骤导航 ======================= */
+
+test('步骤导航列出全部 12 步，且当前步被标出来', () => {
+  const app = boot();
+  app.run('APP._test.gotoStep("pmh")');
+  const html = app.run('APP._test.navRowsHtml()');
+  assert.match(html, /基本情况/);
+  assert.match(html, /既往史/);
+  assert.match(html, /系统回顾/);
+  assert.match(html, /生成病历/);
+  const rows = (html.match(/data-navstep=/g) || []).length;
+  assert.equal(rows, 12, '12 个步骤每步一行');
+  assert.match(html, /nav-row cur[^>]*data-navstep="pmh"/, '当前步要带 cur 类');
+});
+
+test('步骤导航每行显示填写状态，三种状态各有自己的样式类', () => {
+  const app = boot();
+  app.run('APP._test.gotoStep("basic")');
+  const html = app.run('APP._test.navRowsHtml()');
+  assert.match(html, /st-empty/, '空病历应有「还没填」');
+  assert.match(html, /还没填/);
+});
+
+test('某个步骤填了之后，导航里那一行变成「已填」', () => {
+  const app = boot();
+  app.run(`
+    const r = APP.getRecord();
+    r.basic.name = '张三'; r.basic.gender = '男'; r.basic.age = '45';
+    r.basic.chiefComplaint = '上腹痛';
+  `);
+  assert.equal(app.run('APP._test.stepState("basic")'), 'done');
+  assert.equal(app.run('APP._test.stepState("hpi")'), 'empty');
+});
+
+test('现病史只填起病时间算「填了一部分」，症状特点也写了才算已填', () => {
+  const app = boot();
+  app.run('APP.getRecord().hpi.onset = "3天前"');
+  assert.equal(app.run('APP._test.stepState("hpi")'), 'part');
+  app.run('APP.getRecord().hpi.symptoms = "中上腹持续性隐痛"');
+  assert.equal(app.run('APP._test.stepState("hpi")'), 'done');
+});
+
+test('体格检查一项都没勾时算空，勾了一大半才算已填', () => {
+  const app = boot();
+  assert.equal(app.run('APP._test.stepState("pe")'), 'empty');
+  // 勾 3 项：远不到 60%，仍是「填了一部分」
+  app.run(`
+    SCHEMA.setPeChecked(APP.getRecord(), 'general', 'development', true);
+    SCHEMA.setPeChecked(APP.getRecord(), 'general', 'nutrition', true);
+    SCHEMA.setPeChecked(APP.getRecord(), 'general', 'conscious', true);
+  `);
+  assert.equal(app.run('APP._test.stepState("pe")'), 'part');
+});
+
+test('点导航里的行会跳到对应步骤', () => {
+  const app = boot();
+  app.run('APP._test.gotoStep("basic")');
+  // 沙箱里的 closest 是桩，点击链路交给真机 E2E 覆盖；
+  // 这里验证的是「导航里确实有 family 这一行，且它的 key 与 gotoStep 认的键一致」。
+  const html = app.run('APP._test.navRowsHtml()');
+  assert.match(html, /data-navstep="family"/);
+  app.run('APP._test.gotoStep("family")');
+  assert.equal(app.run('APP._test.getStepKey()'), 'family');
+});
+
+test('导航里「自查」「生成」两步不显示任何状态——它们没有内容多少这回事', () => {
+  const app = boot();
+  // 这两步不是「录入」步骤。给它们标「填了一部分」会让人以为还有东西没填，
+  // 标「已填」又像是做完了一项检查。状态是 none，导航里整个角标不渲染。
+  assert.equal(app.run('APP._test.stepState("check")'), 'none');
+  assert.equal(app.run('APP._test.stepState("output")'), 'none');
+  const html = app.run('APP._test.navRowsHtml()');
+  const rows = html.split('data-navstep="');
+  const checkRow = rows.find(r => r.startsWith('check"'));
+  const outRow = rows.find(r => r.startsWith('output"'));
+  assert.ok(checkRow && !/nav-state/.test(checkRow), '自查那行不该有状态角标');
+  assert.ok(outRow && !/nav-state/.test(outRow), '生成那行不该有状态角标');
 });

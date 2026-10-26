@@ -102,6 +102,26 @@ header {
 .stepbar .title { font-weight: 600; color: var(--blue); }
 .stepbar .num { margin-left: auto; color: var(--gray-4); }
 
+/* 目录入口：整条 stepbar 都是热区（见 app.js 的绑定），
+   所以这里只负责让它看起来可点，不再单独放大按钮。 */
+.stepbar {
+  cursor: pointer;
+  min-height: 36px;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.stepbar:active { background: var(--gray-1); }
+
+.stepbar-open {
+  font-size: calc(12px * var(--fs-scale));
+  color: var(--blue);
+  background: var(--blue-light);
+  border-radius: 12px;
+  padding: 3px 10px;
+  white-space: nowrap;
+}
+
 .progress {
   height: 3px;
   background: var(--gray-2);
@@ -989,6 +1009,111 @@ footer .btn:disabled {
   font-family: inherit;
 }
 
+/* ---------------- 步骤导航（底部抽屉） ---------------- */
+
+.nav-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.45);
+  display: flex;
+  align-items: flex-end;
+  z-index: 210;
+}
+
+.nav-sheet {
+  background: #fff;
+  width: 100%;
+  max-height: 88vh;
+  border-radius: 16px 16px 0 0;
+  padding: 12px 12px calc(12px + env(safe-area-inset-bottom, 0px));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: auto;
+  animation: nav-up .18s ease;
+}
+
+@keyframes nav-up {
+  from { transform: translateY(24px); opacity: .6; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.nav-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 2px 4px;
+}
+
+.nav-title {
+  font-size: calc(16px * var(--fs-scale));
+  font-weight: 600;
+}
+
+.nav-head .btn-icon {
+  margin-left: auto;
+  border: none;
+  background: var(--gray-1);
+  color: var(--gray-5);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: calc(13px * var(--fs-scale));
+  min-height: 44px;
+  cursor: pointer;
+}
+
+.nav-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* 每一行 48px 高：手机上单手点目录是「盲点」，行高不够必然点错 */
+.nav-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 48px;
+  padding: 8px 12px;
+  border: 1px solid var(--gray-2);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--gray-6);
+  font-size: calc(15px * var(--fs-scale));
+  text-align: left;
+  cursor: pointer;
+}
+
+.nav-row:active { background: var(--gray-1); }
+
+.nav-row.cur {
+  border-color: var(--blue);
+  background: var(--blue-light);
+}
+
+.nav-icon {
+  width: 22px;
+  text-align: center;
+  color: var(--gray-4);
+  font-size: calc(13px * var(--fs-scale));
+}
+
+.nav-row.cur .nav-icon { color: var(--blue); }
+
+.nav-name { flex: 1; font-weight: 500; }
+
+.nav-state {
+  font-size: calc(11px * var(--fs-scale));
+  padding: 2px 8px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+
+.nav-state.st-done { background: var(--score-ok-bg); color: var(--score-ok); }
+.nav-state.st-part { background: var(--score-warn-bg); color: var(--score-warn); }
+.nav-state.st-empty { background: var(--gray-1); color: var(--gray-4); }
+
 .sec-pick {
   display: flex;
   flex-direction: column;
@@ -1787,6 +1912,15 @@ footer .btn:disabled {
   .modal { background: #1f1f1f; }
   .modal-mask { background: rgba(0,0,0,.65); }
 
+  .nav-sheet { background: #1f1f1f; color: var(--gray-6); }
+  .nav-mask { background: rgba(0,0,0,.65); }
+  .nav-head .btn-icon { background: var(--gray-2); color: var(--gray-5); }
+  .nav-row { background: #2c2c2c; border-color: var(--gray-3); color: var(--gray-6); }
+  .nav-row:active { background: #3c4043; }
+  .nav-row.cur { background: var(--blue-light); border-color: var(--blue); }
+  .nav-state.st-empty { background: var(--gray-2); color: var(--gray-4); }
+  .stepbar-open { background: var(--blue-light); color: var(--blue); }
+
   #toast { background: rgba(232,234,237,.95); color: #202124; }
 }
 
@@ -1863,9 +1997,10 @@ footer .btn:disabled {
     <button class="btn-icon" id="btnList">病历</button>
     <button class="btn-icon" id="btnExport">导出</button>
   </div>
-  <div class="stepbar">
+  <div class="stepbar" id="stepBar" role="button" tabindex="0" aria-label="打开步骤导航">
     <span class="title" id="stepTitle">基本情况</span>
     <span class="num" id="stepNum">1/12</span>
+    <span class="stepbar-open" id="btnNav">目录 ▾</span>
   </div>
   <div class="progress"><div id="progressBar"></div></div>
 </header>
@@ -12455,12 +12590,17 @@ const APP = (() => {
    * 「评分自查」放在「摘要与诊断」之后、「生成病历」之前：
    * 自查看的正是病历里已经写下的文字，只有写到摘要与诊断这一步才具备条件；
    * 而生成/导出是最后一环，自查必须在交卷前完成，不能排在导出之后。
+   *
+   * 步骤顺序 == 病历章节顺序（见 GENERATOR.SECTION_ORDER），不是两套。
+   * 既往史在系统回顾之前：《诊断学》第10版第六篇的住院病历书写顺序是
+   * 「主诉／现病史／既往史／系统回顾／个人史／婚姻史／月经生育史／家族史」，
+   * 系统回顾是既往史的补充追问，排在它后面才讲得通。
    */
   const STEPS = [
     { key: 'basic', name: '基本情况', icon: '①' },
     { key: 'hpi', name: '现病史', icon: '②' },
-    { key: 'ros', name: '系统回顾', icon: '③' },
-    { key: 'pmh', name: '既往史', icon: '④' },
+    { key: 'pmh', name: '既往史', icon: '③' },
+    { key: 'ros', name: '系统回顾', icon: '④' },
     { key: 'personal', name: '个人史', icon: '⑤' },
     { key: 'marriage', name: '婚姻与生育史', icon: '⑥' },
     { key: 'family', name: '家庭史', icon: '⑦' },
@@ -14199,6 +14339,132 @@ const APP = (() => {
     })[section] || '';
   }
 
+  /* ---------------------- 步骤导航 ---------------------- */
+
+  /**
+   * 某一步填到什么程度：done（该步的关键内容有了）/ part（填了一点）/ empty（一个字都没有）。
+   *
+   * 判据刻意从简：导航面板是用来「跳转」的，不是用来打分的。
+   * 一旦它开始算百分比，就会和「评分自查」打架——学生不知道该信哪个。
+   * 所以这里只回答三件事：有了、有一点、没有。
+   */
+  function stepState(key) {
+    const b = R.basic || {};
+    const txt = v => String(v === undefined || v === null ? '' : v).trim() !== '';
+    const anyText = obj => Object.keys(obj || {}).some(k => {
+      const v = obj[k];
+      if (typeof v === 'string') return txt(v);
+      if (typeof v === 'boolean') return v;
+      if (v && typeof v === 'object') return anyText(v);
+      return false;
+    });
+
+    switch (key) {
+      case 'basic': {
+        const n = ['name', 'gender', 'age', 'chiefComplaint'].filter(k => txt(b[k])).length;
+        return n >= 3 ? 'done' : (n ? 'part' : 'empty');
+      }
+      case 'hpi': {
+        const n = ['onset', 'symptoms'].filter(k => txt((R.hpi || {})[k])).length;
+        return n === 2 ? 'done' : (n ? 'part' : 'empty');
+      }
+      case 'pmh': {
+        const p = R.pmh || {};
+        if (txt(p.health) && txt(p.diseaseDetail)) return 'done';
+        return anyText(p) ? 'part' : 'empty';
+      }
+      case 'ros': {
+        const sys = Object.keys(R.ros || {});
+        const n = sys.reduce((a, k) => a + Object.keys(R.ros[k] || {}).filter(s => {
+          const v = R.ros[k][s];
+          return v && (v.checked || v.negative);
+        }).length, 0);
+        return n >= 20 ? 'done' : (n ? 'part' : 'empty');
+      }
+      case 'personal':
+        return txt((R.personal || {}).smoking) || txt(R.personal.environment) ? 'done'
+          : (anyText(R.personal) ? 'part' : 'empty');
+      case 'marriage':
+        return txt((R.marriage || {}).status) ? 'done' : (anyText(R.marriage) ? 'part' : 'empty');
+      case 'family':
+        return anyText(R.family) ? 'part' : 'empty';
+      case 'pe': {
+        const deptKey = b.department || 'general';
+        const dept = SCHEMA.DEPARTMENTS.find(d => d.key === deptKey) || SCHEMA.DEPARTMENTS[0];
+        let total = 0;
+        let on = 0;
+        SCHEMA.PE_COMMON.forEach(g => g.items
+          .filter(it => !it.depts || it.depts.includes(deptKey))
+          .forEach(it => { total++; if (SCHEMA.peChecked(R, g.key, it.key)) on++; }));
+        (dept.special || []).forEach(spKey => {
+          const sp = SCHEMA.PE_SPECIAL[spKey];
+          if (sp) sp.items.forEach(it => { total++; if (SCHEMA.peChecked(R, 'special_' + spKey, it.key)) on++; });
+        });
+        if (!on) return 'empty';
+        return on >= Math.ceil(total * 0.6) ? 'done' : 'part';
+      }
+      case 'aux':
+        return (R.auxiliary || {}).items &&
+          R.auxiliary.items.some(it => txt(it.name) || txt(it.result)) ? 'done' : 'empty';
+      case 'summary':
+        return ((R.diagnosis || {}).confirmed || []).filter(txt).length ? 'done' : 'empty';
+      default:
+        // 自查 / 生成：没有「内容多少」这回事，不该给它们贴「还没填」的标签。
+        // 用 'none' 表示「这一步不适用填写状态」，导航里就不渲染角标。
+        return 'none';
+    }
+  }
+
+  /**
+   * 打开步骤导航（底部抽屉）。
+   *
+   * 为什么用底部抽屉而不是顶部下拉框：
+   *   手机上手一伸就够到底部，而且 12 项竖排一屏放得下，不必滚动。
+   *   顶部下拉框在 iOS Safari 上会被地址栏挤掉，还会盖住当前这一步的标题。
+   */
+  function openNav() {
+    const wrap = document.createElement('div');
+    wrap.className = 'nav-mask';
+    wrap.innerHTML = `<div class="nav-sheet">
+      <div class="nav-head">
+        <span class="nav-title">跳到哪一步</span>
+        <button type="button" class="btn-icon" data-navclose>关闭</button>
+      </div>
+      <div class="nav-list">${navRowsHtml()}</div>
+      <div class="hint">带数字的是录入步骤，顺序与病历章节一致。填到一半随时可以跳走，回来时内容还在。</div>
+    </div>`;
+    document.body.appendChild(wrap);
+
+    wrap.addEventListener('click', ev => {
+      if (ev.target === wrap) { wrap.remove(); return; }
+      if (ev.target.closest('[data-navclose]')) { wrap.remove(); return; }
+      const row = ev.target.closest('[data-navstep]');
+      if (row) {
+        wrap.remove();
+        gotoStep(row.dataset.navstep);
+      }
+    });
+    return wrap;
+  }
+
+  /** 导航面板的行 HTML。抽出来是为了让测试能直接断言，不必去读 DOM。 */
+  function navRowsHtml() {
+    return STEPS.map((s, i) => {
+      const st = stepState(s.key);
+      const cur = i === step ? ' cur' : '';
+      const stateText = { done: '已填', part: '填了一部分', empty: '还没填' }[st];
+      // 自查 / 生成这两步没有「填了多少」这回事，硬贴一个状态只会误导人，
+      // 所以整个角标都不渲染。
+      const stateHtml = st === 'none' ? ''
+        : `<span class="nav-state st-${st}">${stateText}</span>`;
+      return `<button type="button" class="nav-row${cur}" data-navstep="${esc(s.key)}">
+        <span class="nav-icon">${esc(s.icon)}</span>
+        <span class="nav-name">${esc(s.name)}</span>
+        ${stateHtml}
+      </button>`;
+    }).join('');
+  }
+
   /** 得分档位：达标绿 / 待补黄 / 缺失红 */
   function scoreClass(percent) {
     const p = Number(percent) || 0;
@@ -15324,6 +15590,10 @@ const APP = (() => {
     });
     $('#btnSave').addEventListener('click', saveWithFeedback);
     $('#btnList').addEventListener('click', openList);
+    // 整条 stepbar 都可以点开目录：手机上「目录 ▾」这几个字太小，
+    // 手指落点低一两毫米就点空了，把标题行整条做成热区。
+    // 只绑 stepBar 一处——btnNav 在它里面，再单独绑一次会冒泡成弹两层。
+    $('#stepBar').addEventListener('click', openNav);
     $('#btnExport').addEventListener('click', () => {
       step = STEPS.length - 1;
       render();
@@ -15376,7 +15646,11 @@ const APP = (() => {
       // 自查结果（与界面同一份数据，供测试直接断言）
       checkSummary: () => (typeof CHECKER !== 'undefined' ? CHECKER.summary(R) : null),
       // 问诊深度自查（同上，界面走 renderCheck 里的卡片）
-      depthOf: r => (typeof DEPTH !== 'undefined' ? DEPTH.check(r || R) : [])
+      depthOf: r => (typeof DEPTH !== 'undefined' ? DEPTH.check(r || R) : []),
+      // 步骤导航：界面走 stepbar 点击，测试直接断言状态判定
+      stepState,
+      openNav,
+      navRowsHtml: () => navRowsHtml()
     }
   };
 })();

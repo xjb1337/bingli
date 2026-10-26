@@ -164,8 +164,8 @@ async function main() {
   await sleep(300);
   await shot('03-hpi');
 
-  // 5. 系统回顾
-  await evaluate('document.getElementById("btnNext").click()');
+  // 5. 系统回顾（按步骤名跳，不按"点几次下一步"——步骤顺序改过一次，位置法全废）
+  await evaluate('APP._test.gotoStep("ros")');
   await sleep(300);
   const rosChips = await evaluate('document.querySelectorAll("[data-ros]").length');
   // 三态：未问 → 阴性 → 阳性 → 未问。点一次是「阴性」，要点两次才是阳性，
@@ -185,20 +185,12 @@ async function main() {
     `症状项=${rosChips} 阳性详情框=${rosPos} 负性批按钮=${rosNeg}`]);
   await shot('04-ros');
 
-  // 6. 跳到体格检查
-  const gotoStep = async (n) => {
-    await evaluate(`(() => {
-      // 通过点击"下一步"逐屏前进
-      for (let i = 0; i < ${n}; i++) document.getElementById('btnNext').click();
-      return document.getElementById('stepTitle').textContent;
-    })()`);
-    await sleep(300);
-    return evaluate('document.getElementById("stepTitle").textContent');
-  };
-  const peTitle = await gotoStep(4); // ros -> pmh -> personal -> marriage -> family
-  results.push(['步骤跳转', peTitle === '婚姻与生育史' || peTitle === '家庭史', peTitle]);
+  // 6. 步骤顺序：既往史必须排在系统回顾之前（病历章节顺序，不是两套）
+  const stepOrder = await evaluate('APP.STEPS.map(s => s.key).join(">")');
+  results.push(['步骤顺序', stepOrder === 'basic>hpi>pmh>ros>personal>marriage>family>pe>aux>summary>check>output', stepOrder]);
 
-  await evaluate('document.getElementById("btnNext").click()');
+  // 7. 跳到体格检查
+  await evaluate('APP._test.gotoStep("pe")');
   await sleep(400);
   const peTitle2 = await evaluate('document.getElementById("stepTitle").textContent');
   const hasSpecial = await evaluate('document.querySelector(".pe-special") !== null');
@@ -239,7 +231,8 @@ async function main() {
   await shot('06-pe-filled');
 
   // 9. 跳到摘要与诊断
-  await gotoStep(2);
+  await evaluate('APP._test.gotoStep("summary")');
+  await sleep(400);
   const sumTitle = await evaluate('document.getElementById("stepTitle").textContent');
   const hintCount = await evaluate('document.querySelectorAll(".hint-card").length');
   const hintNames = await evaluate('Array.from(document.querySelectorAll(".hint-name")).map(e=>e.textContent).join("|")');
@@ -256,8 +249,8 @@ async function main() {
   const diagCount = await evaluate('document.querySelectorAll("[data-diag]").length');
   results.push(['添加诊断', diagCount === 1, `诊断条数=${diagCount}`]);
 
-  // 11. 评分自查（新增的第 11 步）
-  await evaluate('document.getElementById("btnNext").click()');
+  // 11. 评分自查
+  await evaluate('APP._test.gotoStep("check")');
   await sleep(500);
   const checkTitle = await evaluate('document.getElementById("stepTitle").textContent');
   const checkStations = await evaluate('document.querySelectorAll(".check-station").length');
@@ -270,8 +263,8 @@ async function main() {
     `标题=${checkTitle} 考站卡片=${checkStations} 待补=${checkTop3} 总分=${checkPct || 'n/a'}`]);
   await shot('08-check');
 
-  // 12. 生成病历（第 12 步）
-  await evaluate('document.getElementById("btnNext").click()');
+  // 12. 生成病历
+  await evaluate('APP._test.gotoStep("output")');
   await sleep(500);
   const outTitle = await evaluate('document.getElementById("stepTitle").textContent');
   const outText = await evaluate('document.getElementById("outputText").textContent');
