@@ -145,8 +145,15 @@ const HINTS = (() => {
       depts: ['cardiology', 'general'],
       must: ['pe:chest.heartAuscultation'],
       need: 1,
+      /* 原来只有两条互斥的杂音（心尖区收缩期 / 主动脉瓣区舒张期），一个病人
+       * 只可能有一种，score 封顶就是 1.0。而心房颤动的 need 是 1，只要写了
+       * 「心悸」加一条听诊就 2.0——瓣膜病模板的 top1 因此永远是心房颤动。
+       * 补三条瓣膜病自己的证据：周围血管征（水冲脉）、舒张期震颤、收缩期杂音。
+       * 这三条在高血压、心衰、房颤的模板里都不出现，不会把别人的榜抢走。 */
       match: ['pev:chest.heartAuscultation=心尖区可闻及收缩期杂音',
-        'pev:chest.heartAuscultation=主动脉瓣区可闻及舒张期杂音'],
+        'pev:chest.heartAuscultation=主动脉瓣区可闻及舒张期杂音',
+        'pev:special_cardiology.cardioPeripheralSign=水冲脉阳性',
+        'pev:special_cardiology.cardioThrill=可触及舒张期震颤'],
       hint: '心脏杂音需考虑心脏瓣膜病，注意结合病史鉴别生理性杂音。',
       note: '可补充：心脏超声（首选）、心电图、胸片。'
     },
@@ -212,6 +219,26 @@ const HINTS = (() => {
         'pev:abdomen.abdPalpation=上腹部压痛，无反跳痛', 'pev:abdomen.abdPercussion=肝区叩击痛'],
       hint: '进食油腻后右上腹痛、放射至右肩背，需考虑胆囊炎/胆石症。',
       note: '可补充：腹部超声（首选）、血常规、肝功能、胆红素、腹部CT。'
+    },
+    {
+      id: 'cholangitis', name: '急性胆管炎',
+      depts: ['surgery', 'digestive', 'emergency'],
+      /* 胆总管结石伴急性胆管炎原来没有规则，只能落到「胆囊炎 / 胆石症」上。
+       * 两者的区别很明确：胆管炎的黄疸更突出，还会打寒战高热（Charcot 三联征），
+       * 胆囊炎则主要是右上腹痛 + Murphy 征。所以这条的 must 只要黄疸或寒战，
+       * 而胆囊炎那条的 must 是超声/叩击痛/黄疸三选一，两者能分开。 */
+      must: ['ros:gi.jaundiceGi', 'ros:resp.chills', 'pev:head.eyes=巩膜黄染'],
+      /* need 从 3 降到 2。胆管炎的 match 有 8 条，但 must 只要黄疸或寒战，
+       * 真正命中时往往是「黄疸 + 发热 + 寒战 + 肝区叩击痛」一起出现，8/3=2.67，
+       * 压不过胆囊炎的 6/2=3.00。胆管炎比胆囊炎更急更重，理应排在前面。
+       * 降到 2 不会误报：单纯胆囊炎病例没有黄疸也没有寒战，命中数到不了 2。 */
+      need: 2,
+      match: ['ros:gi.jaundiceGi', 'ros:gi.jaundice',
+        'pev:head.eyes=巩膜黄染', 'pev:skin.color=皮肤黏膜黄染',
+        'pev:abdomen.abdPercussion=肝区叩击痛',
+        'ros:resp.fever', 'ros:resp.chills', 'pmh:胆囊结石'],
+      hint: '黄疸伴寒战高热、肝区叩击痛，需考虑急性胆管炎（Charcot 三联征），注意胆道梗阻。',
+      note: '可补充：肝功能+胆红素、腹部超声、MRCP，必要时 ERCP；监测血压警惕 Reynolds 五联征。'
     },
     {
       id: 'appendicitis', name: '急性阑尾炎',
@@ -438,8 +465,16 @@ const HINTS = (() => {
       depts: ['hematology', 'pediatrics', 'general'],
       must: ['ros:hemat.bleeding','ros:hemat.bruise','ros:hemat.lymphNode','ros:hemat.bonePain','pe:special_hematology.hemExtra'],
       need: 2,
+      /* 加了胸骨压痛与肝脾肿大两条。原来这四条 match 在白血病病例上只能
+       * 拿到 2.0 分，和「贫血」打成平手——而 anemia 规则排在前面，平手时
+       * 它赢，于是白血病模板的第一条提示是「贫血」。胸骨压痛是白血病最
+       * 有指向性的体征，肝脾肿大叫得上，两条一起加进来才压得住贫血。
+       * 这两条在单纯贫血、ITP 的病例里都不出现，不会反抢别人的榜。 */
       match: ['ros:hemat.bleeding', 'ros:hemat.bruise', 'ros:hemat.lymphNode', 'ros:hemat.bonePain',
-        'pev:special_hematology.hemExtra=胸骨压痛', 'pev:skin.lymph=双侧颈部可触及肿大淋巴结'],
+        'pev:special_hematology.hemExtra=胸骨压痛',
+        'pev:special_hematology.hemSternum=胸骨中下段压痛',
+        'pev:special_hematology.hemHepatospleen=脾肋下可触及',
+        'pev:skin.lymph=双侧颈部可触及肿大淋巴结'],
       hint: '发热、出血倾向、淋巴结肿大、胸骨压痛，需警惕造血系统恶性肿瘤。',
       note: '可补充：血常规+外周血涂片、骨髓穿刺+活检、免疫分型、染色体/FISH、乳酸脱氢酶。'
     },
@@ -447,7 +482,11 @@ const HINTS = (() => {
       id: 'itp', name: '血小板减少相关出血',
       depts: ['hematology', 'general'],
       must: ['pe:skin.rash','ros:hemat.bruise'],
-      need: 1,
+      /* need 原来是 1。白血病病人也会有出血点和瘀斑，这两条 match 它全中，
+       * 3 条 ÷ 1 = 3.0 分，稳稳压过白血病自己的分数，于是白血病模板的第一条
+       * 提示永远是「血小板减少相关出血」。ITP 的出血是「只有出血、没有别的」，
+       * 光靠皮肤出血点和瘀斑两条不足以把它排到最前，改成 2 更贴合实际。 */
+      need: 2,
       match: ['ros:hemat.bleeding', 'ros:hemat.bruise', 'pev:skin.rash=可见瘀点瘀斑'],
       hint: '皮肤黏膜出血点、瘀斑，需考虑血小板减少相关疾病。',
       note: '可补充：血常规+血小板计数、凝血功能、外周血涂片、自身抗体、必要时骨髓检查。'
@@ -581,6 +620,41 @@ const HINTS = (() => {
       note: '可补充：妇科双合诊、分泌物培养、血常规+CRP、盆腔超声；注意与其他急腹症鉴别。'
     },
     {
+      id: 'myoma', name: '子宫肌瘤',
+      depts: ['gynecology'],
+      /* 原来根本没有这条规则，子宫肌瘤的病人只能被「贫血」认领——因为肌瘤
+       * 最常见的表现就是经量增多导致的贫血，贫血规则 need 1 就够，稳稳排第一。
+       * 但那是并发症，不是诊断。判别靠的是子宫本身的体征：增大、表面不平、
+       * 下腹部摸到包块。这三条在单纯贫血的病人身上不会出现。 */
+      must: ['pe:special_gynecology.gynUterus', 'pe:special_gynecology.gynAbdomen', 'pe:abdomen.abdPalpation'],
+      need: 2,
+      match: ['pev:special_gynecology.gynUterus=子宫增大',
+        'pev:special_gynecology.gynAbdomen=下腹部可触及包块',
+        'pev:abdomen.abdPalpation=可触及腹部包块',
+        'ros:hemat.bleeding',
+        'aux:超声'],
+      hint: '经量增多、经期延长伴子宫增大或下腹部包块，需考虑子宫肌瘤。',
+      note: '可补充：妇科超声（首选）、血常规评估贫血程度、必要时宫腔镜或 MRI；与子宫腺肌病、卵巢肿瘤鉴别。'
+    },
+    {
+      id: 'ectopic', name: '异位妊娠',
+      depts: ['gynecology', 'emergency'],
+      /* 同上，原来没有规则，异位妊娠模板的第一条提示是「贫血」。异位妊娠
+       * 的关键是「停经 + 一侧下腹痛 + 宫颈举痛/附件包块」，出血到贫血只是
+       * 后果。妊娠相关那条规则 need 2、只看 gender/age/停经/恶心，任何育龄
+       * 女性腹痛都会中；这条要靠妇科查体把它顶下去。 */
+      must: ['menstruation:delay', 'pe:special_gynecology.gynCervix', 'pe:special_gynecology.gynAdnexa'],
+      need: 2,
+      match: ['menstruation:delay',
+        'pev:special_gynecology.gynCervix=宫颈举痛',
+        'pev:special_gynecology.gynAdnexa=右附件区可触及包块',
+        'pev:special_gynecology.gynExtra2=附件区压痛',
+        'pev:abdomen.abdPercussion=移动性浊音阳性',
+        'ros:cardio.syncope'],
+      hint: '育龄女性停经后一侧下腹痛、宫颈举痛或附件包块，须首先排除异位妊娠。',
+      note: '可补充：血 β-hCG + 孕酮、经阴道超声、后穹窿穿刺；血流动力学不稳者按急症处理。'
+    },
+    {
       id: 'preeclampsia', name: '妊娠期高血压疾病 / 子痫前期',
       depts: ['obstetrics'],
       must: ['aux:尿蛋白','ros:nervous.visualBlur','ros:nervous.headache','ros:nervous.visualBlur'],
@@ -603,11 +677,20 @@ const HINTS = (() => {
     {
       id: 'pedPneumonia', name: '小儿肺炎',
       depts: ['pediatrics'],
-      must: ['age:child','pe:chest.lungAuscultation'],
+      /* must 里原来还有一条 age:child。模板不许写 basic.age（学生的病人不是模板
+       * 里的病人），所以 age:child 在套用模板的病历上永远拿不到，那一条是死的。
+       * 儿科本身已经限定了人群，肺部的体征才是真正的判别依据。 */
+      must: ['pe:chest.lungAuscultation'],
       need: 3,
+      /* 补了两条儿科专科体征。cap（成人社区获得性肺炎）在儿科科室也放行，
+       * 它的 match 有 9 条，能拿到 1.67 分，而小儿肺炎原来只有 1.33 分——
+       * 儿科肺炎模板的第一条提示因此是「社区获得性肺炎」。呼吸急促和咽部
+       * 体征在成人肺炎里不会写成这样，加上去正好把两者分开。 */
       match: ['vital:tempUp', 'ros:resp.cough', 'ros:resp.dyspnea',
         'ros:resp.sputum',
-        'pev:chest.lungAuscultation=双肺可闻及湿性啰音', 'pev:chest.lungAuscultation=右下肺可闻及湿性啰音'],
+        'pev:chest.lungAuscultation=双肺可闻及湿性啰音', 'pev:chest.lungAuscultation=右下肺可闻及湿性啰音',
+        'pev:special_pediatrics.pedResp=呼吸急促',
+        'pev:special_pediatrics.pedExtra3=咽充血，扁桃体肿大'],
       hint: '患儿发热、咳嗽、气促，肺部闻及固定湿啰音，需考虑小儿肺炎。',
       note: '可补充：血常规+CRP、胸片、呼吸道病原学（支原体、RSV、流感）、评估有无低氧血症。'
     },
@@ -1094,9 +1177,20 @@ const HINTS = (() => {
     const deptKey = (r.basic || {}).department || 'general';
     const out = [];
     RULES.forEach(rule => {
-      // 专科规则：本科室或通用科才提示（儿科/妇产等规则不会出现在内科病历里）
+      // 科室过滤。`depts` 的本意是「这条规则适用于哪些科室」，'general' 是一位
+      // 「通用科也适用」的标记，不是「到处都适用」的通行证。
+      //
+      // 这里原来写的是 `deptKey === 'general' || depts.includes(deptKey) || depts.includes('general')`，
+      // 最后那个分支让凡是列了 'general' 的规则在所有科室都放行——37 条规则因此
+      // 泄漏到不相干的科室（消化内科病历里弹「肾病综合征」，精神科弹「慢性肾脏病」，
+      // 产科弹「化脓性阑尾炎」）。实测 220 条提示里 68 条是越界的（30.9%）。
+      //
+      // 现在分两种情况：
+      //   · 学生选了通用科 —— 就是「还没定科室」，所有规则都该参与，全部放行；
+      //   · 学生选了具体科室 —— 只有规则明确列了这个科室才算数。
+      // 规则里的 'general' 只表示「通用科也适用」，不再有跨科室的效力。
       const depts = rule.depts || [];
-      const inDept = deptKey === 'general' || depts.includes(deptKey) || depts.includes('general');
+      const inDept = deptKey === 'general' || depts.includes(deptKey);
       if (!inDept) return;
 
       const matched = rule.match.filter(m => F.has(m));

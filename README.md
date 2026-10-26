@@ -328,7 +328,7 @@ E:\bingli\
 │  ├─ templates.js   模板套用：只补空白、不覆盖、自动补科室
 │  ├─ depth.js       问诊深度自查：读你写的现病史/既往史，挑"问了但没问深"的地方
 │  ├─ generator.js   病历生成逻辑（纯函数）
-│  ├─ hints.js       诊断参考提示规则库（57 条）
+│  ├─ hints.js       诊断参考提示规则库（60 条）
 │  ├─ app.js         界面交互（只负责 DOM，存储一律走 core）
 │  ├─ style.css      样式
 │  └─ index.html     模板
@@ -396,7 +396,17 @@ node tools/verify-ui-audit.js     # 空病历 12 页：对比度、溢出、文�
 node tools/verify-touch-data.js   # 有数据态：量那些只有填了内容才出现的按钮
 node tools/check-field-reach.js   # 85 个字段逐个填值，看有没有「填了等于没填」
 node tools/check-top1.js          # 56 份模板的诊断提示 top1 命中率
+node tools/check-hint-leak.js     # 提示有没有跑到不相干的科室去（--verbose 看明细）
+node tools/diag-top1.js <key>...  # 某份模板的提示为什么排成这样，逐条列命中项
 ```
+
+> `check-hint-leak.js` 是「科室越界」的守门人。规则里的 `depts` 写了 `'general'`
+> 只表示「通用科也适用」，**不是**「到处都适用」。这条判据原来写漏了，实测
+> 220 条提示里有 68 条越界（30.9%）——消化内科病历弹「肾病综合征」，精神科弹
+> 「慢性肾脏病」，产科弹「化脓性阑尾炎」。现在 0 条。
+>
+> `diag-top1.js` 用来分辨「提示排错了」和「提示名字比出院诊断宽」这两件事：
+> 前者要改规则，后者只改 `check-top1.js` 的 `EXPECT` 表就行。
 
 > `verify-ui-audit.js` 跑的是空病历，所以重点查体的 ×、SOAP 行的删除、
 > 病历列表的删除这些**只有填了内容才渲染**的按钮它量不到。
