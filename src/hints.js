@@ -118,9 +118,25 @@ const HINTS = (() => {
     {
       id: 'htn', name: '高血压病',
       depts: ['cardiology', 'general', 'neurology', 'nephrology', 'endocrinology'],
-      must: ['vital:bpUp'],
-      need: 1,
-      match: ['vital:bpUp'],
+      /* must 里不能只放 vital:bpUp —— 模板（以及只填了病史、还没录生命体征的
+       * 真实记录）pe.vitals 是空的，这样写会让「高血压病」永远 0 命中：
+       * 明明写了「高血压病史 10 年」，提示却一条都不给。
+       * 病史 + 靶器官损害的体征同样成立，故补 pmh:高血压。
+       *
+       * need 必须是 2，不能是 1：只有一条「高血压病史」时，
+       *   ① 学生早就知道病人有高血压，再提示一遍没有信息量；
+       *   ② score = 命中数/need = 1.0，会顶掉真正要做的主诊断
+       *      （实测：急性肾损伤模板的 top1 变成了「高血压病」）。
+       * 现在的口径是「病史 + 至少一条旁证」：血压升高、靶器官损害体征、
+       * 或尿蛋白——也就是「高血压确实在造成损害」才提示。 */
+      must: ['vital:bpUp','pmh:高血压'],
+      need: 2,
+      match: ['vital:bpUp', 'pmh:高血压',
+        // 靶器官损害体征：左心室肥厚/扩大、蛋白尿
+        'pev:chest.heartInspect=心尖搏动向左下移位',
+        'pev:chest.heartPercussion=心界向左下扩大',
+        'pev:special_cardiology.cardioBorder=心界向左下扩大',
+        'aux:尿蛋白'],
       hint: '血压升高需考虑原发性高血压，注意排除继发性因素。',
       note: '可补充：不同日多次测量、24h动态血压、尿常规、肾功能、眼底检查、心脏超声、血脂血糖。'
     },
@@ -172,9 +188,14 @@ const HINTS = (() => {
     {
       id: 'pancreatitis', name: '急性胰腺炎',
       depts: ['digestive', 'emergency', 'surgery', 'general'],
-      must: ['cc:上腹痛','ros:gi.vomiting','aux:淀粉酶','aux:脂肪酶'],
-      need: 2,
-      match: ['cc:上腹痛', 'cc:腹痛', 'ros:gi.vomiting', 'risk:alcohol', 'aux:淀粉酶', 'aux:脂肪酶',
+      /* must 收紧到「胰酶」：既往 must 里的『上腹痛 / 呕吐』是几乎所有急腹症都有的
+       * 通用表现，脓毒症、胆道感染病历都能凑满 need，结果把别人的 top1 顶成胰腺炎。
+       * 现在必须真的查到血淀粉酶或脂肪酶才谈得上胰腺炎。 */
+      must: ['aux:淀粉酶','aux:脂肪酶'],
+      need: 3,
+      /* match 同步收紧：删掉 'cc:腹痛'（14 份模板都有）与 'ros:gi.vomiting'（14 份），
+       * 只留胰腺炎特征性的定位性上腹痛、饮酒诱因、胰酶、CT 与上腹压痛。 */
+      match: ['cc:上腹痛', 'risk:alcohol', 'aux:淀粉酶', 'aux:脂肪酶', 'aux:CT',
         'pev:special_digestive.giTenderness=上腹部压痛',
         'pev:abdomen.abdPalpation=上腹部压痛，无反跳痛'],
       hint: '饱食或饮酒后上腹剧痛放射至腰背、伴呕吐，需考虑急性胰腺炎。',
@@ -201,6 +222,25 @@ const HINTS = (() => {
         'pev:abdomen.abdPalpation=右下腹压痛、反跳痛', 'pev:abdomen.abdPalpation=全腹压痛、反跳痛，腹肌紧张'],
       hint: '转移性右下腹痛伴右下腹固定压痛/反跳痛，需考虑急性阑尾炎。',
       note: '可补充：血常规、腹部超声或CT、尿常规；育龄女性加做尿妊娠试验。'
+    },
+    {
+      id: 'peritonitis', name: '急性腹膜炎',
+      /* 不写 'general'：腹膜刺激征是外科急腹症的定位体征，全科室提示没有意义。 */
+      depts: ['surgery', 'emergency', 'digestive'],
+      must: ['pe:abdomen.abdPalpation'],
+      need: 3,
+      /* 这条规则此前根本不存在，于是「全腹压痛反跳痛、腹肌紧张」的病历被
+       * 急性胰腺炎/肠梗阻顶成 top1。特征选词只用腹膜刺激征及其直接后果：
+       * 全腹压痛反跳痛+腹肌紧张、肝浊音界消失（气腹）、肠鸣音消失、鼓音区缩小、
+       * 立位腹平片。刻意不放 cc:腹痛/发热 这类所有急腹症都有的通用表现。 */
+      match: ['pev:abdomen.abdPalpation=全腹压痛、反跳痛，腹肌紧张',
+        'pev:special_surgery.surgPeritoneum=全腹压痛、反跳痛伴板状腹',
+        'pev:special_surgery.surgPeritoneum=肝浊音界消失',
+        'pev:abdomen.abdAuscultation=肠鸣音消失',
+        'pev:abdomen.abdPercussion=鼓音区缩小',
+        'aux:腹部平片'],
+      hint: '全腹压痛、反跳痛伴腹肌紧张，肠鸣音消失或肝浊音界消失，需考虑急性腹膜炎（消化道穿孔可能）。',
+      note: '可补充：立位腹部平片（膈下游离气体）、腹部CT、血常规+CRP、血淀粉酶、急诊外科会诊。'
     },
     {
       id: 'obstruction', name: '肠梗阻',
@@ -231,20 +271,67 @@ const HINTS = (() => {
     /* ------------------------------ 肾脏 ------------------------------ */
     {
       id: 'ckd', name: '慢性肾脏病',
-      depts: ['nephrology', 'general', 'endocrinology', 'cardiology'],
-      must: ['ros:gu.oliguria','ros:gu.hematuria','pe:abdomen.abdPercussion','pmh:慢性肾脏病'],
+      /* depts 里不要写 'general'：analyze() 的 inDept 判定是
+       * `deptKey === 'general' || depts.includes(deptKey) || depts.includes('general')`，
+       * 写上 'general' 就等于「任何科室都提示慢性肾脏病」，结果眼科、产科、
+       * 儿科的病历也会被顶成 CKD。只保留真正会管这个病的科室。 */
+      depts: ['nephrology', 'endocrinology', 'cardiology'],
+      /* must 里不能放 pe:abdomen.abdPercussion —— 腹部叩诊是全腹查体的常规项，
+       * 几乎每份病历都会做，用它当必要条件等于「做了查体就算 CKD」。
+       * 这里的每一条都必须真的指向肾实质受累：尿量改变、血尿、既往 CKD 诊断。 */
+      must: ['ros:gu.oliguria','ros:gu.hematuria','pmh:慢性肾脏病','ros:gu.nocturia',
+        'pev:special_nephrology.renalSkin=睑结膜苍白'],
       need: 2,
+      /* 删掉 pmh:糖尿病 / pmh:高血压：那是病因和危险因素，不是肾脏受累的表现，
+       * 留着会让任何糖尿病、高血压病历都冒出 CKD 提示，把真正写了肾性贫血、
+       * 夜尿增多、肾区叩击痛、血肌酐升高的病历挤下去。 */
       match: ['ros:gu.oliguria', 'ros:gu.edemaGu', 'ros:gu.hematuria', 'pmh:慢性肾脏病',
-        'pmh:糖尿病', 'pmh:高血压', 'pev:abdomen.abdPercussion=双肾区叩击痛'],
-      hint: '水肿、尿量改变、肾区叩击痛或高血压/糖尿病病史，需考虑慢性肾脏病。',
+        'ros:gu.nocturia', 'ros:gu.polyuria',
+        'pev:special_nephrology.renalSkin=睑结膜苍白',
+        'pev:special_nephrology.renalBP=血压升高',
+        'pev:chest.heartPercussion=心界向左下扩大',
+        'pev:abdomen.abdPercussion=双肾区叩击痛',
+        'aux:肌酐'],
+      hint: '夜尿增多、水肿、尿量改变、肾性贫血或肾区叩击痛，需考虑慢性肾脏病。',
       note: '可补充：尿常规+尿沉渣、尿蛋白/肌酐比、血肌酐+eGFR、泌尿系超声。'
+    },
+    {
+      id: 'aki', name: '急性肾损伤',
+      /* 必须写 'nephrology' 之外只留 'emergency'：AKI 是急诊/肾内的判断，
+       * 不写 'general'，否则任何做了肾功能的手术病历都会被提示 AKI。 */
+      depts: ['nephrology', 'emergency'],
+      /* 必要条件只认「尿量减少」：这是 AKI 与 CKD 的分水岭。
+       * 只写 pe:abdomen.* 或 aux:肌酐 是不行的——慢肾衰的病人肌酐也高，
+       * 用它当必要条件等于「查了肾功就是 AKI」。 */
+      must: ['ros:gu.oliguria'],
+      need: 3,
+      /* 只留真正区分「急性容量不足性肾损伤」的条目：
+       *   ros:gu.oliguria + aux:肌酐 —— 肾损伤本身
+       *   skin.elasticity 减退 + renalBP 偏低 —— 容量不足的体征
+       *   ros:gi.diarrhea —— 肾前性诱因
+       * 特意不放 ros:gi.vomiting 和 pev:general.face=急性病容：
+       * 泌尿系结石、有机磷中毒的病历里也都有这两条，放进来会让
+       * 「急性肾损伤」抢到它们的 top1（实测过多一次）。
+       * need 由 2 提到 3，同理——命中 2 条太容易。 */
+      match: ['ros:gu.oliguria', 'aux:肌酐',
+        'pev:skin.elasticity=皮肤弹性减退',
+        'pev:special_nephrology.renalBP=血压偏低',
+        'ros:gi.diarrhea'],
+      hint: '尿量减少伴肌酐升高，且有腹泻、呕吐、进食少等容量不足诱因，需考虑急性肾损伤（肾前性可能大）。',
+      note: '可补充：血肌酐动态（48h 内升高幅度）、尿量记录、尿钠/尿渗透压（鉴别肾前性与肾性）、补液试验后复查、泌尿系超声除外梗阻。'
     },
     {
       id: 'nephrotic', name: '肾病综合征',
       depts: ['nephrology', 'pediatrics', 'general'],
       must: ['ros:gu.edemaGu','pe:spine.limbs'],
       need: 2,
-      match: ['ros:gu.edemaGu', 'ros:gu.oliguria', 'pev:spine.limbs=双下肢凹陷性水肿', 'aux:尿常规'],
+      /* 原来只有 4 条 match，和 CKD 打平（都 1.50），排序时被排在前面的 CKD 顶掉。
+       * 补的三条都是肾病综合征自己的特征：颜面水肿（肾病源性水肿从眼睑开始）、
+       * 移动性浊音阳性（大量蛋白尿低蛋白血症常伴腹水）、尿蛋白——
+       * 而不是靠削弱 CKD 来「让位」。 */
+      match: ['ros:gu.edemaGu', 'ros:gu.oliguria', 'pev:spine.limbs=双下肢凹陷性水肿', 'aux:尿常规',
+        'aux:尿蛋白', 'pev:special_nephrology.renalFacialEdema=颜面水肿',
+        'pev:abdomen.abdPercussion=移动性浊音阳性'],
       hint: '大量蛋白尿、低蛋白血症、明显水肿、高脂血症四联征，需考虑肾病综合征。',
       note: '可补充：24h尿蛋白定量、血清白蛋白、血脂、肾功能、免疫学检查。'
     },
@@ -317,15 +404,33 @@ const HINTS = (() => {
       hint: '满月脸、水牛背、向心性肥胖，需考虑库欣综合征（或长期使用糖皮质激素）。',
       note: '可补充：24h尿游离皮质醇、午夜血皮质醇、小剂量地塞米松抑制试验、垂体MRI。'
     },
+    {
+      id: 'thyroidNodule', name: '甲状腺结节',
+      /* 不写 'general'：颈前肿块本身很局限，没必要让所有科室都冒出这条。 */
+      depts: ['surgery', 'endocrinology'],
+      /* 必要条件用「颈前肿块」或「触到结节」这种指向性证据，
+       * 不要用 pe:neck.thyroid —— 甲状腺触诊是颈部的常规查体项，
+       * 写了「甲状腺无肿大」也会产生这个 key，等于「查了颈就算结节」。 */
+      must: ['ros:endocrine.neckMass', 'pev:neck.thyroid=甲状腺可触及结节'],
+      need: 2,
+      match: ['ros:endocrine.neckMass', 'pev:neck.thyroid=甲状腺可触及结节', 'aux:超声'],
+      hint: '颈前肿块、随吞咽上下移动或查体触及甲状腺结节，需考虑甲状腺结节，注意评估良恶性。',
+      note: '可补充：甲状腺超声（TI-RADS 分级）、TSH、必要时细针穿刺细胞学（FNA）、颈部淋巴结评估。'
+    },
 
     /* ------------------------------ 血液 ------------------------------ */
     {
       id: 'anemia', name: '贫血',
       depts: ['hematology', 'general', 'digestive', 'gynecology', 'pediatrics'],
       must: ['ros:hemat.anemia','pe:skin.color','aux:血红蛋白'],
-      need: 1,
-      match: ['ros:hemat.anemia', 'pev:skin.color=皮肤黏膜苍白', 'ros:hemat.fatigue', 'aux:血红蛋白'],
-      hint: '乏力、面色苍白，需考虑贫血，并进一步明确病因（缺铁性/巨幼细胞性/失血性等）。',
+      /* need 必须是 2：贫血是「证据型」诊断，光有乏力不能算。
+       * 原来 need:1 + match 里的 ros:hemat.fatigue，让任何慢性病病历
+       * （子宫肌瘤、白血病、甲状腺结节、宫外孕）都先闪出「贫血」，
+       * 把真正的诊断挤到后面。乏力也一并删掉——它没有鉴别价值。 */
+      need: 2,
+      match: ['ros:hemat.anemia', 'pev:skin.color=皮肤黏膜苍白', 'aux:血红蛋白',
+        'pev:general.face=贫血面容', 'pev:special_hematology.hemAnemia=睑结膜苍白'],
+      hint: '面色苍白、睑结膜苍白伴血红蛋白下降，需考虑贫血，并进一步明确病因（缺铁性/巨幼细胞性/失血性等）。',
       note: '可补充：血常规+网织红细胞、铁代谢、叶酸/B12、大便隐血、必要时胃肠镜及妇科评估。'
     },
     {
@@ -389,6 +494,27 @@ const HINTS = (() => {
       match: ['ros:nervous.vertigo', 'ros:nervous.dizziness', 'ros:nervous.tinnitus'],
       hint: '眩晕伴耳鸣或听力下降，需考虑前庭周围性病变，注意排除中枢性眩晕。',
       note: '可补充：Dix-Hallpike 试验、听力检查、头颅MRI、必要时前庭功能检查。'
+    },
+    {
+      id: 'gb', name: '吉兰-巴雷综合征',
+      depts: ['neurology', 'pediatrics', 'emergency'],
+      must: ['pe:special_neurology.neuroDeepReflex','ros:nervous.weakness'],
+      need: 3,
+      /* 与脑卒中的鉴别点是「腱反射」：卒中上运动神经元损害 → 腱反射亢进、病理征阳性；
+       * 吉兰-巴雷是周围神经脱髓鞘 → 腱反射减弱或消失、无病理征。
+       * 所以 match 只认深反射减弱/消失、弛缓性肌力下降、手套袜套样感觉减退，
+       * 刻意不放 ros:nervous.speech 与 pev:nervousPE.nerve=病理反射阳性 这类卒中特征。
+       * need 取 3：单靠「无力 + 麻木」两条会与糖尿病周围神经病变、甲减混淆。 */
+      match: ['ros:nervous.weakness', 'ros:nervous.numbness',
+        'pev:special_neurology.neuroDeepReflex=深反射消失',
+        'pev:nervousPE.tendonReflex=腱反射普遍减弱',
+        'pev:special_neurology.neuroExtra3=肌张力减低',
+        'pev:special_neurology.neuroExtra4=手套袜套样感觉减退',
+        'pev:spine.limbMuscle=双上肢肌力正常、双下肢肌力减退',
+        'pev:spine.limbs=四肢肌力减退',
+        'aux:脑脊液', 'aux:肌电图'],
+      hint: '对称性弛缓性肢体无力、腱反射减弱或消失，起病前有感染史，需考虑吉兰-巴雷综合征。',
+      note: '可补充：腰椎穿刺（蛋白-细胞分离）、肌电图及神经传导速度、肺功能（评估呼吸肌）、心电监护。'
     },
 
     /* ------------------------------ 风湿 ------------------------------ */
@@ -499,20 +625,62 @@ const HINTS = (() => {
       depts: ['pediatrics'],
       must: ['ros:nervous.seizure'],
       need: 2,
-      match: ['ros:nervous.seizure', 'vital:tempUp'],
+      /* 原来 match 只有『抽搐 + 体温升高』，而体温走 vital:tempUp —— 模板不写生命体征，
+       * 于是这条规则在模板场景下只能命中 1 条、永远差一条，属于结构性不可达。
+       * 补 ros:resp.fever 与 cc:发热：两者都是「发热」这件事在不同录入位置的等价表达，
+       * 不改变临床含义（热性惊厥的前提本来就是发热）。 */
+      match: ['ros:nervous.seizure', 'vital:tempUp', 'ros:resp.fever', 'cc:发热'],
       hint: '发热伴抽搐，需考虑热性惊厥，同时排除中枢神经系统感染。',
       note: '可补充：详细惊厥发作描述、血糖电解质、头颅影像（有指征时）、脑电图（反复发作时）。'
     },
 
     /* ------------------------------ 急诊 ------------------------------ */
     {
+      id: 'organophosphate', name: '有机磷中毒',
+      /* 不写 'general'：有机磷中毒是急诊/理化因素范畴，让所有科室都提示没有意义。 */
+      depts: ['emergency'],
+      must: ['ros:nervous.tremor','aux:胆碱酯酶'],
+      need: 4,
+      /* 特征性三联：① 有机磷接触后出现毒蕈碱样（流涎、大汗、腹泻、视物模糊）
+       * ② 烟碱样（肌纤维颤动，走 ros:nervous.tremor）③ 中枢抑制（GCS 下降、嗜睡）。
+       * 胆碱酯酶降低是唯一能定性的客观指标，所以放在 must 里。
+       * 注意：schema 的 head.eyes 与 special_emergency.emConscious 都没有「瞳孔缩小」
+       * 这个选项，缩瞳只能写在主诉/现病史/系统回顾的文字里，规则这边不能用 pe 键表达。
+       * need 取 4：只靠「震颤 + 胆碱酯酶」两条容易被甲亢（震颤）等病历蹭到。 */
+      match: ['ros:nervous.tremor', 'aux:胆碱酯酶',
+        'pev:special_emergency.emExtra1=GCS评分下降',
+        'pev:special_emergency.emConscious=嗜睡',
+        'pev:general.conscious=嗜睡',
+        'pev:special_emergency.emSkin=皮肤湿冷',
+        'pev:special_emergency.emCirculation=脉搏细速',
+        'ros:gi.diarrhea',
+        'ros:nervous.visualBlur',
+        'pev:chest.lungAuscultation=双肺可闻及湿性啰音'],
+      hint: '有有机磷农药接触史，出现流涎、大汗、腹泻、肌纤维颤动、意识障碍，需考虑有机磷中毒。',
+      note: '可补充：全血胆碱酯酶活性（确诊与分级）、血气分析、心电图（监测心律失常）、反复评估呼吸肌与意识。'
+    },
+    {
       id: 'sepsis', name: '脓毒症',
       depts: ['emergency', 'general', 'respiratory', 'digestive', 'surgery'],
       must: ['vital:tempUp','vital:tempDown','pmh:糖尿病'],
       need: 3,
-      match: ['vital:tempUp', 'vital:tachy', 'vital:tachypnea', 'ros:resp.chills',
-        'pev:general.conscious=神志清楚，精神差'],
-      hint: '感染灶 + 心率增快、呼吸急促、意识改变，需警惕脓毒症（qSOFA）。',
+      /* 光有体温和心率不能算脓毒症——那可能只是肺炎、胆管炎本身。
+       * 必须同时有「感染证据」和「器官功能受损证据」，否则这条提示会把
+       * 感染性疾病原发病误判成脓毒症，排在真正的诊断前面。
+       * 感染证据：寒战、CRP/PCT 升高、白细胞异常（走 aux 关键词）；
+       * 器官受损：低血压、意识改变、呼吸急促、乳酸升高。 */
+      match: ['vital:tempUp', 'vital:tempDown', 'vital:tachy', 'vital:tachypnea',
+        'vital:bpDown', 'ros:resp.chills',
+        'aux:CRP', 'aux:降钙素原', 'aux:乳酸', 'aux:血培养',
+        'pev:general.conscious=神志清楚，精神差',
+        /* 急诊床旁能直接看到的器官灌注不足：休克指数、综合评估的休克表现、
+         * 皮肤湿冷、脉搏细速。这 4 项只有真正按脓毒症/休克记录的病历才有，
+         * 不会落在普通肺炎、胆囊炎的病历里。 */
+        'pev:special_emergency.emShock=休克指数0.5～1.0',
+        'pev:special_emergency.emExtra1=休克表现',
+        'pev:special_emergency.emSkin=皮肤湿冷',
+        'pev:special_emergency.emCirculation=脉搏细速'],
+      hint: '感染灶 + 心率增快、呼吸急促、血压下降或意识改变，需警惕脓毒症（qSOFA）。',
       note: '可补充：血培养（抗菌药物使用前）、乳酸、血常规+CRP+PCT、器官功能评估、液体复苏评估。'
     },
     {
@@ -520,8 +688,17 @@ const HINTS = (() => {
       depts: ['emergency', 'cardiology', 'general'],
       must: ['vital:bpDown','pev:skin.color=口唇及肢端发绀','pev:general.conscious=神志清楚，精神差','pev:general.conscious=嗜睡','pev:general.conscious=昏睡'],
       need: 2,
+      /* 原来 match 里 5 条有 3 条是 vital:*，而模板不写生命体征 → 只有 2 条能命中，
+       * 与一堆科室级规则同分 s=1.00，排序上永远被压在后面。
+       * 这里补的 4 条都是「灌注不足」的床旁证据，写在查体里而不是生命体征里：
+       * 休克指数、休克表现（急诊综合评估）、皮肤湿冷、脉搏细速。
+       * 它们只在真正记为休克/脓毒症的病历里出现，不会命中普通内科病例。 */
       match: ['vital:bpDown', 'vital:tachy', 'vital:tachypnea',
-        'pev:skin.color=口唇及肢端发绀', 'pev:general.conscious=神志清楚，精神差'],
+        'pev:skin.color=口唇及肢端发绀', 'pev:general.conscious=神志清楚，精神差',
+        'pev:special_emergency.emShock=休克指数>1.0',
+        'pev:special_emergency.emExtra1=休克表现',
+        'pev:special_emergency.emSkin=皮肤湿冷',
+        'pev:special_emergency.emCirculation=脉搏细速'],
       hint: '血压下降、心率增快、皮肤湿冷、意识改变，提示存在休克，需立即处理。',
       note: '建议立即：建立静脉通路、心电监护、血气+乳酸、床旁超声评估容量状态、明确休克类型。'
     }
@@ -761,7 +938,13 @@ const HINTS = (() => {
     const auxText = (((r.auxiliary || {}).items) || [])
       .map(i => (i.name || '') + (i.result || '')).join(' ').toLowerCase();
     ['胸片', '超声', '心电图', '血常规', '尿常规', '淀粉酶', '脂肪酶', '血红蛋白', '尿蛋白', '大便',
-      '胃镜', '幽门螺杆菌', '隐血', '腹部平片', '腹部ct']
+      '胃镜', '幽门螺杆菌', '隐血', '腹部平片', '腹部ct',
+      'CRP', '降钙素原', '乳酸', '血培养', '肌酐', '肝肾功能',
+      /* 三个专科性很强的关键词：
+       * 胆碱酯酶 → 有机磷中毒的解毒靶点，别处不会查；
+       * 脑脊液、肌电图 → 吉兰-巴雷与中枢感染的客观依据（蛋白-细胞分离、传导速度减慢）。
+       * 目前没有别的规则引用这三个 aux 键，所以只加词、不改任何既有规则得分。 */
+      '胆碱酯酶', '脑脊液', '肌电图']
       .forEach(k => { if (auxText.includes(k.toLowerCase())) F.add('aux:' + (k === '腹部ct' ? 'CT' : k)); });
     if (auxText.includes('ct')) F.add('aux:CT');
 

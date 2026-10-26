@@ -70,7 +70,10 @@ const APP = (() => {
   const FIELD_LEVEL = {
     must: new Set([
       'basic.name', 'basic.gender', 'basic.age', 'basic.department',
-      'basic.chiefComplaint', 'basic.chiefComplaintDuration'
+      'basic.chiefComplaint'
+      // 主诉时长原本在这里。用户要求把「持续时间/单位」两个控件去掉、时间直接写进主诉，
+      // 这个字段就没有对应的输入框了——留在 must 里会让「填写情况」永远报一项必填缺失，
+      // 而那一项在界面上根本不存在，学生永远补不完。
     ]),
     // 留空后「病历里会缺这一项」或只剩通用套话
     should: new Set([
@@ -407,12 +410,16 @@ const APP = (() => {
         <div class="card-title">主诉 <span class="tag-req">必填</span></div>
         ${textarea('主诉症状', 'basic.chiefComplaint', {
           rows: 2,
-          placeholder: '如：发热、咳嗽、咳痰',
+          placeholder: '如：发热、咳嗽、咳黄痰3天',
           hint: '只写症状和体征，不写诊断；一般不超过20字。'
         })}
-        <div class="row2">
-          ${input('持续时间', 'basic.chiefComplaintDuration', { placeholder: '3' })}
-          ${select('单位', 'basic.chiefComplaintDurationUnit', SCHEMA.DURATION_UNITS)}
+        ${/* 用户要求：时间自己写在主诉里（「反复上腹部疼痛2年」），不要再单独给两个下拉框。
+             原来那对「持续时间 + 单位」的控件会把一句话拆成三处，学生写「2年」还得再点一次下拉，
+             而且病历正文里「2」和「年」是拼出来的，改起来要找两个框。
+             现在主诉正文就是唯一真相：写了多久就写在同一句里。 */ ''}
+        <div class="hint">
+          持续时间直接写进主诉，例如「<b>反复上腹部疼痛2年</b>」「<b>发热、咳嗽、咳黄痰3天</b>」。
+          没有写时长的话，生成时会提醒你补。
         </div>
         <div class="live-preview" id="ccPreview"></div>
       </div>
@@ -594,12 +601,12 @@ const APP = (() => {
         ${input('其他疾病', 'pmh.diseaseOther', { placeholder: '补充未列出的疾病' })}
         ${textarea('疾病详情（病程、治疗、控制情况）', 'pmh.diseaseDetail', {
           rows: 3,
-          placeholder: '如：高血压病史5年，长期口服氨氯地平5mg qd，血压控制在130/80mmHg左右',
+          placeholder: '如：高血压病史 5 年，长期口服氨氯地平 5mg qd，血压控制在 130/80mmHg 左右',
           hint: '填写此项后会直接采用这里的文字，替代上面的勾选描述。'
         })}
         ${textarea('长期用药史', 'pmh.longTermMeds', {
           rows: 2,
-          placeholder: '如：长期口服氨氯地平5mg qd（3年）',
+          placeholder: '如：长期口服氨氯地平 5mg qd（3 年）',
           hint: '评分表第2页既往史六项之一（1 分）。与上一条「疾病详情」可并存：详情讲病情，这里单列药名与用法。'
         })}
         ${textarea('与本病无关但仍需治疗的其他疾病', 'pmh.otherTreatDiseases', {
@@ -880,6 +887,9 @@ const APP = (() => {
               <span class="vital-label">${esc(v.label)}</span>
               <input type="number" step="0.1" inputmode="decimal"
                 data-path="pe.vitals.${v.key}" value="${esc(R.pe.vitals[v.key] || '')}"
+                data-min="${v.min === undefined ? '' : v.min}"
+                data-max="${v.max === undefined ? '' : v.max}"
+                data-vlabel="${esc(v.label)}"
                 placeholder="${esc(v.placeholder || '')}">
               <span class="vital-unit">${esc(v.unit)}</span>
             </label>
@@ -1481,7 +1491,8 @@ const APP = (() => {
     const NAME = {
       'basic.name': '姓名', 'basic.gender': '性别', 'basic.age': '年龄',
       'basic.department': '科室', 'basic.chiefComplaint': '主诉症状',
-      'basic.chiefComplaintDuration': '主诉时长',
+      // 主诉时长已并入主诉正文，这里不再有对应输入框。留着一行没有输入框的映射，
+      // 只会让「填写情况」把一个界面上不存在的字段算成缺失。
       'basic.recordNo': '病历号', 'basic.admitDate': '入院日期',
       'basic.informant': '病史陈述者',
       'hpi.onset': '起病情况', 'hpi.symptoms': '症状特点', 'hpi.treatment': '诊治经过',
@@ -2148,6 +2159,45 @@ const APP = (() => {
     box.textContent = `已勾 ${on}/${items.length}`;
   }
 
+  /**
+   * 生命体征输入侧的「可信范围」校验。
+   *
+   * 为什么要有：`GENERATOR.validate()` 里已经有一份同样的范围表（VITAL_RANGE），
+   * 但那要到第 11 步生成病历时才提示。学生在第 9 步把体温打成 375、脉搏打成 7，
+   * 一路点下去毫无阻碍，等看到警告时已经不知道是哪一个数字错了。
+   *
+   * 这里只做一件事：把输入框标红 + 在旁边说明「可信范围是 34～43」。
+   * 不拦输入、不改正数字——万一是真的有这种极端值，改不改由学生判断。
+   */
+  function markVital(el) {
+    if (!el || !el.dataset || el.dataset.min === undefined) return;
+    const lo = el.dataset.min === '' ? null : Number(el.dataset.min);
+    const hi = el.dataset.max === '' ? null : Number(el.dataset.max);
+    const label = el.dataset.vlabel || '这一项';
+    const raw = String(el.value || '').trim();
+    const cell = el.closest('.vital');
+    let note = cell ? cell.querySelector('.vital-warn') : null;
+
+    let bad = '';
+    if (raw !== '' && /^-?\d+(\.\d+)?$/.test(raw)) {
+      const n = Number(raw);
+      if (lo !== null && n < lo) bad = `低于可信范围（${lo}～${hi}）`;
+      else if (hi !== null && n > hi) bad = `高于可信范围（${lo}～${hi}）`;
+    }
+    if (bad) {
+      el.classList.add('is-out-of-range');
+      if (!note && cell) {
+        note = document.createElement('span');
+        note.className = 'vital-warn';
+        cell.appendChild(note);
+      }
+      if (note) note.textContent = `${label}${bad}`;
+    } else {
+      el.classList.remove('is-out-of-range');
+      if (note) note.remove();
+    }
+  }
+
   /** 按组键取查体项列表：普通组从 PE_COMMON 取，special_xxx 从 PE_SPECIAL 取 */
   function peItemsOf(groupKey) {
     if (String(groupKey).startsWith('special_')) {
@@ -2173,6 +2223,8 @@ const APP = (() => {
         // 查体项：只刷新这一个条目的「已填 / 系统默认 / 需填」标记，
         // 不整页重绘（否则输入框会失焦、光标跳到开头）。
         if (t.dataset.path.startsWith('pe.')) refreshPeBadge(t);
+        // 生命体征的可信范围：边输边标，不等生成时才说
+        if (t.dataset.path.startsWith('pe.vitals.')) markVital(t);
         // 过敏史/性别切换需要重绘
         if (t.dataset.path === 'pmh.allergy' || t.dataset.path === 'marital') { }
       }

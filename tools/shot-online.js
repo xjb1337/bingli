@@ -84,8 +84,7 @@ async function main() {
   // 填一点数据后走到评分自查页
   await ev(`(() => {
     const set=(p,v)=>{const el=document.querySelector('[data-path="'+p+'"]');if(el){el.value=v;el.dispatchEvent(new Event('input',{bubbles:true}));}};
-    set('basic.name','李四'); set('basic.age','58'); set('basic.chiefComplaint','发热、咳嗽、咳黄痰');
-    set('basic.chiefComplaintDuration','3');
+    set('basic.name','李四'); set('basic.age','58'); set('basic.chiefComplaint','发热、咳嗽、咳黄痰3天');
     document.querySelector('[data-seg="basic.gender"][data-val="男"]')?.click();
     const s=document.querySelector('select[data-path="basic.department"]');
     if(s){s.value='respiratory';s.dispatchEvent(new Event('change',{bubbles:true}));}

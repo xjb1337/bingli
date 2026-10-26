@@ -20180,7 +20180,11 @@ const CHECKER = (() => {
     {
       const cc = txt(b.chiefComplaint);
       const dur = txt(b.chiefComplaintDuration);
-      const ccHasDur = /[0-9０-９一二三四五六七八九十百]+(天|日|周|月|年|小时|分钟|min|h)$/.test(cc);
+      // 主诉时长现在由学生自己写在主诉正文里（界面上已没有「持续时间/单位」两个框）。
+      // 所以这里必须能从正文里认出来，否则一份「反复上腹痛2年」的规范主诉会被判成
+      // 「还缺持续时间」，把 2.5 分白白扣掉。
+      // 允许末尾带「余/多/左右/来/许」这类约数词——学生真的会写「咳嗽3月余」。
+      const ccHasDur = /[0-9０-９一二三四五六七八九十百千万两半十几数]+(?:个)?(?:天|日|周|星期|月|年|小时|分钟|min|h)(?:余|多|左右|来|许)?$/i.test(cc);
       const onset = txt(h.onset);
       let earned = 0;
       if (cc && (dur || ccHasDur)) earned += 2.5;   // 起病时间
@@ -20191,7 +20195,7 @@ const CHECKER = (() => {
       if (!cc) {
         problems.push('还缺主诉正文：只写「症状＋时间」，不写病名');
       } else {
-        if (!dur && !ccHasDur) problems.push('主诉末尾还缺持续时间（2.5 分）');
+        if (!dur && !ccHasDur) problems.push('主诉末尾还缺持续时间（2.5 分）：例如「反复上腹痛2年」');
         if (bad.length) {
           problems.push('主诉里出现了诊断性词语「' + bad.join('、') + '」，' +
             '评分表要求主诉原则上不用诊断名称，建议改成症状描述');
@@ -21419,18 +21423,27 @@ const CHECKER = (() => {
    */
   function durationVariants(rec) {
     const b = obj(rec.basic);
+    const out = [];
+    const units = [];
     const n = txt(b.chiefComplaintDuration);
     const u = txt(b.chiefComplaintDurationUnit);
-    if (!n) return [];
-    const units = [u];
-    // 单位的中文同义写法（天/日）也一并认
-    if (u === '天') units.push('日');
-    if (u === '日') units.push('天');
-    const out = [];
-    units.filter(Boolean).forEach(x => {
-      out.push(n + x);
-      if (CN_NUM[n]) out.push(CN_NUM[n] + x);
-    });
+    if (n) {
+      units.push(u);
+      // 单位的中文同义写法（天/日）也一并认
+      if (u === '天') units.push('日');
+      if (u === '日') units.push('天');
+      units.filter(Boolean).forEach(x => {
+        out.push(n + x);
+        if (CN_NUM[n]) out.push(CN_NUM[n] + x);
+      });
+    }
+    // 时长现在主要写在主诉正文里（界面上已没有单独的时长框）。
+    // 从「反复上腹痛2年」里把「2年」提出来，S 段写了「2年」才算对得上——
+    // 否则一套新写法，全部现病史都会被判成「时长与主诉不一致」。
+    const fromCC = String(txt(b.chiefComplaint) || '').match(
+      /([0-9０-９一二三四五六七八九十百千万两半十几数]+(?:个)?(?:天|日|周|星期|月|年|小时|分钟|min|h))/i
+    );
+    if (fromCC && out.indexOf(fromCC[1]) < 0) out.push(fromCC[1]);
     return out.filter(Boolean);
   }
 
@@ -21899,7 +21912,9 @@ const CHECKER = (() => {
     // ——第 6 页·入院记录
     {
       const cells = [
-        ['起病时间', isS(b.chiefComplaintDuration) || isS(h.onset)],
+        // 起病时间：时长已并入主诉正文，正文里带了「2年」也算填了
+        ['起病时间', isS(b.chiefComplaintDuration) || isS(h.onset) ||
+          /[0-9０-９一二三四五六七八九十百千万两半十几数]+(?:个)?(?:天|日|周|星期|月|年|小时|分钟)/.test(txt(b.chiefComplaint))],
         ['诱因', isS(h.cause)],
         ['症状', isS(h.symptoms)],
         ['缓解因素', isS(h.relief)],
@@ -23365,6 +23380,13 @@ const GENERATOR = (() => {
     const b = r.basic || {};
     const cc = stripTail(b.chiefComplaint);
     if (!cc) return '';
+    // 用户要求把「持续时间 + 单位」两个控件去掉：时间直接写在主诉这一句里。
+    // 所以这里的第一原则变成**主诉正文是什么就写什么**，不再往后面拼字段。
+    //
+    // 仍然保留 duration 字段的拼接能力，只为两件事：
+    //   1) 套用模板时模板把时长放在单独字段里（53 份模板有 13 份这么写）；
+    //   2) 旧存档里已经存了 duration。
+    // 这两种情况下用户看到的是「正文 + 时长」，不是他手写的，属于历史数据兼容。
     let dur = stripTail(b.chiefComplaintDuration);
     if (!dur) return `${cc}。`;
 
@@ -23517,16 +23539,37 @@ const GENERATOR = (() => {
     return text;
   }
 
-  /** 一键生成现病史初稿（只补齐空字段，不覆盖已写内容） */
+  /**
+   * 一键生成现病史初稿（只补齐空字段，不覆盖已写内容）。
+   *
+   * 起病时间的来源优先级：
+   *   1) 主诉正文里已经写了时长（"反复上腹痛2年" → 取「2年」）；
+   *   2) 旧存档 / 模板里单独的 duration 字段。
+   * 界面上已经没有时长输入框了，所以 ① 是主路径；② 只为兼容旧数据。
+   */
   function draftHPI(r) {
     const h = r.hpi || {};
     const b = r.basic || {};
-    const cc = stripTail(b.chiefComplaint) || '上述症状';
+    // 先从主诉正文里提时长，「反复上腹痛2年」「咳嗽3月余」都能提出来
+    const m = String(b.chiefComplaint || '').match(
+      /([0-9０-９一二三四五六七八九十百千万两半十几数]+(?:个)?(?:天|日|周|星期|月|年|小时|分钟))/i
+    );
+    let cc = stripTail(b.chiefComplaint) || '上述症状';
+    const durText = m ? m[1]
+      : (stripTail(b.chiefComplaintDuration)
+        ? stripTail(b.chiefComplaintDuration) + (b.chiefComplaintDurationUnit || '')
+        : '');
     const out = { ...h };
-    const durText = stripTail(b.chiefComplaintDuration)
-      ? stripTail(b.chiefComplaintDuration) + (b.chiefComplaintDurationUnit || '')
-      : '';
     if (!stripTail(out.onset)) {
+      // 时长已经从主诉里提走了，症状名里就不能再带一遍，
+      // 否则会写出「2年前无明显诱因出现反复上腹痛2年」这种自己重复自己的句子。
+      // 连着后面的约数词一起吃掉：「咳嗽3月余」→「3月前…咳嗽」，
+      // 不能剩个「余」孤零零挂在句尾（「3月前…咳嗽余」，读着像错字）。
+      if (m && durText === m[1]) {
+        const esc = m[1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const rest = stripTail(cc.replace(new RegExp(esc + '(?:余|多|左右|来|许)?'), ''));
+        cc = rest || '上述症状';
+      }
       out.onset = `${durText ? durText + '前' : ''}无明显诱因出现${cc}`;
     }
     if (!stripTail(out.generalCondition)) {
@@ -23847,27 +23890,40 @@ const GENERATOR = (() => {
     // 婚姻状况只有一个真相：婚姻史页填了就以它为准（会写详细情况），
     // 没填则回退到一般项目。两处默认值不同时打架，避免同一份病历自相矛盾。
     const status = m.status || b.marital || '';
-    if (!status) return '';
+    // ⚠️ 已修（用户报「填了却写不进病历」）：这一行原来是 `if (!status) return ''`，
+    // 于是只填了结婚年龄/配偶健康/性生活/夫妻关系、忘了点婚姻状况下拉框时，
+    // 整节婚姻史直接消失——用户填的每一个字都被吃掉，还查不出原因。
+    // 婚姻状况是「叙述的开头」，不是「这一节是否成立」的前提：只要还有一个字段
+    // 有内容，就该把它写出来，缺开头就从句中事实写起（「配偶体健」而不是「已婚，配偶体健」）。
     if (status === '未婚') return '未婚。';
-    let s = status;
-    if (m.age) s += `，${m.age}岁结婚`;
+    // 用数组拼再用「，」连，而不是一路 `s += '，' + x`：没有婚姻状况打头时，
+    // 前者会拼出「，配偶体健」这种以逗号开头的残句，后者天然没有这个问题。
+    const seg = [];
+    if (status) seg.push(status);
+    if (m.age) seg.push(`${m.age}岁结婚`);
     // 学生常直接写「配偶体健」，再冠一次「配偶」就成了「配偶配偶体健」。
     if (m.spouseHealth) {
       const sp = stripTail(m.spouseHealth);
-      s += `，${/^配偶/.test(sp) ? sp : `配偶${sp}`}`;
+      seg.push(/^配偶/.test(sp) ? sp : `配偶${sp}`);
     }
-    appendMarriageExtra(m, part => { s += `，${part}`; });
-    return s + '。';
+    appendMarriageExtra(m, part => { seg.push(part); });
+    if (!seg.length) return '';
+    return seg.join('，') + '。';
   }
 
   /** 月经与生育史（模板里的独立一节） */
   function buildMenstruationChildbirth(r) {
-    const b = r.basic || {};
     const parts = [];
+    // 以前这里把「月经史：」「生育史：」两个标签剥掉再用逗号连成一句，
+    // 结果是「初潮14岁，周期28天，1-0-0-1，顺产1子体健。」
+    // —— 学生填的「子女情况」确实写进去了，但混在月经史一串数字后面，
+    // 没人看得出那句是生育史。用户报的「填了没写进病历」就是这个观感造成的。
+    // 现在两个标签都留着，各写各的；这一节的标题本来就是【月经与生育史】，
+    // 里面再分「月经史：…」「生育史：…」正好对上教材和医院模板的写法。
     const men = buildMenstruation(r);
-    if (men) parts.push(men.replace(/^月经史：/, '').replace(/。$/, ''));
+    if (men) parts.push(men);
     const cb = buildChildbirth(r);
-    if (cb) parts.push(cb.replace(/^生育史：/, '').replace(/。$/, ''));
+    if (cb) parts.push(cb);
     if (!parts.length) {
       // ⚠️ 缺陷2：旧实现在这里返回「无。」（男性）或空串（女性）。
       // 「无。」既不是用户写的内容，也不构成任何有效信息（男性本来就没有月经史，
@@ -23875,26 +23931,28 @@ const GENERATOR = (() => {
       // 现在统一返回占位符，由 generate 拼成「【月经与生育史】／」。
       return PH;
     }
-    return parts.join('，') + '。';
+    return parts.join('\n');
   }
 
   /**
-   * 兼容旧调用：婚姻 + 月经 + 生育合成一句。
+   * 兼容旧调用：婚姻 + 月经 + 生育合成一段。
    *
    * 只被导出给旧调用方 / 测试用，正文里两节是分开写的。
    * 注意占位符：buildMenstruationChildbirth 现在无内容时返回「／」，
    * 不能再给它补句号拼成「未婚，／。」这种怪句子。
+   *
+   * 另外，月经史和生育史现在各带标签、各占一行，不能再拿「，」往婚姻史后面接，
+   * 否则会拼出「已婚，25岁结婚，月经史：初潮14岁，…」这样一整句的长串，
+   * 而下一行又冒出「生育史：」——读起来像排版坏了。
    */
   function buildMarriageChildbirth(r) {
-    const parts = [];
+    const lines = [];
     const mar = buildMarriageHistory(r);
-    if (mar) parts.push(mar.replace(/。$/, ''));
+    if (mar) lines.push(mar);
     const mc = buildMenstruationChildbirth(r);
-    if (mc && mc !== '无。' && mc !== PH) parts.push(mc.replace(/。$/, ''));
-    if (!parts.length) return PH;
-    // 只有占位符时原样返回，不加句号
-    if (parts.length === 1 && parts[0] === PH) return PH;
-    return parts.join('，') + '。';
+    if (mc && mc !== PH) lines.push(mc);
+    if (!lines.length) return PH;
+    return lines.join('\n');
   }
 
   /**
@@ -23939,9 +23997,27 @@ const GENERATOR = (() => {
     const b = r.basic || {};
     // 缺陷M1（已复现）：男性记录里残留着 childbirth 数据（旧存档、切换性别、误填）时，
     // 旧实现照样输出「生育史：2-0-0-2。」——男性没有生育史，这是凭空成文。
-    // 生育史只对女性成立；性别未填（还没选）时同样不写，避免先写成「2-0-0-2」
-    // 再因为选了性别而消失，让用户以为程序吃数据。
-    if (b.gender !== '女') return '';
+    //
+    // ⚠️ 已修（用户报「子女情况填了却写不进病历」）：原来的第一行是
+    //   `if (b.gender !== '女') return '';`
+    // 一刀切掉了男性。可是男性患者的「子女数」「子女健康状况」确实要问、要写
+    // （《诊断学》第10版 第六篇：婚姻史一节的「配偶健康状况」之外，
+    //   男性生育史就是记子女情况）。于是男生在这两个框里填的字被整段吞掉，
+    // 界面上却照样显示「已填」——学生永远发现不了。
+    // 现在按性别分两条路：女性走四项式/孕产次，男性只写子女情况。
+    // 性别还没选（空串）时仍不写：猜错性别比留空更糟。
+    if (!b.gender) return '';
+
+    if (b.gender !== '女') {
+      const mp = [];
+      // 男性界面把「子女数」存进 gravida（历史字段复用），这里按「人」来写，
+      // 绝不能走女性的「孕X产Y」——那会把父亲写成产妇。
+      if (String(c.gravida || '').trim()) mp.push(`育有子女${String(c.gravida).trim()}人`);
+      if (stripTail(c.details)) mp.push(stripTail(c.details));
+      if (!mp.length) return '';
+      return '生育史：' + mp.join('，') + '。';
+    }
+
     const parts = [];
     // 教材《诊断学》第10版 第六篇·病历书写：
     //   「生育史按下列顺序写明：足月分娩数-早产数-流产或人流数-存活数，并记录避孕措施。」
@@ -26793,7 +26869,10 @@ const APP = (() => {
   const FIELD_LEVEL = {
     must: new Set([
       'basic.name', 'basic.gender', 'basic.age', 'basic.department',
-      'basic.chiefComplaint', 'basic.chiefComplaintDuration'
+      'basic.chiefComplaint'
+      // 主诉时长原本在这里。用户要求把「持续时间/单位」两个控件去掉、时间直接写进主诉，
+      // 这个字段就没有对应的输入框了——留在 must 里会让「填写情况」永远报一项必填缺失，
+      // 而那一项在界面上根本不存在，学生永远补不完。
     ]),
     // 留空后「病历里会缺这一项」或只剩通用套话
     should: new Set([
@@ -27130,12 +27209,16 @@ const APP = (() => {
         <div class="card-title">主诉 <span class="tag-req">必填</span></div>
         ${textarea('主诉症状', 'basic.chiefComplaint', {
           rows: 2,
-          placeholder: '如：发热、咳嗽、咳痰',
+          placeholder: '如：发热、咳嗽、咳黄痰3天',
           hint: '只写症状和体征，不写诊断；一般不超过20字。'
         })}
-        <div class="row2">
-          ${input('持续时间', 'basic.chiefComplaintDuration', { placeholder: '3' })}
-          ${select('单位', 'basic.chiefComplaintDurationUnit', SCHEMA.DURATION_UNITS)}
+        ${/* 用户要求：时间自己写在主诉里（「反复上腹部疼痛2年」），不要再单独给两个下拉框。
+             原来那对「持续时间 + 单位」的控件会把一句话拆成三处，学生写「2年」还得再点一次下拉，
+             而且病历正文里「2」和「年」是拼出来的，改起来要找两个框。
+             现在主诉正文就是唯一真相：写了多久就写在同一句里。 */ ''}
+        <div class="hint">
+          持续时间直接写进主诉，例如「<b>反复上腹部疼痛2年</b>」「<b>发热、咳嗽、咳黄痰3天</b>」。
+          没有写时长的话，生成时会提醒你补。
         </div>
         <div class="live-preview" id="ccPreview"></div>
       </div>
@@ -28207,7 +28290,8 @@ const APP = (() => {
     const NAME = {
       'basic.name': '姓名', 'basic.gender': '性别', 'basic.age': '年龄',
       'basic.department': '科室', 'basic.chiefComplaint': '主诉症状',
-      'basic.chiefComplaintDuration': '主诉时长',
+      // 主诉时长已并入主诉正文，这里不再有对应输入框。留着一行没有输入框的映射，
+      // 只会让「填写情况」把一个界面上不存在的字段算成缺失。
       'basic.recordNo': '病历号', 'basic.admitDate': '入院日期',
       'basic.informant': '病史陈述者',
       'hpi.onset': '起病情况', 'hpi.symptoms': '症状特点', 'hpi.treatment': '诊治经过',

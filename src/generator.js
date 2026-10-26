@@ -309,6 +309,13 @@ const GENERATOR = (() => {
     const b = r.basic || {};
     const cc = stripTail(b.chiefComplaint);
     if (!cc) return '';
+    // 用户要求把「持续时间 + 单位」两个控件去掉：时间直接写在主诉这一句里。
+    // 所以这里的第一原则变成**主诉正文是什么就写什么**，不再往后面拼字段。
+    //
+    // 仍然保留 duration 字段的拼接能力，只为两件事：
+    //   1) 套用模板时模板把时长放在单独字段里（53 份模板有 13 份这么写）；
+    //   2) 旧存档里已经存了 duration。
+    // 这两种情况下用户看到的是「正文 + 时长」，不是他手写的，属于历史数据兼容。
     let dur = stripTail(b.chiefComplaintDuration);
     if (!dur) return `${cc}。`;
 
@@ -461,16 +468,37 @@ const GENERATOR = (() => {
     return text;
   }
 
-  /** 一键生成现病史初稿（只补齐空字段，不覆盖已写内容） */
+  /**
+   * 一键生成现病史初稿（只补齐空字段，不覆盖已写内容）。
+   *
+   * 起病时间的来源优先级：
+   *   1) 主诉正文里已经写了时长（"反复上腹痛2年" → 取「2年」）；
+   *   2) 旧存档 / 模板里单独的 duration 字段。
+   * 界面上已经没有时长输入框了，所以 ① 是主路径；② 只为兼容旧数据。
+   */
   function draftHPI(r) {
     const h = r.hpi || {};
     const b = r.basic || {};
-    const cc = stripTail(b.chiefComplaint) || '上述症状';
+    // 先从主诉正文里提时长，「反复上腹痛2年」「咳嗽3月余」都能提出来
+    const m = String(b.chiefComplaint || '').match(
+      /([0-9０-９一二三四五六七八九十百千万两半十几数]+(?:个)?(?:天|日|周|星期|月|年|小时|分钟))/i
+    );
+    let cc = stripTail(b.chiefComplaint) || '上述症状';
+    const durText = m ? m[1]
+      : (stripTail(b.chiefComplaintDuration)
+        ? stripTail(b.chiefComplaintDuration) + (b.chiefComplaintDurationUnit || '')
+        : '');
     const out = { ...h };
-    const durText = stripTail(b.chiefComplaintDuration)
-      ? stripTail(b.chiefComplaintDuration) + (b.chiefComplaintDurationUnit || '')
-      : '';
     if (!stripTail(out.onset)) {
+      // 时长已经从主诉里提走了，症状名里就不能再带一遍，
+      // 否则会写出「2年前无明显诱因出现反复上腹痛2年」这种自己重复自己的句子。
+      // 连着后面的约数词一起吃掉：「咳嗽3月余」→「3月前…咳嗽」，
+      // 不能剩个「余」孤零零挂在句尾（「3月前…咳嗽余」，读着像错字）。
+      if (m && durText === m[1]) {
+        const esc = m[1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const rest = stripTail(cc.replace(new RegExp(esc + '(?:余|多|左右|来|许)?'), ''));
+        cc = rest || '上述症状';
+      }
       out.onset = `${durText ? durText + '前' : ''}无明显诱因出现${cc}`;
     }
     if (!stripTail(out.generalCondition)) {
@@ -791,27 +819,40 @@ const GENERATOR = (() => {
     // 婚姻状况只有一个真相：婚姻史页填了就以它为准（会写详细情况），
     // 没填则回退到一般项目。两处默认值不同时打架，避免同一份病历自相矛盾。
     const status = m.status || b.marital || '';
-    if (!status) return '';
+    // ⚠️ 已修（用户报「填了却写不进病历」）：这一行原来是 `if (!status) return ''`，
+    // 于是只填了结婚年龄/配偶健康/性生活/夫妻关系、忘了点婚姻状况下拉框时，
+    // 整节婚姻史直接消失——用户填的每一个字都被吃掉，还查不出原因。
+    // 婚姻状况是「叙述的开头」，不是「这一节是否成立」的前提：只要还有一个字段
+    // 有内容，就该把它写出来，缺开头就从句中事实写起（「配偶体健」而不是「已婚，配偶体健」）。
     if (status === '未婚') return '未婚。';
-    let s = status;
-    if (m.age) s += `，${m.age}岁结婚`;
+    // 用数组拼再用「，」连，而不是一路 `s += '，' + x`：没有婚姻状况打头时，
+    // 前者会拼出「，配偶体健」这种以逗号开头的残句，后者天然没有这个问题。
+    const seg = [];
+    if (status) seg.push(status);
+    if (m.age) seg.push(`${m.age}岁结婚`);
     // 学生常直接写「配偶体健」，再冠一次「配偶」就成了「配偶配偶体健」。
     if (m.spouseHealth) {
       const sp = stripTail(m.spouseHealth);
-      s += `，${/^配偶/.test(sp) ? sp : `配偶${sp}`}`;
+      seg.push(/^配偶/.test(sp) ? sp : `配偶${sp}`);
     }
-    appendMarriageExtra(m, part => { s += `，${part}`; });
-    return s + '。';
+    appendMarriageExtra(m, part => { seg.push(part); });
+    if (!seg.length) return '';
+    return seg.join('，') + '。';
   }
 
   /** 月经与生育史（模板里的独立一节） */
   function buildMenstruationChildbirth(r) {
-    const b = r.basic || {};
     const parts = [];
+    // 以前这里把「月经史：」「生育史：」两个标签剥掉再用逗号连成一句，
+    // 结果是「初潮14岁，周期28天，1-0-0-1，顺产1子体健。」
+    // —— 学生填的「子女情况」确实写进去了，但混在月经史一串数字后面，
+    // 没人看得出那句是生育史。用户报的「填了没写进病历」就是这个观感造成的。
+    // 现在两个标签都留着，各写各的；这一节的标题本来就是【月经与生育史】，
+    // 里面再分「月经史：…」「生育史：…」正好对上教材和医院模板的写法。
     const men = buildMenstruation(r);
-    if (men) parts.push(men.replace(/^月经史：/, '').replace(/。$/, ''));
+    if (men) parts.push(men);
     const cb = buildChildbirth(r);
-    if (cb) parts.push(cb.replace(/^生育史：/, '').replace(/。$/, ''));
+    if (cb) parts.push(cb);
     if (!parts.length) {
       // ⚠️ 缺陷2：旧实现在这里返回「无。」（男性）或空串（女性）。
       // 「无。」既不是用户写的内容，也不构成任何有效信息（男性本来就没有月经史，
@@ -819,26 +860,28 @@ const GENERATOR = (() => {
       // 现在统一返回占位符，由 generate 拼成「【月经与生育史】／」。
       return PH;
     }
-    return parts.join('，') + '。';
+    return parts.join('\n');
   }
 
   /**
-   * 兼容旧调用：婚姻 + 月经 + 生育合成一句。
+   * 兼容旧调用：婚姻 + 月经 + 生育合成一段。
    *
    * 只被导出给旧调用方 / 测试用，正文里两节是分开写的。
    * 注意占位符：buildMenstruationChildbirth 现在无内容时返回「／」，
    * 不能再给它补句号拼成「未婚，／。」这种怪句子。
+   *
+   * 另外，月经史和生育史现在各带标签、各占一行，不能再拿「，」往婚姻史后面接，
+   * 否则会拼出「已婚，25岁结婚，月经史：初潮14岁，…」这样一整句的长串，
+   * 而下一行又冒出「生育史：」——读起来像排版坏了。
    */
   function buildMarriageChildbirth(r) {
-    const parts = [];
+    const lines = [];
     const mar = buildMarriageHistory(r);
-    if (mar) parts.push(mar.replace(/。$/, ''));
+    if (mar) lines.push(mar);
     const mc = buildMenstruationChildbirth(r);
-    if (mc && mc !== '无。' && mc !== PH) parts.push(mc.replace(/。$/, ''));
-    if (!parts.length) return PH;
-    // 只有占位符时原样返回，不加句号
-    if (parts.length === 1 && parts[0] === PH) return PH;
-    return parts.join('，') + '。';
+    if (mc && mc !== PH) lines.push(mc);
+    if (!lines.length) return PH;
+    return lines.join('\n');
   }
 
   /**
@@ -883,9 +926,27 @@ const GENERATOR = (() => {
     const b = r.basic || {};
     // 缺陷M1（已复现）：男性记录里残留着 childbirth 数据（旧存档、切换性别、误填）时，
     // 旧实现照样输出「生育史：2-0-0-2。」——男性没有生育史，这是凭空成文。
-    // 生育史只对女性成立；性别未填（还没选）时同样不写，避免先写成「2-0-0-2」
-    // 再因为选了性别而消失，让用户以为程序吃数据。
-    if (b.gender !== '女') return '';
+    //
+    // ⚠️ 已修（用户报「子女情况填了却写不进病历」）：原来的第一行是
+    //   `if (b.gender !== '女') return '';`
+    // 一刀切掉了男性。可是男性患者的「子女数」「子女健康状况」确实要问、要写
+    // （《诊断学》第10版 第六篇：婚姻史一节的「配偶健康状况」之外，
+    //   男性生育史就是记子女情况）。于是男生在这两个框里填的字被整段吞掉，
+    // 界面上却照样显示「已填」——学生永远发现不了。
+    // 现在按性别分两条路：女性走四项式/孕产次，男性只写子女情况。
+    // 性别还没选（空串）时仍不写：猜错性别比留空更糟。
+    if (!b.gender) return '';
+
+    if (b.gender !== '女') {
+      const mp = [];
+      // 男性界面把「子女数」存进 gravida（历史字段复用），这里按「人」来写，
+      // 绝不能走女性的「孕X产Y」——那会把父亲写成产妇。
+      if (String(c.gravida || '').trim()) mp.push(`育有子女${String(c.gravida).trim()}人`);
+      if (stripTail(c.details)) mp.push(stripTail(c.details));
+      if (!mp.length) return '';
+      return '生育史：' + mp.join('，') + '。';
+    }
+
     const parts = [];
     // 教材《诊断学》第10版 第六篇·病历书写：
     //   「生育史按下列顺序写明：足月分娩数-早产数-流产或人流数-存活数，并记录避孕措施。」
@@ -1012,19 +1073,42 @@ const GENERATOR = (() => {
     const v = (r.pe || {}).vitals || {};
     // 缺项统一写成「／」，与一般项目、既往史的占位符保持同一个字符（全角斜杠）。
     const val = k => vitalValue(v[k]) || PH;
+    /**
+     * 写进病历的数字要再过一道可信范围。
+     *
+     * 输入框已经会标红，但那只是视觉提示——学生一路点下去，`T -5℃`、`T 999999999℃`
+     * 照样会进病历正文，打印出来就是硬伤。这里在生成侧再挡一次：
+     * 明显不是人体数据的值按「未填」处理（写成「／」），validate() 里会同步说明
+     * 哪个数被跳过了、为什么。
+     *
+     * 为什么不直接改正：不知道学生想填 37.5 还是 375，猜就是编造。
+     * 为什么不原样保留：一个不可能的数字比一个空格更有害——空格学生自己会补，
+     * 离谱的数字他多半看不见。
+     */
+    const safe = k => {
+      const raw = vitalValue(v[k]);
+      if (!raw) return PH;
+      const rng = VITAL_RANGE[k];
+      if (!rng) return raw;
+      if (!/^-?\d+(\.\d+)?$/.test(raw)) return PH;   // 不是数字，写了也是错
+      const n = Number(raw);
+      return n >= rng[0] && n <= rng[1] ? raw : PH;
+    };
     const parts = [
-      `T ${val('temperature')}℃`,
-      `P ${val('pulse')}次/分`,
-      `R ${val('respiration')}次/分`,
+      `T ${safe('temperature')}℃`,
+      `P ${safe('pulse')}次/分`,
+      `R ${safe('respiration')}次/分`,
       // 血压中间用半角 / 分隔收缩压与舒张压，这是病历书写惯例；
       // 未填时两侧都是「／」，呈现为「BP ／/／mmHg」。
-      `BP ${vitalValue(v.sbp) || PH}/${vitalValue(v.dbp) || PH}mmHg`,
-      `身高 ${val('height')}cm`,
-      `体重 ${val('weight')}kg`
+      `BP ${safe('sbp')}/${safe('dbp')}mmHg`,
+      `身高 ${safe('height')}cm`,
+      `体重 ${safe('weight')}kg`
     ];
-    if (vitalValue(v.headCirc)) parts.push(`头围 ${vitalValue(v.headCirc)}cm`);
-    if (vitalValue(v.chestCirc)) parts.push(`胸围 ${vitalValue(v.chestCirc)}cm`);
-    if (vitalValue(v.abdCirc)) parts.push(`腹围 ${vitalValue(v.abdCirc)}cm`);
+    // 头围/胸围/腹围没填时整项不出现（不做占位，避免噪音）；
+    // 填了但超出可信范围时也当没填——否则会输出「头围 ／cm」这种半截。
+    if (vitalValue(v.headCirc) && safe('headCirc') !== PH) parts.push(`头围 ${safe('headCirc')}cm`);
+    if (vitalValue(v.chestCirc) && safe('chestCirc') !== PH) parts.push(`胸围 ${safe('chestCirc')}cm`);
+    if (vitalValue(v.abdCirc) && safe('abdCirc') !== PH) parts.push(`腹围 ${safe('abdCirc')}cm`);
     return parts.join('，') + '。';
   }
 
@@ -2444,12 +2528,13 @@ const GENERATOR = (() => {
       const raw = String(v[k] === undefined || v[k] === null ? '' : v[k]).trim();
       if (!raw) return;
       if (!/^-?\d+(\.\d+)?$/.test(raw)) {
-        w.push(`【生命体征】${label}填的是「${raw}」，不是数字，请核对。`);
+        w.push(`【生命体征】${label}填的是「${raw}」，不是数字。病历里这一项已按「／」留空，请补填。`);
         return;
       }
       const n = Number(raw);
       if (n < lo || n > hi) {
-        w.push(`【生命体征】${label} ${raw} 超出可信范围（${lo}～${hi}），请核对是否多打或少打了一位。`);
+        w.push(`【生命体征】${label} ${raw} 超出可信范围（${lo}～${hi}），`
+          + `病历里这一项已按「／」留空，请核对是否多打或少打了一位后再填。`);
       }
     });
     // 收缩压必须高于舒张压：写反了是最常见的手误，两个数都在范围内时查不出来

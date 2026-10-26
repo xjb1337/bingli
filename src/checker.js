@@ -40,6 +40,15 @@ const CHECKER = (() => {
   const isS = v => typeof v === 'string' && v.trim() !== '';
   const toNum = x => { const n = Number(x); return Number.isFinite(n) ? n : 0; };
   const round1 = n => Math.round(n * 10) / 10;
+  /**
+   * 给一段提示语收尾：已经有句末标点就不再补，避免出现「（5 分）。。」。
+   * 提示语是分多处拼起来的，有的自带句号、有的没有，统一在这里收口。
+   */
+  const endWithPeriod = s => {
+    const t = String(s == null ? '' : s).trim();
+    if (!t) return '';
+    return /[。！？；：，、.!?;:,]$/.test(t) ? t : t + '。';
+  };
   const hasAny = (o, keys) => keys.some(k => isS(obj(o)[k]));
   const anyChecked = o => Object.keys(obj(o)).some(k => !!obj(o)[k]);
 
@@ -314,7 +323,11 @@ const CHECKER = (() => {
     {
       const cc = txt(b.chiefComplaint);
       const dur = txt(b.chiefComplaintDuration);
-      const ccHasDur = /[0-9０-９一二三四五六七八九十百]+(天|日|周|月|年|小时|分钟|min|h)$/.test(cc);
+      // 主诉时长现在由学生自己写在主诉正文里（界面上已没有「持续时间/单位」两个框）。
+      // 所以这里必须能从正文里认出来，否则一份「反复上腹痛2年」的规范主诉会被判成
+      // 「还缺持续时间」，把 2.5 分白白扣掉。
+      // 允许末尾带「余/多/左右/来/许」这类约数词——学生真的会写「咳嗽3月余」。
+      const ccHasDur = /[0-9０-９一二三四五六七八九十百千万两半十几数]+(?:个)?(?:天|日|周|星期|月|年|小时|分钟|min|h)(?:余|多|左右|来|许)?$/i.test(cc);
       const onset = txt(h.onset);
       let earned = 0;
       if (cc && (dur || ccHasDur)) earned += 2.5;   // 起病时间
@@ -325,7 +338,7 @@ const CHECKER = (() => {
       if (!cc) {
         problems.push('还缺主诉正文：只写「症状＋时间」，不写病名');
       } else {
-        if (!dur && !ccHasDur) problems.push('主诉末尾还缺持续时间（2.5 分）');
+        if (!dur && !ccHasDur) problems.push('主诉末尾还缺持续时间（2.5 分）：例如「反复上腹痛2年」');
         if (bad.length) {
           problems.push('主诉里出现了诊断性词语「' + bad.join('、') + '」，' +
             '评分表要求主诉原则上不用诊断名称，建议改成症状描述');
@@ -1553,18 +1566,27 @@ const CHECKER = (() => {
    */
   function durationVariants(rec) {
     const b = obj(rec.basic);
+    const out = [];
+    const units = [];
     const n = txt(b.chiefComplaintDuration);
     const u = txt(b.chiefComplaintDurationUnit);
-    if (!n) return [];
-    const units = [u];
-    // 单位的中文同义写法（天/日）也一并认
-    if (u === '天') units.push('日');
-    if (u === '日') units.push('天');
-    const out = [];
-    units.filter(Boolean).forEach(x => {
-      out.push(n + x);
-      if (CN_NUM[n]) out.push(CN_NUM[n] + x);
-    });
+    if (n) {
+      units.push(u);
+      // 单位的中文同义写法（天/日）也一并认
+      if (u === '天') units.push('日');
+      if (u === '日') units.push('天');
+      units.filter(Boolean).forEach(x => {
+        out.push(n + x);
+        if (CN_NUM[n]) out.push(CN_NUM[n] + x);
+      });
+    }
+    // 时长现在主要写在主诉正文里（界面上已没有单独的时长框）。
+    // 从「反复上腹痛2年」里把「2年」提出来，S 段写了「2年」才算对得上——
+    // 否则一套新写法，全部现病史都会被判成「时长与主诉不一致」。
+    const fromCC = String(txt(b.chiefComplaint) || '').match(
+      /([0-9０-９一二三四五六七八九十百千万两半十几数]+(?:个)?(?:天|日|周|星期|月|年|小时|分钟|min|h))/i
+    );
+    if (fromCC && out.indexOf(fromCC[1]) < 0) out.push(fromCC[1]);
     return out.filter(Boolean);
   }
 
@@ -1943,7 +1965,7 @@ const CHECKER = (() => {
         status = 'ok';
       }
       items.push(item('总体—书写简洁扼要、临床思路清晰', '第 5 页·总体',
-        5, earned, tips.join('；') + (tips.length ? '。' : ''), { status: status }));
+        5, earned, endWithPeriod(tips.join('；')), { status: status }));
     }
 
     // 字迹整洁 5 分 ——第 5 页·总体（卷面分，本工具不能判断，故不计分）
@@ -2033,7 +2055,9 @@ const CHECKER = (() => {
     // ——第 6 页·入院记录
     {
       const cells = [
-        ['起病时间', isS(b.chiefComplaintDuration) || isS(h.onset)],
+        // 起病时间：时长已并入主诉正文，正文里带了「2年」也算填了
+        ['起病时间', isS(b.chiefComplaintDuration) || isS(h.onset) ||
+          /[0-9０-９一二三四五六七八九十百千万两半十几数]+(?:个)?(?:天|日|周|星期|月|年|小时|分钟)/.test(txt(b.chiefComplaint))],
         ['诱因', isS(h.cause)],
         ['症状', isS(h.symptoms)],
         ['缓解因素', isS(h.relief)],

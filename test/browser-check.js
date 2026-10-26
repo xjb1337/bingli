@@ -125,8 +125,8 @@ async function main() {
     };
     set('basic.name','张三');
     set('basic.age','58');
-    set('basic.chiefComplaint','发热、咳嗽、咳黄痰');
-    set('basic.chiefComplaintDuration','3');
+    // 主诉时长现在直接写进主诉正文：界面上已没有「持续时间 / 单位」两个框。
+    set('basic.chiefComplaint','发热、咳嗽、咳黄痰3天');
     document.querySelector('[data-seg="basic.gender"][data-val="男"]').click();
     document.querySelector('[data-seg="basic.marital"][data-val="已婚"]').click();
     'ok'

@@ -109,8 +109,8 @@ async function main() {
     const set = (p,v) => { const el=document.querySelector('[data-path="'+p+'"]'); if(el){el.value=v;el.dispatchEvent(new Event('input',{bubbles:true}));} };
     set('basic.name','线上测试');
     set('basic.age','60');
-    set('basic.chiefComplaint','咳嗽咳痰');
-    set('basic.chiefComplaintDuration','5');
+    // 时长写进主诉正文——界面上已经没有单独的「持续时间 / 单位」输入框
+    set('basic.chiefComplaint','咳嗽咳痰5天');
     document.querySelector('[data-seg="basic.gender"][data-val="男"]').click();
     const s=document.querySelector('select[data-path="basic.department"]');
     s.value='respiratory'; s.dispatchEvent(new Event('change',{bubbles:true}));

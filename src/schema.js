@@ -236,20 +236,23 @@ const SCHEMA = (() => {
    * ------------------------------------------------------------------- */
 
   const VITALS = [
-    { key: 'temperature', label: '体温', unit: '℃', placeholder: '36.5', type: 'number' },
-    { key: 'pulse', label: '脉搏', unit: '次/分', placeholder: '78', type: 'number' },
-    { key: 'respiration', label: '呼吸', unit: '次/分', placeholder: '18', type: 'number' },
-    { key: 'sbp', label: '收缩压', unit: 'mmHg', placeholder: '120', type: 'number' },
-    { key: 'dbp', label: '舒张压', unit: 'mmHg', placeholder: '80', type: 'number' },
-    { key: 'height', label: '身高', unit: 'cm', placeholder: '170', type: 'number' },
-    { key: 'weight', label: '体重', unit: 'kg', placeholder: '60', type: 'number' },
+    // min/max 是「可信范围」，不是正常范围。超出可信范围基本是打错字或多按一位；
+    // 输入时就地标红，不用等到第 11 步生成时才发现。
+    // 工具不判断正常异常——正常参考值因人而异，这里只拦明显输错。
+    { key: 'temperature', label: '体温', unit: '℃', placeholder: '36.5', type: 'number', min: 34, max: 43 },
+    { key: 'pulse', label: '脉搏', unit: '次/分', placeholder: '78', type: 'number', min: 20, max: 250 },
+    { key: 'respiration', label: '呼吸', unit: '次/分', placeholder: '18', type: 'number', min: 5, max: 80 },
+    { key: 'sbp', label: '收缩压', unit: 'mmHg', placeholder: '120', type: 'number', min: 50, max: 300 },
+    { key: 'dbp', label: '舒张压', unit: 'mmHg', placeholder: '80', type: 'number', min: 20, max: 200 },
+    { key: 'height', label: '身高', unit: 'cm', placeholder: '170', type: 'number', min: 30, max: 250 },
+    { key: 'weight', label: '体重', unit: 'kg', placeholder: '60', type: 'number', min: 1, max: 300 },
     // 腹围：教材《病历书写》「腹部」一节明确列出「腹围（妊娠、肥胖、腹腔积液等情况时测量）」，
     // 测量方法为「让病人排尿后平卧，用软尺经脐绕腹一周」。放在生命体征卡里与身高体重同排，
     // 消化内科/产科/儿科都常用，因此不加 dept 限制。
-    { key: 'abdCirc', label: '腹围', unit: 'cm', placeholder: '80', type: 'number' },
+    { key: 'abdCirc', label: '腹围', unit: 'cm', placeholder: '80', type: 'number', min: 20, max: 200 },
     // 儿科专用
-    { key: 'headCirc', label: '头围', unit: 'cm', placeholder: '34', type: 'number', dept: 'pediatrics' },
-    { key: 'chestCirc', label: '胸围', unit: 'cm', placeholder: '33', type: 'number', dept: 'pediatrics' }
+    { key: 'headCirc', label: '头围', unit: 'cm', placeholder: '34', type: 'number', min: 20, max: 70, dept: 'pediatrics' },
+    { key: 'chestCirc', label: '胸围', unit: 'cm', placeholder: '33', type: 'number', min: 20, max: 120, dept: 'pediatrics' }
   ];
 
   /**

@@ -146,11 +146,19 @@ test('产物声明 UTF-8 编码与移动端 viewport', () => {
 /* ======================= 体积约束 ======================= */
 
 test('产物体积在合理范围（手机加载要快）', () => {
-  const kb = fs.statSync(DIST).size / 1024;
-  // 这个断言只用来兜住「模块被重复内联」这类失控增长，不是精确预算。
-  // 参考：2026-10 加入 checker.js（四个考站的自查规则库）后约 390KB，
-  // 加模板病例（消化内科 6 个病种，纯数据约 10KB/个）后约 620KB，
-  // 经 GitHub Pages 传输时 gzip 后不到 120KB，手机上可接受。
-  assert.ok(kb < 900, `产物 ${kb.toFixed(1)}KB 偏大，先检查是否模块被重复内联`);
-  assert.ok(kb > 50, `产物 ${kb.toFixed(1)}KB 异常偏小，可能内容缺失`);
+  const buf = fs.readFileSync(DIST);
+  const rawKb = buf.length / 1024;
+  // 手机真正下载的是压缩后的字节。GitHub Pages 对 text/html 一律 gzip，
+  // 所以「学生要等多久」取决于这一行，而不是文件在磁盘上多大。
+  const gzipKb = require('node:zlib').gzipSync(buf, { level: 9 }).length / 1024;
+
+  // 原始体积：只兜住「模块被重复内联」这类失控增长。模板病例是纯中文长文本，
+  // 重复度高、压得极狠——42 份模板让原始体积从 620KB 涨到 1040KB，
+  // 但 gzip 后只从 74KB 涨到 262KB，所以原始体积的上限必须留得足够宽。
+  assert.ok(rawKb < 1600, `产物原始体积 ${rawKb.toFixed(1)}KB 偏大，先检查是否模块被重复内联`);
+  assert.ok(rawKb > 50, `产物 ${rawKb.toFixed(1)}KB 异常偏小，可能内容缺失`);
+
+  // 压缩体积：这才是手机上首屏要下载的量。留 400KB 余量，
+  // 够再加 20 份模板而不必回来改这个数字。
+  assert.ok(gzipKb < 400, `产物 gzip 后 ${gzipKb.toFixed(1)}KB，手机上首次打开会明显变慢`);
 });

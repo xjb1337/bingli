@@ -63,7 +63,26 @@ var TEMPLATES = (function () {
     // 记录套用前的空/非空状态，用于统计「本来就有内容的没被动过」
     const before = snapshotNonEmpty(record);
 
+    // 主诉时长和它的单位是一体的，必须一起看。
+    // 坑：emptyRecord() 把 basic.chiefComplaintDurationUnit 的默认值写成了「天」，
+    // 而 fillBlanks 只填空位 —— 模板写「3 / 月」时，时长填上了，单位却被默认的「天」
+    // 顶掉，于是主诉变成「乏力 3天」，现病史却写「3个月前」。（13 个模板踩过这条）
+    // 所以：只有时长本来就是空的（即这个时长来自模板）才跟着写单位；
+    // 学生自己填过的时长，单位也归学生，不动。
+    const beforeDur = String((record.basic && record.basic.chiefComplaintDuration) || '').trim();
+    const tplBasic = t.record.basic || {};
+
     const filled = RECORD_CORE.fillBlanks(record, t.record);
+
+    if (!beforeDur && String(tplBasic.chiefComplaintDuration || '').trim()) {
+      const unit = String(tplBasic.chiefComplaintDurationUnit || '').trim();
+      if (unit && record.basic.chiefComplaintDurationUnit !== unit) {
+        record.basic.chiefComplaintDurationUnit = unit;
+        if (filled.indexOf('basic.chiefComplaintDurationUnit') < 0) {
+          filled.push('basic.chiefComplaintDurationUnit');
+        }
+      }
+    }
 
     // 套用时科室若还停在 general，顺手把模板的科室填上，否则专科查体出不来
     if (t.dept && (!record.basic.department || record.basic.department === 'general')) {

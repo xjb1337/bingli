@@ -50,7 +50,12 @@ test('每个模板的 key 唯一、dept 是合法科室、有 name', () => {
   const keys = new Set();
   const deptKeys = S.DEPARTMENTS.map(d => d.key);
   TEMPLATES.all().forEach(t => {
-    assert.match(t.key, /^[a-z][a-z0-9]*$/, `模板 key「${t.key}」应是小写英文`);
+    // key 同时是文件名（tools/tpl-parts/<key>.cjs）和 data-tpl 属性值，
+    // 所以只约束「小写字母开头、只含字母数字」，允许中间驼峰。
+    // 一开始写成全小写是有原因的——怕有人写 key 和文件名对不上。
+    // 但 pedPneumonia 这种驼峰比 pedpneumonia 好读太多，而唯一性由下面这条断言管着，
+    // 文件名一致性由 tools/check-templates.js 管着，正则没必要卡死风格。
+    assert.match(t.key, /^[a-z][a-zA-Z0-9]*$/, `模板 key「${t.key}」应以小写字母开头且只含字母数字`);
     assert.ok(!keys.has(t.key), `模板 key「${t.key}」重复`);
     keys.add(t.key);
     assert.ok(deptKeys.includes(t.dept), `模板「${t.key}」的 dept「${t.dept}」不是合法科室键`);
@@ -258,4 +263,34 @@ test('模板里宣告的诊断都出现在生成病历的【初步诊断】里',
     });
   });
   assert.deepEqual(bad, [], bad.join('\n'));
+});
+test('主诉的时长单位必须跟着模板一起生效（不会被默认的「天」顶掉）', () => {
+  // 坑的来历：emptyRecord() 把 basic.chiefComplaintDurationUnit 的默认值写成了「天」，
+  // 而 fillBlanks 只填空位 —— 模板写「3 / 月」时，时长填上了，单位却被「天」顶掉，
+  // 于是主诉说「乏力 3 天」，现病史说「3 个月前」，同一份病历自相矛盾。
+  const bad = [];
+  TEMPLATES.all().forEach(t => {
+    const b = t.record.basic || {};
+    const dur = String(b.chiefComplaintDuration || '').trim();
+    const unit = String(b.chiefComplaintDurationUnit || '').trim();
+    if (!dur || !unit) return;
+
+    const r = S.emptyRecord();
+    TEMPLATES.apply(r, t.key);
+    const ccSec = G.generate(r).text.split('【主诉】')[1] || '';
+    const cc = (ccSec.split('\n').filter(s => s.trim())[0] || '').trim();
+    if (!cc.includes(dur + unit)) {
+      bad.push(`${t.key}: 期望主诉含「${dur}${unit}」，实际是「${cc}」`);
+    }
+  });
+  assert.deepEqual(bad, [], bad.join('\n'));
+});
+
+test('学生自己填过的时长，套模板时不会被改单位', () => {
+  const r = S.emptyRecord();
+  r.basic.chiefComplaintDuration = '6';
+  r.basic.chiefComplaintDurationUnit = '小时';
+  TEMPLATES.apply(r, 'pud');           // pud 模板写的是 2 年
+  assert.equal(r.basic.chiefComplaintDuration, '6', '学生填的时长被改了');
+  assert.equal(r.basic.chiefComplaintDurationUnit, '小时', '学生填的单位被改了');
 });

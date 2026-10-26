@@ -71,14 +71,14 @@ async function main() {
     const set = (p,v) => { const el = document.querySelector('[data-path="'+p+'"]'); el.value = v; el.dispatchEvent(new Event('input',{bubbles:true})); };
     set('basic.name','欧阳小明');
     set('basic.age','67');
-    set('basic.chiefComplaint','头晕伴右侧肢体乏力');
-    set('basic.chiefComplaintDuration','6');
+    // 时长直接写在主诉正文里，界面上已经没有单独的时长框了
+    set('basic.chiefComplaint','头晕伴右侧肢体乏力6天');
     document.querySelector('[data-seg="basic.gender"][data-val="男"]').click();
     document.querySelector('[data-seg="basic.marital"][data-val="已婚"]').click();
   })()`);
   await sleep(300);
   const cc = await ev(`document.querySelector('#ccPreview').textContent`);
-  check('中文主诉生成', cc.includes('头晕伴右侧肢体乏力3天') || cc.includes('6'), cc.trim());
+  check('中文主诉生成', cc.includes('头晕伴右侧肢体乏力6天'), cc.trim());
 
   // 3. 切神经内科，验证科室已切换（跳转标签在体格检查页才渲染）
   await ev(`(() => {

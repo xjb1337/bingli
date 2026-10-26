@@ -58,7 +58,6 @@ async function main() {
     set('basic.name', '田泓宇');
     set('basic.age', '7月');
     set('basic.chiefComplaint', '发热、咳嗽8天');
-    set('basic.chiefComplaintDuration', '8');
     const g = document.querySelector('[data-seg="basic.gender"][data-val="男"]');
     if (g) g.click();
     const s = document.querySelector('select[data-path="basic.department"]');

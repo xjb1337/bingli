@@ -108,7 +108,7 @@ function token() {
 
 const TOKEN = token();
 
-async function api(method, path, body) {
+async function apiOnce(method, path, body) {
   const res = await fetch(API + path, {
     method,
     headers: {
@@ -122,10 +122,27 @@ async function api(method, path, body) {
   const text = await res.text();
   let json = null;
   try { json = text ? JSON.parse(text) : null; } catch { /* 非 JSON */ }
-  if (!res.ok) {
-    throw new Error(`${method} ${path} → HTTP ${res.status}: ${text.slice(0, 300)}`);
+  return { ok: res.ok, status: res.status, text, json };
+}
+
+/* 这台机器的出口网络对 api.github.com 很不稳定：偶发 ECONNRESET、偶发 HTTP 400
+ * 「malformed request」，同一份 body 重发一次就过。所以统一做三次重试，
+ * 只有连续三次都失败才认为真的出错。 */
+async function api(method, path, body) {
+  let last = '';
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const r = await apiOnce(method, path, body);
+      if (r.ok) return r.json;
+      last = `HTTP ${r.status}: ${r.text.slice(0, 300)}`;
+      if (process.env.DBG) console.log(`  [retry ${attempt}] ${method} ${path} → ${r.status}`);
+    } catch (e) {
+      last = String(e && e.message || e);
+      if (process.env.DBG) console.log(`  [retry ${attempt}] ${method} ${path} → ${last}`);
+    }
+    if (attempt < 3) await new Promise(r => setTimeout(r, 600 * attempt));
   }
-  return json;
+  throw new Error(`${method} ${path} → ${last}`);
 }
 
 const localHead = git('rev-parse', 'HEAD');
@@ -173,7 +190,10 @@ for (const line of nameStatus) {
     console.log(`  删除 ${path}`);
     continue;
   }
-  const content = readFileSync(path);
+  let content;
+  try { content = readFileSync(path); }
+  catch (e) { throw new Error(`读不到 ${JSON.stringify(path)}（长度 ${path.length}）：${e.message}`); }
+  if (process.env.DBG) console.log(`  [dbg] path=${JSON.stringify(path)} len=${path.length} bytes=${content.length}`);
   // Git blob 存的是原始字节；文本文件用 UTF-8 编码后 base64
   const b64 = content.toString('base64');
   const blob = await api('POST', `/repos/${OWNER}/${REPO}/git/blobs`, {

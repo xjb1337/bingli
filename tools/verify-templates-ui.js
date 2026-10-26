@@ -132,17 +132,30 @@ async function main() {
       atDigestive.count === 6 && atDigestive.onlyDigestive === true,
       `${atDigestive.count} 个：${atDigestive.keys.join(', ')} ${atDigestive.countTag.trim()}`);
 
-    // 点错科室不能串台
+    // 点错科室不能串台：心内科的模板只该是自己的那几份，绝不能混进消化内科的
     const crossDept = await evaluate(`(() => {
       const r = APP.getRecord();
       r.basic.department = 'cardiology';
       APP._test.render();
-      const n = document.querySelectorAll('[data-tpl]').length;
+      const btns = Array.from(document.querySelectorAll('[data-tpl]'));
+      const keys = btns.map(b => b.dataset.tpl);
+      const own = APP._test.templatesOf('cardiology').map(t => t.key);
+      const digest = APP._test.templatesOf('digestive').map(t => t.key);
+      const out = {
+        count: btns.length,
+        // 列出来的每一份都必须是心内科自己的
+        allOwn: keys.every(k => own.includes(k)),
+        // 一份消化内科的模板都不许出现在这里
+        noCrosstalk: keys.every(k => !digest.includes(k)),
+        keys: keys
+      };
       r.basic.department = 'digestive';
       APP._test.render();
-      return n;
+      return out;
     })()`);
-    check('切到心内科时一个模板都不列（目前只做了消化内科）', crossDept === 0, `按钮=${crossDept}`);
+    check('切到心内科时只列心内科自己的模板，不串消化内科的',
+      crossDept.allOwn === true && crossDept.noCrosstalk === true,
+      `${crossDept.count} 个：${crossDept.keys.join(', ')}`);
 
     // ---- ③ 套用模板：空白被填、身份仍空、科室正确 ----
     await evaluate(`(() => {
