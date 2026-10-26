@@ -82,6 +82,10 @@ const FIELDS = [
   ['personal.growth', '生长发育正常'],
   ['personal.maternal', '母亲孕期体健'],
   ['personal.habits', '无特殊嗜好'],
+  // 精神科两栏：值与标签同形时不能重复加标签（buildPersonal 里判了前缀），
+  // 所以这里故意写成不带标签的纯内容，测的是「值本身有没有丢」。
+  ['personal.premorbidPersonality', '内向敏感追求完美'],
+  ['personal.stressEvent', '丧偶后出现情绪低落'],
 
   // 婚姻史
   ['marriage.status', '已婚'],

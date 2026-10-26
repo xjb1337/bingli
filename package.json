@@ -25,7 +25,9 @@
     "audit:ui": "node tools/verify-ui-audit.js",
     "audit:touch": "node tools/verify-touch-data.js",
     "audit:fields": "node tools/check-field-reach.js",
-    "audit:top1": "node tools/check-top1.js"
+    "audit:top1": "node tools/check-top1.js",
+    "e2e:psychiatry": "node tools/verify-psychiatry-ui.js",
+    "test:psychiatry": "node --test tests/psychiatry.test.cjs"
   },
   "engines": {
     "node": ">=22"

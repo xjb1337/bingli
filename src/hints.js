@@ -701,6 +701,109 @@ const HINTS = (() => {
         'pev:special_emergency.emCirculation=脉搏细速'],
       hint: '血压下降、心率增快、皮肤湿冷、意识改变，提示存在休克，需立即处理。',
       note: '建议立即：建立静脉通路、心电监护、血气+乳酸、床旁超声评估容量状态、明确休克类型。'
+    },
+
+    /* ------------------------------ 精神 ------------------------------ */
+
+    /* 精神科规则的总原则：
+     * ① depts 一律只写 ['psychiatry']。analyze() 的 inDept 是
+     *    `deptKey === 'general' || depts.includes(deptKey) || depts.includes('general')`，
+     *    一旦写上 'general'，这些规则就会在**所有科室**的病历里出现——
+     *    内科病人随口一句「最近睡不好、有点焦虑」就会被提示「焦虑障碍」。
+     * ② 「情绪低落」「焦虑」这类词没有鉴别力，几乎任何病人都可能写上一句，
+     *    所以必须条件（must）只认有定位价值的精神检查阳性，
+     *    且 need 取 3 以上，靠单条 core 症状撑不起诊断。 */
+    {
+      id: 'depression', name: '抑郁发作',
+      depts: ['psychiatry'],
+      /* ICD-10/DSM-5 都要求「核心症状」：心境低落或兴趣与愉快感丧失，
+       * 二者至少其一。故 must 只放 moodLow 与 interestLoss，
+       * 不把 energyLoss/appetiteChange 这些附加症状当必要条件。 */
+      must: ['ros:nervous.moodLow', 'ros:nervous.interestLoss'],
+      /* need 取 3：只写「情绪低落」一条时 m=1、撑不住，避免内科病历里
+       * 一句「心情不好」就冒出抑郁发作（护栏自测项之一）。 */
+      need: 3,
+      match: ['ros:nervous.moodLow', 'ros:nervous.interestLoss',
+        'ros:nervous.energyLoss', 'ros:nervous.suicidal',
+        'ros:nervous.appetiteChange', 'ros:nervous.insomnia',
+        'ros:nervous.memoryLoss',
+        'pev:special_psychiatry.psyMood=情感低落',
+        'pev:special_psychiatry.psyInsight=自知力完整，承认有病并愿意接受治疗',
+        'pev:special_psychiatry.psyCognition=近事记忆力减退',
+        'pev:special_psychiatry.psyBehavior=意志减退，生活懒散'],
+      hint: '持续的情绪低落与兴趣减退，伴精力下降、睡眠或食欲改变，需考虑抑郁发作；注意评估自杀风险。',
+      note: '可补充：病程是否≥2周、HAMD/PHQ-9 评分、甲状腺功能排除甲减、既往躁狂史（排除双相）。'
+    },
+    {
+      id: 'schizophrenia', name: '精神分裂症',
+      depts: ['psychiatry'],
+      /* 必要条件必须是「阳性精神病性症状」：幻觉，或妄想（任一型）。
+       * 「被害妄想」与「有关系妄想」是 psyThoughtContent 的两个不同取值，
+       * pev: 是整串精确匹配，不能合成一条，必须分开写。
+       * 注意 schema 里的原值是「有关系妄想」，不是「关系妄想」——
+       * 少一个字这里就永远命不中（脚本逐个比对过选项表）。 */
+      must: ['ros:nervous.hallucination',
+        'pev:special_psychiatry.psyPerception=幻听',
+        'pev:special_psychiatry.psyThoughtContent=被害妄想',
+        'pev:special_psychiatry.psyThoughtContent=有关系妄想'],
+      need: 2,
+      match: ['ros:nervous.hallucination',
+        'pev:special_psychiatry.psyPerception=幻听',
+        'pev:special_psychiatry.psyThoughtContent=被害妄想',
+        'pev:special_psychiatry.psyThoughtContent=有关系妄想',
+        'pev:special_psychiatry.psyThoughtForm=思维散漫',
+        'pev:special_psychiatry.psyThoughtForm=思维破裂',
+        'pev:special_psychiatry.psyInsight=自知力缺失，否认有病',
+        'pev:special_psychiatry.psyBehavior=冲动毁物行为',
+        'pev:special_psychiatry.psyAppearance=接触被动，问话少答',
+        'pev:special_psychiatry.psyAppearance=接触违拗，拒绝检查',
+        'ros:nervous.behaviorAbnormal', 'ros:nervous.speech'],
+      hint: '幻觉、妄想等精神病性症状，伴自知力缺失，需考虑精神分裂症。',
+      note: '可补充：病程≥6 个月、PANSS 评分、排除物质所致精神障碍与器质性精神障碍。'
+    },
+    {
+      id: 'bipolar', name: '双相情感障碍（躁狂发作）',
+      depts: ['psychiatry'],
+      /* 关键鉴别：躁狂的 must 只放「躁狂三联」——情感高涨、思维奔逸、活动增多。
+       * 不把 ros:nervous.moodLow 写进 must：抑郁发作同样有 moodLow，
+       * 放进来会让单纯抑郁发作同时满足双相的条件，把抑郁的 top1 顶掉。
+       * 「既往抑郁发作」这条线索通过 match 里的 moodLow 计分，
+       * 由 hint 提示医生去追问，而不是让它当必要条件。 */
+      must: ['pev:special_psychiatry.psyMood=情感高涨',
+        'pev:special_psychiatry.psyThoughtForm=思维奔逸',
+        'pev:special_psychiatry.psyBehavior=意志增强，活动增多'],
+      need: 2,
+      match: ['pev:special_psychiatry.psyMood=情感高涨',
+        'pev:special_psychiatry.psyThoughtForm=思维奔逸',
+        'pev:special_psychiatry.psyBehavior=意志增强，活动增多',
+        'pev:special_psychiatry.psyMood=情感不稳，易激惹',
+        'pev:special_psychiatry.psySpeech=语速增快，言语增多',
+        'pev:special_psychiatry.psyThoughtContent=夸大妄想',
+        'ros:nervous.moodLow',
+        'ros:nervous.energyLoss',
+        'cc:情绪高涨', 'cc:易激惹', 'cc:言语增多'],
+      hint: '情感高涨、思维奔逸、活动增多（躁狂三联），需考虑双相情感障碍躁狂发作；' +
+        '需追问既往是否有抑郁发作、发作间期是否完全缓解以支持双相诊断。',
+      note: '可补充：YMRS 评分、既往发作史与发作间期社会功能、排除甲状腺功能亢进与物质所致。'
+    },
+    {
+      id: 'anxiety', name: '焦虑障碍',
+      depts: ['psychiatry'],
+      /* 必要条件：焦虑体验本身或精神检查里的「焦虑紧张」。
+       * 刻意不把心悸、震颤、出汗这些躯体症状写进 must——它们在
+       * 心内科、内分泌科病历里到处都是，一进 must 就会全科乱冒。 */
+      must: ['ros:nervous.anxiety', 'pev:special_psychiatry.psyMood=焦虑紧张'],
+      need: 2,
+      /* match 只留 5 条：两条必要条件 + 睡眠障碍、震颤、精力下降。
+       * 躯体症状（心悸/出汗）一律不收：它们在别的科也常见，
+       * 塞进来会让心内科病历冒出「焦虑障碍」。 */
+      match: ['ros:nervous.anxiety',
+        'pev:special_psychiatry.psyMood=焦虑紧张',
+        'ros:nervous.insomnia',
+        'ros:nervous.tremor',
+        'ros:nervous.energyLoss'],
+      hint: '持续焦虑紧张伴睡眠障碍与自主神经症状，需考虑焦虑障碍。',
+      note: '可补充：GAD-7 评分、病程≥6 个月、排除甲亢与心律失常。'
     }
   ];
 
@@ -814,7 +917,15 @@ const HINTS = (() => {
 
     const ccKeys = ['发热', '咳嗽', '咳痰', '咯血', '呼吸困难', '气促', '喘息', '胸闷', '胸痛',
       '心悸', '上腹痛', '腹痛', '转移性右下腹痛', '右上腹痛', '腹泻', '呕吐', '腹胀', '黑便',
-      '呕血', '黄疸', '水肿', '血尿', '头痛', '头晕', '乏力', '消瘦'];
+      '呕血', '黄疸', '水肿', '血尿', '头痛', '头晕', '乏力', '消瘦',
+      /* 精神科症状词：原表 28 个词全是内外科症状，「情绪低落、兴趣减退」这类
+       * 精神科主诉一个字都命中不了，精神科规则的 cc: 特征等于不存在。
+       * 这些词都不含「痛」字，不会被下面 flatCC 的「X痛→痛」归一化破坏。
+       * 「体重下降」同时收「体重减轻」：口语写法两种都常见。 */
+      '情绪低落', '兴趣减退', '快感缺失', '精力下降', '乏力感', '失眠', '早醒',
+      '自杀', '自伤', '幻觉', '幻听', '妄想', '被害妄想', '行为异常',
+      '言语增多', '情绪高涨', '易激惹', '焦虑', '惊恐', '强迫', '记忆力下降',
+      '食欲减退', '体重下降', '体重减轻'];
 
     // 主诉/现病史里的说法太活，「上腹部疼痛」「上腹隐痛」都不会包含子串「上腹痛」，
     // 于是最常见的上腹痛连 cc:上腹痛 都命不中，消化性溃疡一条规则都触发不了。
@@ -841,7 +952,10 @@ const HINTS = (() => {
     // 慢性病史手写文本也识别
     const pmhText = `${(r.pmh || {}).diseaseDetail || ''} ${(r.pmh || {}).special || ''}`;
     ['高血压', '糖尿病', '冠心病', '慢性肾脏病', '肝硬化', '病毒性肝炎', '脑卒中',
-      '痛风', '甲状腺功能亢进', '甲状腺功能减退', '类风湿关节炎', '肺结核']
+      '痛风', '甲状腺功能亢进', '甲状腺功能减退', '类风湿关节炎', '肺结核',
+      /* 精神科既往史：复发率极高，「既往精神分裂症」「既往抑郁发作」是本次
+       * 诊断的直接依据，不识别就等于让精神科病历丢掉最重要的那条线索。 */
+      '精神分裂症', '抑郁症', '双相情感障碍', '躁狂', '焦虑症', '强迫症', '精神疾病']
       .forEach(dz => { if (pmhText.includes(dz)) F.add('pmh:' + dz); });
 
     // 个人史
@@ -944,7 +1058,16 @@ const HINTS = (() => {
        * 胆碱酯酶 → 有机磷中毒的解毒靶点，别处不会查；
        * 脑脊液、肌电图 → 吉兰-巴雷与中枢感染的客观依据（蛋白-细胞分离、传导速度减慢）。
        * 目前没有别的规则引用这三个 aux 键，所以只加词、不改任何既有规则得分。 */
-      '胆碱酯酶', '脑脊液', '肌电图']
+      '胆碱酯酶', '脑脊液', '肌电图',
+      /* 精神科：
+       * 量表（HAMD/PHQ-9/PANSS/YMRS 等都是「××量表」或英文缩写）、
+       * 甲状腺功能（抑郁/焦虑必须先排甲减甲亢）、血药浓度（锂盐/丙戊酸）、
+       * 头颅 CT/MRI（排除器质性精神障碍）。
+       * auxText 已 toLowerCase()，所以比较时统一 .toLowerCase()；生成的特征键
+       * 保留原写法（aux:HAMD 等），与既有 aux:CRP 的写法一致。
+       * 注意「头颅CT」会同时被下面那条 includes('ct') 加上通用的 aux:CT——
+       * 这是既有行为，不改；精神科规则不引用 aux:CT，故不受影响。 */
+      '甲状腺功能', '量表', 'HAMD', 'PHQ', 'PANSS', 'YMRS', '血药浓度', '头颅CT', '头颅MRI']
       .forEach(k => { if (auxText.includes(k.toLowerCase())) F.add('aux:' + (k === '腹部ct' ? 'CT' : k)); });
     if (auxText.includes('ct')) F.add('aux:CT');
 

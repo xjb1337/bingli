@@ -586,6 +586,38 @@
       def=腹部平软，无压痛及反跳痛，肠鸣音正常
       opt=腹部平软，无压痛及反跳痛，肠鸣音正常 ‖ 腹部压痛 ‖ 腹膜刺激征阳性 ‖ 肠鸣音消失 ‖ 腹围增大
 
+===== PE_SPECIAL.psychiatry  精神状况检查（写入路径 pe.special_psychiatry.<项key>）
+  special_psychiatry.psyAppearance ｜ 仪表与接触
+      def=衣着整洁，接触主动，合作
+      opt=衣着整洁，接触主动，合作 ‖ 衣着不整，接触被动 ‖ 接触被动，问话少答 ‖ 接触违拗，拒绝检查 ‖ 仪表邋遢，蓬头垢面
+  special_psychiatry.psyOrientation ｜ 意识与定向力
+      def=定向力完整，意识清晰
+      opt=定向力完整，意识清晰 ‖ 定向力不完整 ‖ 意识模糊 ‖ 谵妄状态
+  special_psychiatry.psySpeech ｜ 言语
+      def=语速适中，语音清晰，对答切题
+      opt=语速适中，语音清晰，对答切题 ‖ 语速增快，言语增多 ‖ 语速缓慢，语音低微 ‖ 言语零乱，答不切题 ‖ 缄默不语
+  special_psychiatry.psyThoughtForm ｜ 思维形式
+      def=思维连贯，逻辑正常
+      opt=思维连贯，逻辑正常 ‖ 思维散漫 ‖ 思维破裂 ‖ 思维贫乏 ‖ 思维奔逸 ‖ 思维中断
+  special_psychiatry.psyThoughtContent ｜ 思维内容
+      def=未引出妄想
+      opt=未引出妄想 ‖ 有关系妄想 ‖ 被害妄想 ‖ 夸大妄想 ‖ 嫉妒妄想 ‖ 自罪妄想 ‖ 强迫观念
+  special_psychiatry.psyPerception ｜ 感知觉
+      def=未引出幻觉
+      opt=未引出幻觉 ‖ 幻听 ‖ 幻视 ‖ 幻嗅 ‖ 错觉 ‖ 内脏幻觉
+  special_psychiatry.psyMood ｜ 情感
+      def=情感反应协调，情绪平稳
+      opt=情感反应协调，情绪平稳 ‖ 情感低落 ‖ 情感高涨 ‖ 情感淡漠 ‖ 情感倒错 ‖ 焦虑紧张 ‖ 情感不稳，易激惹
+  special_psychiatry.psyCognition ｜ 认知功能
+      def=记忆、计算与理解力尚可
+      opt=记忆、计算与理解力尚可 ‖ 近事记忆力减退 ‖ 远近记忆均减退 ‖ 计算力下降 ‖ 智能减退
+  special_psychiatry.psyInsight ｜ 自知力
+      def=自知力完整，承认有病并愿意接受治疗
+      opt=自知力完整，承认有病并愿意接受治疗 ‖ 自知力部分存在 ‖ 自知力缺失，否认有病
+  special_psychiatry.psyBehavior ｜ 意志与行为
+      def=意志活动正常，未见怪异行为
+      opt=意志活动正常，未见怪异行为 ‖ 意志减退，生活懒散 ‖ 意志增强，活动增多 ‖ 冲动毁物行为 ‖ 自伤自杀行为 ‖ 木僵状态
+
 ===== VITALS 生命体征（模板里一律留空，不要填数字）
   temperature  体温（℃）
   pulse  脉搏（次/分）
@@ -694,6 +726,11 @@
       nervous.moodLow  情绪低落
       nervous.anxiety  焦虑
       nervous.hallucination  幻觉妄想
+      nervous.interestLoss  兴趣减退/愉快感缺失
+      nervous.energyLoss  精力下降/易疲劳
+      nervous.suicidal  自杀自伤观念
+      nervous.appetiteChange  食欲及体重改变
+      nervous.behaviorAbnormal  行为异常
   ===== joint 肌肉骨骼系统
       joint.jointPain  关节疼痛/肿胀
       joint.morningStiff  晨僵
@@ -726,3 +763,4 @@
   gynecology  妇科
   pediatrics  儿科
   emergency  急诊/ICU
+  psychiatry  精神科

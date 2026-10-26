@@ -163,6 +163,11 @@ const RECORD_CORE = (() => {
     儿科: 'pediatrics', 小儿内科: 'pediatrics', 新生儿科: 'pediatrics', 小儿科: 'pediatrics',
     急诊: 'emergency', ICU: 'emergency', 重症医学科: 'emergency',
     急诊ICU: 'emergency', 急诊科: 'emergency', 重症监护室: 'emergency',
+    // 「精神科」不是「神经科」：前者看精神障碍，后者看神经系统疾病，
+    // 写错了会把整段精神状况检查换成神经系统查体，所以单独列全。
+    精神科: 'psychiatry', 精神心理科: 'psychiatry', 心理科: 'psychiatry',
+    心理咨询科: 'psychiatry', 心身医学科: 'psychiatry', 精神卫生科: 'psychiatry',
+    精神病科: 'psychiatry', 精神医学: 'psychiatry',
   };
 
   // 英文/缩写大小写不敏感：DIGESTIVE、Digestive、icu 都应认

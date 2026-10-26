@@ -768,6 +768,19 @@ const GENERATOR = (() => {
     seg.push(`职业与工作条件：${filledOrPH(p.occupationEnv)}`);
     // 冶游史（教材点名要求，此前全项目 grep 零命中）
     seg.push(`冶游史：${filledOrPH(p.sexualHistory)}`);
+    // 病前性格与应激事件：精神科病历必写，综合医院留空即可、留空不输出。
+    //
+    // 不能直接拼 `${标签}：${值}`：学生十有八九会自己把标签写进框里
+    // （placeholder 就是「病前性格内向，少与人交往」），拼出来会变成
+    // 「病前性格：病前性格内向」。值已经以标签开头时就原样用。
+    if (stripTail(p.premorbidPersonality)) {
+      const v = stripTail(p.premorbidPersonality);
+      seg.push(/^病前性格/.test(v) ? v : `病前性格：${v}`);
+    }
+    if (stripTail(p.stressEvent)) {
+      const v = stripTail(p.stressEvent);
+      seg.push(/^(发病前)?应激事件/.test(v) ? v : `发病前应激事件：${v}`);
+    }
     seg.push(`毒物接触史：${filledOrPH(p.drugs)}`);
     if (stripTail(p.environment)) seg.push(stripTail(p.environment));
     if (stripTail(p.habits)) seg.push(stripTail(p.habits));

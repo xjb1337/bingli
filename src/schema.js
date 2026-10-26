@@ -196,7 +196,16 @@ const SCHEMA = (() => {
         { key: 'insomnia', label: '失眠' },
         { key: 'moodLow', label: '情绪低落' },
         { key: 'anxiety', label: '焦虑' },
-        { key: 'hallucination', label: '幻觉妄想' }
+        { key: 'hallucination', label: '幻觉妄想' },
+        /* 下面五项是为精神科补的。教材的神经精神系统系统回顾只到"情绪状态、
+           睡眠、记忆"这一层，写得下抑郁和焦虑，但问不出精神科真正要问的东西：
+           兴趣减退、精力下降、自杀观念、食欲体重改变、行为异常。
+           这几项在精神科门诊是必问项，缺了它们，抑郁发作的整段病史就无从下手。 */
+        { key: 'interestLoss', label: '兴趣减退/愉快感缺失' },
+        { key: 'energyLoss', label: '精力下降/易疲劳' },
+        { key: 'suicidal', label: '自杀自伤观念' },
+        { key: 'appetiteChange', label: '食欲及体重改变' },
+        { key: 'behaviorAbnormal', label: '行为异常' }
       ]
     },
     {
@@ -1312,6 +1321,69 @@ const SCHEMA = (() => {
           options: ['腹部平软，无压痛及反跳痛，肠鸣音正常', '腹部压痛', '腹膜刺激征阳性', '肠鸣音消失', '腹围增大']
         }
       ]
+    },
+    psychiatry: {
+      // 精神科的「查体」就是精神状况检查（mental status examination, MSE），
+      // 不是触诊叩诊，所以这十项按 MSE 的通行维度排：外表与接触 → 意识定向 →
+      // 言语 → 思维形式 → 思维内容 → 感知觉 → 情感 → 认知 → 自知力 → 意志行为。
+      //
+      // 《诊断学》第 10 版没有精神检查章节（它只在全身体格检查里提了一句
+      // 「初步的精神状态检查」），所以这里不逐字抄教材，按精神病学的常规写法定。
+      // 每一档都写成「正常 / 轻 / 中 / 重」可选的整句，学生点一下就能改，
+      // 也方便他按自己病人的实际程度换一个更贴切的。
+      name: '精神状况检查',
+      items: [
+        {
+          key: 'psyAppearance', label: '仪表与接触',
+          default: '衣着整洁，接触主动，合作',
+          options: ['衣着整洁，接触主动，合作', '衣着不整，接触被动', '接触被动，问话少答', '接触违拗，拒绝检查', '仪表邋遢，蓬头垢面']
+        },
+        {
+          key: 'psyOrientation', label: '意识与定向力',
+          default: '定向力完整，意识清晰',
+          options: ['定向力完整，意识清晰', '定向力不完整', '意识模糊', '谵妄状态']
+        },
+        {
+          key: 'psySpeech', label: '言语',
+          default: '语速适中，语音清晰，对答切题',
+          options: ['语速适中，语音清晰，对答切题', '语速增快，言语增多', '语速缓慢，语音低微', '言语零乱，答不切题', '缄默不语']
+        },
+        {
+          key: 'psyThoughtForm', label: '思维形式',
+          default: '思维连贯，逻辑正常',
+          options: ['思维连贯，逻辑正常', '思维散漫', '思维破裂', '思维贫乏', '思维奔逸', '思维中断']
+        },
+        {
+          key: 'psyThoughtContent', label: '思维内容',
+          default: '未引出妄想',
+          options: ['未引出妄想', '有关系妄想', '被害妄想', '夸大妄想', '嫉妒妄想', '自罪妄想', '强迫观念']
+        },
+        {
+          key: 'psyPerception', label: '感知觉',
+          default: '未引出幻觉',
+          options: ['未引出幻觉', '幻听', '幻视', '幻嗅', '错觉', '内脏幻觉']
+        },
+        {
+          key: 'psyMood', label: '情感',
+          default: '情感反应协调，情绪平稳',
+          options: ['情感反应协调，情绪平稳', '情感低落', '情感高涨', '情感淡漠', '情感倒错', '焦虑紧张', '情感不稳，易激惹']
+        },
+        {
+          key: 'psyCognition', label: '认知功能',
+          default: '记忆、计算与理解力尚可',
+          options: ['记忆、计算与理解力尚可', '近事记忆力减退', '远近记忆均减退', '计算力下降', '智能减退']
+        },
+        {
+          key: 'psyInsight', label: '自知力',
+          default: '自知力完整，承认有病并愿意接受治疗',
+          options: ['自知力完整，承认有病并愿意接受治疗', '自知力部分存在', '自知力缺失，否认有病']
+        },
+        {
+          key: 'psyBehavior', label: '意志与行为',
+          default: '意志活动正常，未见怪异行为',
+          options: ['意志活动正常，未见怪异行为', '意志减退，生活懒散', '意志增强，活动增多', '冲动毁物行为', '自伤自杀行为', '木僵状态']
+        }
+      ]
     }
   };
 
@@ -1331,7 +1403,8 @@ const SCHEMA = (() => {
     { key: 'obstetrics', name: '产科', group: '妇产', special: ['obstetrics'] },
     { key: 'gynecology', name: '妇科', group: '妇产', special: ['gynecology'] },
     { key: 'pediatrics', name: '儿科', group: '儿科', special: ['pediatrics'] },
-    { key: 'emergency', name: '急诊/ICU', group: '急诊', special: ['emergency'] }
+    { key: 'emergency', name: '急诊/ICU', group: '急诊', special: ['emergency'] },
+    { key: 'psychiatry', name: '精神科', group: '精神', special: ['psychiatry'] }
   ];
 
   /* ---------------------------------------------------------------------
@@ -1436,7 +1509,13 @@ const SCHEMA = (() => {
         sexualHistory: '',
         // 职业与工作条件：教材同一句里点名，和 basic.occupation（职业名称）不是一回事
         // ——这里记的是工作环境、是否接触毒物粉尘放射线。
-        occupationEnv: ''
+        occupationEnv: '',
+        // 病前性格与应激事件：精神科病历的必写项。教材《诊断学》的个人史里
+        // 没有这两栏（它面向综合医院），但精神科查房第一句就问"病前性格怎么样、
+        // 这次发病前有没有遇到什么事"。留在这里而不是单开一步，是为了不打断
+        // 那 11 个步骤的节奏——不用精神科的人留空即可，空着不输出。
+        premorbidPersonality: '',
+        stressEvent: ''
       },
       // 婚姻史
       marriage: {

@@ -1,7 +1,7 @@
 /* 模板病例数据 —— 由 tools/gen-templates.js 从 tools/tpl-parts/*.cjs 生成，请勿手改。
  *
  * 改模板的正确方式：改 tools/tpl-parts/<key>.cjs，然后 node tools/gen-templates.js。
- * 共 53 个模板：acs, af, aki, anemia, appendicitis, asthma, bronchiectasis, cap, chole, cholelith, cirrhosis, ckd, copd, cushing, dementia, dka, dm, ectopic, febrileSz, fracture, gb, hernia, hf, htn, hyperthyroid, hypothyroid, itp, leukemia, meningitis, myoma, nephrotic, obstruction, organophosphate, pancreatitis, pedDiarrhea, pedPneumonia, peritonitis, pid, preeclampsia, pregDiabetes, pregnancy, ptx, pud, sepsis, shock, stone, stroke, tb, thyroidNodule, ugib, uti, valve, vertigo
+ * 共 56 个模板：acs, af, aki, anemia, appendicitis, asthma, bipolar, bronchiectasis, cap, chole, cholelith, cirrhosis, ckd, copd, cushing, dementia, depression, dka, dm, ectopic, febrileSz, fracture, gb, hernia, hf, htn, hyperthyroid, hypothyroid, itp, leukemia, meningitis, myoma, nephrotic, obstruction, organophosphate, pancreatitis, pedDiarrhea, pedPneumonia, peritonitis, pid, preeclampsia, pregDiabetes, pregnancy, ptx, pud, schizophrenia, sepsis, shock, stone, stroke, tb, thyroidNodule, ugib, uti, valve, vertigo
  */
 var TEMPLATE_DATA = [
   {
@@ -1679,6 +1679,211 @@ var TEMPLATE_DATA = [
         "confirmed": [
           "支气管哮喘急性发作（中度）",
           "变应性鼻炎"
+        ]
+      }
+    }
+  },
+  {
+    "key": "bipolar",
+    "dept": "psychiatry",
+    "name": "双相情感障碍（目前为躁狂发作）",
+    "alias": [
+      "双相情感障碍",
+      "双相障碍",
+      "躁狂发作",
+      "躁郁症"
+    ],
+    "hint": "情感高涨、思维奔逸、活动增多（躁狂三联），睡眠需要减少、言行鲁莽",
+    "record": {
+      "basic": {
+        "marital": "已婚",
+        "nationality": "汉族",
+        "nativePlace": "湖北武汉",
+        "birthPlace": "湖北武汉",
+        "occupation": "个体经营者",
+        "reliability": "尚可靠",
+        "informant": "患者配偶",
+        "chiefComplaint": "情绪高涨、言语增多2周"
+      },
+      "hpi": {
+        "onset": "2周前无诱因出现情绪异常高涨，自觉心情特别好，整日兴高采烈",
+        "cause": "连续熬夜筹办店铺开业后",
+        "symptoms": "言语明显增多，滔滔不绝，别人插不上话，话题随境转移；自觉脑子转得飞快，想法一个接一个",
+        "relief": "无缓解方式，夜间仅睡2～3小时仍不觉疲乏",
+        "evolution": "近1周加重，自认「能力超常」，计划同时开三家分店，4天内刷卡消费十余万元购设备",
+        "accompanying": "易激惹，家人劝阻即发脾气摔物，但未伤人；食欲亢进，进食量明显增多",
+        "negativeDiscriminating": "无发热、头痛、呕吐及抽搐，无颅脑外伤史，无饮酒及吸食冰毒等物质使用史，无甲状腺疾病史，本次发作前未服用激素及抗抑郁药",
+        "treatment": "1周前于外院门诊，查甲状腺功能正常，予碳酸锂0.25g每日2次口服、喹硫平0.1g每晚口服，服药不规律，症状未控制",
+        "generalCondition": "发病以来精神兴奋，睡眠需要明显减少，食欲亢进，体重无明显下降，工作与社交活动显著增多",
+        "extra": ""
+      },
+      "ros": {
+        "nervous": {
+          "behaviorAbnormal": {
+            "checked": true,
+            "detail": "四处筹款扩张店铺，夜间外出不归，驾车超速"
+          },
+          "sleepDisorder": {
+            "checked": true,
+            "detail": "每夜仅睡2～3小时，醒后精力充沛"
+          },
+          "hallucination": {
+            "negative": true
+          },
+          "anxiety": {
+            "negative": true
+          },
+          "tremor": {
+            "checked": true,
+            "detail": "双手细颤，持筷时明显"
+          },
+          "headache": {
+            "negative": true
+          },
+          "dizziness": {
+            "negative": true
+          },
+          "memoryLoss": {
+            "negative": true
+          }
+        },
+        "resp": {
+          "fever": {
+            "negative": true
+          },
+          "cough": {
+            "negative": true
+          }
+        },
+        "cardio": {
+          "palpitation": {
+            "checked": true,
+            "detail": "活动后心悸，休息可缓解"
+          }
+        },
+        "gi": {
+          "appetiteLoss": {
+            "negative": true
+          },
+          "vomiting": {
+            "negative": true
+          },
+          "abdominalPain": {
+            "negative": true
+          }
+        },
+        "joint": {
+          "backPain": {
+            "negative": true
+          }
+        }
+      },
+      "pmh": {
+        "health": "体健",
+        "diseaseChecks": {},
+        "diseaseDetail": "否认高血压、糖尿病、冠心病等慢性病史，否认甲状腺疾病及颅脑外伤史",
+        "longTermMeds": "否认长期服用激素、抗抑郁药及其他药物史",
+        "infection": "否认肝炎、结核、伤寒等传染病史",
+        "surgery": "否认手术史",
+        "trauma": "否认外伤史",
+        "transfusion": "否认输血史",
+        "poisoning": "否认一氧化碳中毒及重金属接触史",
+        "vaccine": "按计划预防接种",
+        "allergy": "无",
+        "relatedHistory": "3年前曾有一次持续4个月的抑郁发作，表现为情绪低落、兴趣减退、整日卧床，于外院诊断「抑郁发作」并服舍曲林治疗，后自行停药，其间无躁狂或轻躁狂发作",
+        "otherTreatDiseases": "",
+        "special": "否认长期饮酒史，否认吸食冰毒、大麻等精神活性物质史，否认咖啡因大量摄入"
+      },
+      "personal": {
+        "residence": "湖北武汉，否认疫区及地方病流行区居住史",
+        "smoking": "有",
+        "smokingAmount": "每日约20支，共12年",
+        "drinking": "已戒",
+        "drinkingAmount": "戒酒3年，此前每周饮白酒约500ml",
+        "drugs": "否认吸毒及滥用镇静催眠药物史",
+        "habits": "平素作息规律，应酬较多；近2周几乎不眠，夜间外出谈生意，电话不断",
+        "sexualHistory": "否认不洁性接触史",
+        "occupationEnv": "经营服装店，近1个月筹备新店开业，作息不规律，无粉尘及毒物接触",
+        "premorbidPersonality": "外向、健谈、精力旺盛，做事急躁、好胜心强，情绪起伏较明显",
+        "stressEvent": "2周前为筹备新店连续熬夜，与合伙人就资金问题发生争执"
+      },
+      "marriage": {
+        "status": "已婚",
+        "age": "27",
+        "spouseHealth": "配偶体健",
+        "relation": "近1个月因消费与投资问题多次争吵"
+      },
+      "family": {
+        "diseaseChecks": {
+          "精神病": true
+        },
+        "other": "",
+        "deceased": "父亲因意外事故去世，时年 58 岁",
+        "threeGeneration": "两系三代否认遗传性疾病病史",
+        "similarDisease": "父亲生前有「情绪大起大落」表现，未就诊；胞兄有抑郁发作史，服抗抑郁药治疗",
+        "infectionHistory": "否认结核、肝炎、性病等传染性疾病家族史"
+      },
+      "pe": {
+        "vitals": {},
+        "general": {
+          "conscious": "神志清楚，精神可"
+        },
+        "special_psychiatry": {
+          "psyAppearance": "衣着整洁，接触主动，合作",
+          "psyOrientation": "定向力完整，意识清晰",
+          "psySpeech": "语速增快，言语增多",
+          "psyThoughtForm": "思维奔逸",
+          "psyThoughtContent": "夸大妄想",
+          "psyPerception": "未引出幻觉",
+          "psyMood": "情感高涨",
+          "psyCognition": "记忆、计算与理解力尚可",
+          "psyInsight": "自知力部分存在",
+          "psyBehavior": "意志增强，活动增多"
+        }
+      },
+      "auxiliary": {
+        "items": [
+          {
+            "name": "甲状腺功能",
+            "result": "FT3 5.2pmol/L，FT4 17.4pmol/L，TSH 1.6mIU/L，均在正常范围",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          },
+          {
+            "name": "血锂浓度",
+            "result": "0.42mmol/L，处于治疗参考范围下限",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          },
+          {
+            "name": "头颅MRI",
+            "result": "脑实质未见异常信号，未见占位性病变",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          },
+          {
+            "name": "心电图",
+            "result": "窦性心动过速，QT间期0.36s，未见明显ST-T改变",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          },
+          {
+            "name": "杨氏躁狂评定量表（YMRS）",
+            "result": "总分32分，提示明显躁狂症状，供病情评估与随访比较",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          }
+        ]
+      },
+      "diagnosis": {
+        "confirmed": [
+          "双相情感障碍，目前为躁狂发作",
+          "既往抑郁发作"
         ]
       }
     }
@@ -4195,6 +4400,217 @@ var TEMPLATE_DATA = [
           "阿尔茨海默病（中度）",
           "高血压病2级（高危）",
           "便秘"
+        ]
+      }
+    }
+  },
+  {
+    "key": "depression",
+    "dept": "psychiatry",
+    "name": "抑郁发作（伴躯体症状）",
+    "alias": [
+      "抑郁发作",
+      "抑郁症",
+      "抑郁障碍",
+      "中度抑郁"
+    ],
+    "hint": "持续情绪低落、兴趣减退伴精力下降，睡眠与食欲改变，需评估自杀风险",
+    "record": {
+      "basic": {
+        "marital": "已婚",
+        "nationality": "汉族",
+        "nativePlace": "浙江杭州",
+        "birthPlace": "浙江杭州",
+        "occupation": "公司会计",
+        "reliability": "可靠",
+        "informant": "患者本人",
+        "chiefComplaint": "情绪低落、兴趣减退3个月"
+      },
+      "hpi": {
+        "onset": "3个月前逐渐出现情绪低落，整日闷闷不乐，对以往感兴趣的事提不起劲",
+        "cause": "工作调整及与同事发生争执后",
+        "symptoms": "晨起时情绪最低落，午后稍减轻，自觉脑子反应变慢、思考费力，注意力不集中，常独自落泪",
+        "relief": "休息及家人陪伴时略有好转，未服抗抑郁药",
+        "evolution": "近1个月加重，已请假在家，有时整日卧床，不愿与人接触",
+        "accompanying": "伴入睡困难及早醒，夜间睡约3小时即醒后难以再入睡；食欲明显减退，进食量约为病前一半",
+        "negativeDiscriminating": "无发热、头痛及呕吐，无抽搐及意识丧失，无饮酒及药物滥用史，无持续情绪高涨或言语增多",
+        "treatment": "2个月前于当地医院查甲状腺功能正常、头颅MRI未见异常，予舍曲林50mg每日1次口服，2周后因恶心自行停药",
+        "generalCondition": "发病以来精神差，食欲减退，睡眠差，生活尚能自理，体重较病前明显下降",
+        "extra": ""
+      },
+      "ros": {
+        "nervous": {
+          "moodLow": {
+            "checked": true,
+            "detail": "整日闷闷不乐，晨重暮轻，常独自落泪"
+          },
+          "interestLoss": {
+            "checked": true,
+            "detail": "以往喜欢的散步、看电视剧均提不起兴趣"
+          },
+          "energyLoss": {
+            "checked": true,
+            "detail": "稍活动即感疲乏，日常家务难以完成"
+          },
+          "suicidal": {
+            "checked": true,
+            "detail": "近1个月反复想到「活着没意思」，曾一次自行加量服用舍曲林被家人发现，无自伤行为"
+          },
+          "appetiteChange": {
+            "checked": true,
+            "detail": "进食量约为病前一半，体重较病前明显下降"
+          },
+          "insomnia": {
+            "checked": true,
+            "detail": "入睡需2小时以上，凌晨3时左右早醒"
+          },
+          "memoryLoss": {
+            "checked": true,
+            "detail": "常忘记刚说过的话，需家人提醒"
+          },
+          "anxiety": {
+            "negative": true
+          },
+          "hallucination": {
+            "negative": true
+          },
+          "behaviorAbnormal": {
+            "negative": true
+          },
+          "headache": {
+            "negative": true
+          },
+          "dizziness": {
+            "negative": true
+          },
+          "tremor": {
+            "negative": true
+          }
+        },
+        "resp": {
+          "fever": {
+            "negative": true
+          },
+          "cough": {
+            "negative": true
+          }
+        },
+        "cardio": {
+          "palpitation": {
+            "negative": true
+          }
+        },
+        "gi": {
+          "abdominalPain": {
+            "negative": true
+          },
+          "vomiting": {
+            "negative": true
+          }
+        },
+        "joint": {
+          "backPain": {
+            "negative": true
+          }
+        }
+      },
+      "pmh": {
+        "health": "体健",
+        "diseaseChecks": {},
+        "diseaseDetail": "否认高血压、糖尿病、冠心病等慢性病史，否认颅脑外伤及癫痫史",
+        "longTermMeds": "否认长期服用激素、镇静催眠药及利血平等药物史",
+        "infection": "否认肝炎、结核、伤寒等传染病史",
+        "surgery": "否认手术史",
+        "trauma": "否认外伤史",
+        "transfusion": "否认输血史",
+        "poisoning": "否认中毒史",
+        "vaccine": "按计划预防接种",
+        "allergy": "无",
+        "relatedHistory": "否认既往类似发作史，否认既往躁狂或轻躁狂发作史",
+        "otherTreatDiseases": "",
+        "special": "已自行停用舍曲林2个月，其间未使用酒精及其他精神活性物质"
+      },
+      "personal": {
+        "residence": "浙江杭州，否认疫区及地方病流行区居住史",
+        "smoking": "无",
+        "drinking": "无",
+        "drugs": "否认乙醇依赖及吸毒、滥用镇静催眠药物史",
+        "habits": "生活作息规律，社交活动少，业余多在家看书，近3个月因精力下降几乎不外出",
+        "sexualHistory": "否认不洁性接触史",
+        "occupationEnv": "财务工作，近半年工作强度增大，无粉尘及毒物接触",
+        "premorbidPersonality": "内向、少言，做事追求完美，遇事多独自承受，不轻易向他人倾诉",
+        "stressEvent": "3个月前科室岗位调整，工作量明显增加，并与同事发生过一次激烈争执"
+      },
+      "marriage": {
+        "status": "已婚",
+        "age": "26",
+        "spouseHealth": "配偶体健",
+        "relation": "和睦"
+      },
+      "family": {
+        "diseaseChecks": {
+          "精神病": true
+        },
+        "other": "",
+        "deceased": "父母健在",
+        "threeGeneration": "两系三代否认遗传性疾病病史",
+        "similarDisease": "母亲有抑郁发作史，曾服抗抑郁药治疗，现病情稳定",
+        "infectionHistory": "否认结核、肝炎、性病等传染性疾病家族史"
+      },
+      "pe": {
+        "vitals": {},
+        "general": {
+          "conscious": "神志清楚，精神差"
+        },
+        "special_psychiatry": {
+          "psyAppearance": "衣着整洁，接触主动，合作",
+          "psyOrientation": "定向力完整，意识清晰",
+          "psySpeech": "语速缓慢，语音低微",
+          "psyThoughtForm": "思维连贯，逻辑正常",
+          "psyThoughtContent": "未引出妄想",
+          "psyPerception": "未引出幻觉",
+          "psyMood": "情感低落",
+          "psyCognition": "近事记忆力减退",
+          "psyInsight": "自知力完整，承认有病并愿意接受治疗",
+          "psyBehavior": "意志减退，生活懒散"
+        }
+      },
+      "auxiliary": {
+        "items": [
+          {
+            "name": "甲状腺功能",
+            "result": "FT3 4.6pmol/L，FT4 15.2pmol/L，TSH 2.1mIU/L，均在正常范围",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          },
+          {
+            "name": "头颅MRI",
+            "result": "脑实质未见异常信号，垂体形态正常，未见占位",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          },
+          {
+            "name": "心电图",
+            "result": "窦性心律，大致正常心电图",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          },
+          {
+            "name": "汉密尔顿抑郁量表（HAMD-17）",
+            "result": "总分24分，提示中度抑郁，供病情评估与随访比较",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          }
+        ]
+      },
+      "diagnosis": {
+        "confirmed": [
+          "抑郁发作（伴躯体症状）",
+          "睡眠障碍"
         ]
       }
     }
@@ -12708,6 +13124,210 @@ var TEMPLATE_DATA = [
           "十二指肠球部溃疡（活动期，A1期）",
           "幽门螺杆菌感染",
           "慢性非萎缩性胃炎"
+        ]
+      }
+    }
+  },
+  {
+    "key": "schizophrenia",
+    "dept": "psychiatry",
+    "name": "精神分裂症（偏执型）",
+    "alias": [
+      "精神分裂症",
+      "偏执型精神分裂症",
+      "分裂症",
+      "思觉失调"
+    ],
+    "hint": "青壮年起病，幻听与被害妄想并存，自知力缺失，社会功能明显受损",
+    "record": {
+      "basic": {
+        "marital": "未婚",
+        "nationality": "汉族",
+        "nativePlace": "河南洛阳",
+        "birthPlace": "河南洛阳",
+        "occupation": "无业",
+        "reliability": "尚可靠",
+        "informant": "患者母亲",
+        "chiefComplaint": "凭空闻声、疑人害己1年"
+      },
+      "hpi": {
+        "onset": "1年前无明显诱因渐起，夜间独处时诉耳边有人说话，内容多为议论和辱骂自己",
+        "cause": "毕业后求职受挫、独自在外租房居住后",
+        "symptoms": "坚信邻居与同事串通要害自己，认为饭菜被人下毒，拒绝进食家中以外送来的食物，多次报警称被跟踪",
+        "relief": "独处房间、关紧门窗时稍感安全，余无缓解方式",
+        "evolution": "近半年加重，对家人亦起疑，曾持刀守在门口不许母亲外出，夜间几乎不眠",
+        "accompanying": "情感反应平淡，对家人受伤住院亦无相应关切，生活懒散，需家人督促洗漱更衣",
+        "negativeDiscriminating": "无发热、头痛、呕吐及抽搐，无颅脑外伤史，无长期饮酒及吸食新型毒品史，无持续情绪高涨或持续情绪低落发作",
+        "treatment": "半年前于当地精神专科医院门诊就诊，予奥氮平10mg每晚口服，因自觉「没病」服药1个月后自行停药，停药后症状加重",
+        "generalCondition": "发病以来精神差，睡眠差，饮食需督促，生活懒散，体重较前下降，社会功能明显受损，无法工作",
+        "extra": ""
+      },
+      "ros": {
+        "nervous": {
+          "hallucination": {
+            "checked": true,
+            "detail": "以言语性幻听为主，夜间明显，诉「有人隔着墙骂我」"
+          },
+          "behaviorAbnormal": {
+            "checked": true,
+            "detail": "曾持刀守门，夜间外出行走，反复报警"
+          },
+          "sleepDisorder": {
+            "checked": true,
+            "detail": "入睡困难，夜间仅睡2～3小时，白天困倦"
+          },
+          "memoryLoss": {
+            "negative": true
+          },
+          "moodLow": {
+            "negative": true
+          },
+          "anxiety": {
+            "negative": true
+          },
+          "suicidal": {
+            "negative": true
+          },
+          "tremor": {
+            "negative": true
+          },
+          "headache": {
+            "negative": true
+          },
+          "dizziness": {
+            "negative": true
+          }
+        },
+        "resp": {
+          "fever": {
+            "negative": true
+          },
+          "cough": {
+            "negative": true
+          }
+        },
+        "cardio": {
+          "palpitation": {
+            "negative": true
+          }
+        },
+        "gi": {
+          "appetiteLoss": {
+            "checked": true,
+            "detail": "因怀疑饭菜被下毒而拒食，体重下降"
+          },
+          "vomiting": {
+            "negative": true
+          }
+        },
+        "joint": {
+          "backPain": {
+            "negative": true
+          }
+        }
+      },
+      "pmh": {
+        "health": "体健",
+        "diseaseChecks": {},
+        "diseaseDetail": "否认高血压、糖尿病、冠心病等慢性病史，否认癫痫及颅脑外伤史",
+        "longTermMeds": "否认长期服用激素、抗结核药及其他药物史",
+        "infection": "否认肝炎、结核、伤寒等传染病史",
+        "surgery": "否认手术史",
+        "trauma": "否认外伤史",
+        "transfusion": "否认输血史",
+        "poisoning": "否认一氧化碳中毒及农药接触史",
+        "vaccine": "按计划预防接种",
+        "allergy": "无",
+        "relatedHistory": "否认既往精神障碍发作史及精神科住院史",
+        "otherTreatDiseases": "",
+        "special": "否认长期饮酒史，否认吸食大麻、冰毒等精神活性物质史"
+      },
+      "personal": {
+        "residence": "河南洛阳，否认疫区及地方病流行区居住史",
+        "smoking": "有",
+        "smokingAmount": "每日约10支，共5年",
+        "drinking": "无",
+        "drugs": "否认乙醇依赖及吸食大麻、苯丙胺类物质史",
+        "habits": "日常起居需家人督促，白天多卧床或来回踱步，夜间常独自外出，几乎不与朋友来往",
+        "sexualHistory": "否认不洁性接触史",
+        "occupationEnv": "毕业后从事销售工作半年即离职，现无业，无粉尘及毒物接触",
+        "premorbidPersonality": "内向、孤僻、敏感多疑，不善与人交往，遇事易往坏处想",
+        "stressEvent": "1年前求职受挫并独自在外租房，与家人联系减少"
+      },
+      "marriage": {
+        "status": "未婚"
+      },
+      "family": {
+        "diseaseChecks": {
+          "精神病": true
+        },
+        "other": "",
+        "deceased": "父母健在",
+        "threeGeneration": "两系三代否认遗传性疾病病史",
+        "similarDisease": "外祖母年轻时有「精神失常」史，未系统诊治",
+        "infectionHistory": "否认结核、肝炎、性病等传染性疾病家族史"
+      },
+      "pe": {
+        "vitals": {},
+        "general": {
+          "conscious": "神志清楚，精神一般"
+        },
+        "special_psychiatry": {
+          "psyAppearance": "衣着不整，接触被动",
+          "psyOrientation": "定向力完整，意识清晰",
+          "psySpeech": "言语零乱，答不切题",
+          "psyThoughtForm": "思维散漫",
+          "psyThoughtContent": "被害妄想",
+          "psyPerception": "幻听",
+          "psyMood": "情感淡漠",
+          "psyCognition": "记忆、计算与理解力尚可",
+          "psyInsight": "自知力缺失，否认有病",
+          "psyBehavior": "冲动毁物行为"
+        }
+      },
+      "auxiliary": {
+        "items": [
+          {
+            "name": "头颅MRI",
+            "result": "脑实质未见异常信号，脑室系统无扩大，未见占位性病变",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          },
+          {
+            "name": "甲状腺功能",
+            "result": "FT3 4.9pmol/L，FT4 16.1pmol/L，TSH 1.8mIU/L，均在正常范围",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          },
+          {
+            "name": "心电图",
+            "result": "窦性心律，QT间期0.38s，大致正常心电图",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          },
+          {
+            "name": "血常规",
+            "result": "WBC 6.4×10⁹/L，N 62%，Hb 132g/L，PLT 218×10⁹/L",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          },
+          {
+            "name": "阳性与阴性症状量表（PANSS）",
+            "result": "总分86分，阳性症状分明显升高，供病情评估与随访比较",
+            "date": "",
+            "hospital": "",
+            "no": ""
+          }
+        ]
+      },
+      "diagnosis": {
+        "confirmed": [
+          "精神分裂症（偏执型）",
+          "社会功能受损"
         ]
       }
     }

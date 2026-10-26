@@ -731,6 +731,23 @@ const APP = (() => {
         ${textarea('疫区、疫水、动物接触史', 'personal.environment', { rows: 2 })}
         ${textarea('其他生活习惯', 'personal.habits', { rows: 2 })}
       </div>
+
+      <div class="card">
+        <div class="card-title">精神科相关（其它科室可留空）</div>
+        ${/* 精神科病史采集必问「病前性格」和「发病前有没有遇到什么事」。
+             放到个人史里而不是单开一步，是因为综合医院病历根本不用这两栏，
+             留空就不输出（generator 的 buildPersonal 里判了 stripTail）。 */ ''}
+        ${textarea('病前性格', 'personal.premorbidPersonality', {
+          rows: 2,
+          placeholder: '如：病前性格内向，少与人交往，做事认真，情绪易波动',
+          hint: '精神科必填；其它科室留空即可，病历里不会出现这一行。'
+        })}
+        ${textarea('发病前应激事件', 'personal.stressEvent', {
+          rows: 2,
+          placeholder: '如：3个月前因工作调动与同事发生冲突后逐渐出现情绪低落',
+          hint: '精神科必填；其它科室留空即可。'
+        })}
+      </div>
     `;
   }
 
