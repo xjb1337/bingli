@@ -500,7 +500,9 @@ select {
 
 .btn-del {
   /* 删除按钮 32×32 太小，误触删除和点不中都很烦。视觉上仍用 18px 的字号，
-     触摸区放大到 44×44，靠 flex 居中保持原来的观感。 */
+     触摸区放大到 44×44，靠 flex 居中保持原来的观感。
+     padding 必须清零：浏览器默认的 1px 6px 会把内容盒压到 32px，
+     而「删除」两个字在 18px 下要 36px，于是折成上下两行——按钮看着像坏了。 */
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -510,8 +512,10 @@ select {
   border-radius: 6px;
   width: 44px;
   height: 44px;
+  padding: 0;
   font-size: 18px;
   line-height: 1;
+  white-space: nowrap;
   cursor: pointer;
   flex-shrink: 0;
 }
@@ -1200,8 +1204,14 @@ footer .btn:disabled {
   pointer-events: none;
   transition: all .25s;
   z-index: 300;
-  white-space: nowrap;
-  max-width: 90vw;
+  /* 长文案必须能折行。套用模板的提示带着病种全名和「填入 N 项」，
+     在 412px 屏上 nowrap 会把尾巴裁掉——而裁掉的正是「没有被覆盖」这句最要紧的。
+     width:max-content 让短提示仍是胶囊形状，max-width 兜住长的那一头。 */
+  white-space: normal;
+  width: max-content;
+  max-width: 88vw;
+  text-align: center;
+  line-height: 1.45;
 }
 
 #toast.show {
@@ -1256,353 +1266,9 @@ footer .btn:disabled {
   white-space: nowrap;
 }
 
-/* ---------------- 总览 ---------------- */
-
-.check-overall-card { border-left: 3px solid var(--blue); }
-
-.check-overall {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  margin-bottom: 12px;
-}
-
-.check-overall .co-num {
-  flex-shrink: 0;
-  font-size: calc(30px * var(--fs-scale));
-  line-height: 1.1;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -.5px;
-}
-
-.check-overall .co-num span {
-  font-size: calc(14px * var(--fs-scale));
-  font-weight: 500;
-  margin-left: 1px;
-}
-
-.check-overall .co-text {
-  flex: 1;
-  min-width: 0;
-  font-size: calc(13px * var(--fs-scale));
-  color: var(--gray-5);
-  line-height: 1.55;
-}
-
-.check-overall .co-text b {
-  color: var(--gray-6);
-  font-size: calc(15px * var(--fs-scale));
-}
-
-/* 四站小比分条 */
-.check-stations {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  padding-top: 12px;
-  border-top: 1px solid var(--gray-2);
-}
-
-/* 四站小比分条：用 max-content 让站名按自然宽度显示，
-   不截断、也不因为字号放大而把「首次病程录」省略成「首次病…」 */
-.check-mini {
-  display: grid;
-  grid-template-columns: max-content minmax(40px, 1fr) max-content;
-  align-items: center;
-  gap: 8px;
-  font-size: calc(12px * var(--fs-scale));
-}
-
-.check-mini .cm-name {
-  color: var(--gray-5);
-  white-space: nowrap;
-  font-size: calc(12px * var(--fs-scale));
-}
-
-.check-mini .cm-bar {
-  height: 6px;
-  background: var(--gray-2);
-  border-radius: 3px;
-  overflow: hidden;
-}
-
-.check-mini .cm-bar > i {
-  display: block;
-  height: 100%;
-  border-radius: 3px;
-  transition: width .25s ease;
-}
-
-.check-mini .cm-num {
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-/* ---------------- 得分三档配色 ---------------- */
-
-.ok, .cm-num.ok { color: var(--score-ok); }
-.warn, .cm-num.warn { color: var(--score-warn); }
-.bad, .cm-num.bad { color: var(--score-bad); }
-
-.cm-bar > i.ok,
-.check-bar > i.ok { background: var(--score-ok); }
-.cm-bar > i.warn,
-.check-bar > i.warn { background: #f9ab00; }
-.cm-bar > i.bad,
-.check-bar > i.bad { background: var(--score-bad); }
-
-/* ---------------- 最该补的 3 项 ---------------- */
-
-.top3 {
-  list-style: none;
-  margin: 10px 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.top3-item {
-  background: var(--gray-1);
-  border-left: 3px solid #f9ab00;
-  border-radius: 8px;
-  padding: 10px;
-}
-
-.top3-head {
-  display: flex;
-  align-items: baseline;
-  gap: 7px;
-  flex-wrap: wrap;
-}
-
-.top3-rank {
-  flex-shrink: 0;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: #f9ab00;
-  color: #fff;
-  font-size: calc(11px * var(--fs-scale));
-  font-weight: 700;
-  line-height: 18px;
-  text-align: center;
-}
-
-.top3-name {
-  flex: 1 1 auto;
-  min-width: 0;
-  font-size: calc(14px * var(--fs-scale));
-  font-weight: 600;
-  word-break: break-word;
-}
-
-.top3-station {
-  flex-shrink: 0;
-  font-size: calc(11px * var(--fs-scale));
-  color: var(--gray-4);
-  white-space: nowrap;
-}
-
-.top3-tip {
-  margin-top: 5px;
-  font-size: calc(13px * var(--fs-scale));
-  color: var(--gray-6);
-  line-height: 1.55;
-  word-break: break-word;
-}
-
-.top3-meta {
-  margin-top: 4px;
-  font-size: calc(11px * var(--fs-scale));
-  color: var(--gray-4);
-}
-
-.top3-empty {
-  font-size: calc(13px * var(--fs-scale));
-  color: var(--score-ok);
-  background: var(--score-ok-bg);
-  border-radius: 6px;
-  padding: 10px;
-  border-left: 3px solid var(--score-ok);
-}
-
-/* ---------------- 各考站卡片 ---------------- */
-
-.check-station { padding: 0; overflow: hidden; }
-
-.check-station > summary {
-  padding: 12px 14px;
-  list-style: none;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  background: #fff;
-}
-
-.check-station > summary::-webkit-details-marker { display: none; }
-
-.check-station > summary::before {
-  content: "▸";
-  color: var(--gray-4);
-  transition: transform .2s;
-  display: inline-block;
-  flex-shrink: 0;
-}
-
-.check-station[open] > summary::before { transform: rotate(90deg); }
-
-.cs-name {
-  flex: 1 1 auto;
-  min-width: 0;
-  font-weight: 600;
-  font-size: calc(14px * var(--fs-scale));
-}
-
-.cs-page {
-  display: inline-block;
-  margin-left: 6px;
-  font-weight: 400;
-  font-size: calc(11px * var(--fs-scale));
-  color: var(--gray-4);
-}
-
-.cs-score {
-  flex-shrink: 0;
-  font-size: calc(13px * var(--fs-scale));
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.check-bar {
-  height: 4px;
-  background: var(--gray-2);
-  margin: 0 14px 10px;
-  border-radius: 2px;
-  overflow: hidden;
-}
-
-.check-bar > i {
-  display: block;
-  height: 100%;
-  border-radius: 2px;
-}
-
-.check-sum-line {
-  padding: 0 14px;
-  font-size: calc(12px * var(--fs-scale));
-  color: var(--gray-5);
-  line-height: 1.55;
-}
-
-.check-lines {
-  padding: 8px 14px 4px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.check-line {
-  display: flex;
-  gap: 8px;
-  align-items: flex-start;
-}
-
-.cl-dot {
-  flex-shrink: 0;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  margin-top: 6px;
-}
-
-.cl-dot.missing { background: var(--score-bad); }
-.cl-dot.weak { background: #f9ab00; }
-.cl-dot.ok { background: var(--score-ok); }
-
-.cl-body { flex: 1 1 auto; min-width: 0; }
-
-.cl-name {
-  font-size: calc(13px * var(--fs-scale));
-  font-weight: 600;
-  color: var(--gray-6);
-  line-height: 1.5;
-  word-break: break-word;
-}
-
-.cl-page {
-  margin-left: 5px;
-  font-weight: 400;
-  font-size: calc(11px * var(--fs-scale));
-  color: var(--gray-4);
-}
-
-.cl-score {
-  margin-left: 5px;
-  font-weight: 500;
-  font-size: calc(11px * var(--fs-scale));
-  color: var(--score-warn);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.cl-tip {
-  margin-top: 3px;
-  font-size: calc(12px * var(--fs-scale));
-  color: var(--gray-5);
-  line-height: 1.55;
-  word-break: break-word;
-}
-
-/* 现场动作分（不计入百分比） */
-.check-process {
-  margin: 6px 14px 12px;
-  padding: 9px 11px;
-  background: var(--gray-1);
-  border-radius: 8px;
-  border-left: 3px solid var(--gray-3);
-}
-
-.cp-title {
-  font-size: calc(12px * var(--fs-scale));
-  font-weight: 600;
-  color: var(--gray-5);
-  margin-bottom: 4px;
-}
-
-.cp-line {
-  font-size: calc(12px * var(--fs-scale));
-  color: var(--gray-5);
-  line-height: 1.6;
-  word-break: break-word;
-}
-
-.btn-jump {
-  display: block;
-  width: calc(100% - 28px);
-  margin: 0 14px 14px;
-  text-align: center;
-  font-size: calc(13px * var(--fs-scale));
-}
-
-.check-notes .note-list {
-  margin: 10px 0 0;
-  padding-left: 18px;
-  font-size: calc(12px * var(--fs-scale));
-  color: var(--gray-5);
-  line-height: 1.6;
-}
-
-.check-notes .note-list li { margin-bottom: 5px; }
-
 /* ---------- 问诊深度自查 ---------- */
 
-.check-depth-card .hint { margin-bottom: 10px; }
+.depth-card .hint { margin-bottom: 10px; }
 
 .depth-lines { display: flex; flex-direction: column; gap: 8px; }
 
@@ -1769,8 +1435,11 @@ footer .btn:disabled {
 }
 
 .soap-row .btn-del {
-  width: 28px;
-  height: 28px;
+  /* 这里原来把删除键压到 28×28 来省地方。SOAP 的行本来就很挤，
+     但 28px 的删除键拇指按下去经常点成旁边的输入框，误删更麻烦。
+     保留 44×44，靠 .soap-row 的间距把观感收回来。 */
+  width: 44px;
+  height: 44px;
   font-size: 16px;
 }
 
@@ -1803,9 +1472,15 @@ footer .btn:disabled {
 
 .focus-x {
   flex-shrink: 0;
-  width: 20px;
-  height: 20px;
+  /* 44×44 是最小可点尺寸。这个 × 原来只有 20×20，拇指按不准就会点成
+     旁边的标签或者干脆没反应，而它是删除操作——点不准的删除按钮比没有更烦人。
+     视觉上仍然是那个小圆圈，靠内边距把热区撑开。 */
+  width: 44px;
+  height: 44px;
   padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: none;
   border-radius: 50%;
   background: transparent;
@@ -1814,6 +1489,7 @@ footer .btn:disabled {
   line-height: 1;
   cursor: pointer;
   font-family: inherit;
+  margin: -12px -12px -12px 0;
 }
 
 .focus-x:active { background: rgba(0,0,0,.12); }
@@ -1826,28 +1502,11 @@ footer .btn:disabled {
  * =========================================================== */
 
 @media (max-width: 420px) {
-  .check-overall { gap: 10px; }
-  .check-overall .co-num { font-size: calc(26px * var(--fs-scale)); }
-  .check-mini { gap: 6px; }
-  .cs-page, .cl-page { display: none; }
-  .check-station > summary { padding: 11px 12px; }
-  .check-lines, .check-sum-line { padding-left: 12px; padding-right: 12px; }
   .btn-jump { width: calc(100% - 24px); margin: 0 12px 12px; }
-}
-
-/* 放大字号时允许标题行换行，分数换到下一行而不是把卡片撑出屏幕 */
-@media (max-width: 420px) {
-  .check-station > summary { align-items: flex-start; }
-  .cs-name { flex-basis: 100%; }
-  .cs-score { margin-left: 18px; }
-  .check-mini { grid-template-columns: max-content minmax(24px, 1fr) max-content; }
 }
 
 /* 极窄屏（<=340px，如 iPhone SE 竖屏 + 大字号） */
 @media (max-width: 340px) {
-  .check-mini { font-size: calc(11px * var(--fs-scale)); gap: 5px; }
-  .check-mini .cm-name { font-size: calc(11px * var(--fs-scale)); }
-  .top3-head { gap: 5px; }
   .view-btn { padding: 8px 2px; font-size: calc(12px * var(--fs-scale)); }
 }
 
@@ -1888,7 +1547,7 @@ footer .btn:disabled {
   .hint-card,
   .ros-group > summary,
   .pe-group > summary,
-  .check-station > summary { background: #1f1f1f; color: var(--gray-6); }
+  .depth-card { background: #1f1f1f; color: var(--gray-6); }
 
   .topbar .btn-icon { background: var(--gray-2); color: var(--gray-5); }
 
@@ -1918,11 +1577,10 @@ footer .btn:disabled {
   .chip.on { background: var(--blue-light); color: var(--blue); }
   .chip-sym.on { background: var(--red-light); color: var(--red); }
 
-  .output, .top3-item, .soap-row, .check-process { background: #2c2c2c; color: var(--gray-6); }
+  .output, .soap-row { background: #2c2c2c; color: var(--gray-6); }
 
   .warn-item { background: var(--score-warn-bg); color: var(--score-warn); }
   .ok-item { background: var(--score-ok-bg); color: var(--score-ok); }
-  .top3-empty { background: var(--score-ok-bg); color: var(--score-ok); }
 
   .tag-score { background: #3c4043; color: var(--gray-5); }
 

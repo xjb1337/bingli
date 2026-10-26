@@ -240,7 +240,9 @@ function partial(area, detail) { PASSED.push({ area, detail, tone: 'warn' }); }
     if (dirty) console.warn('[reset] 记录没清干净，残留姓名 =', dirty);
   };
 
-  const STEPS = ['basic', 'hpi', 'pmh', 'ros', 'personal', 'marriage', 'family', 'pe', 'aux', 'summary', 'check', 'output'];
+  // 评分自查已移除（用户要求：这只是写病历的工具，不需要自查打分）。
+  // 这份列表要跟 APP.STEPS 保持一致，否则逐页扫描会去 goto 一个不存在的步骤。
+  const STEPS = ['basic', 'hpi', 'pmh', 'ros', 'personal', 'marriage', 'family', 'pe', 'aux', 'summary', 'output'];
 
   /* =====================================================================
    * 0. 空病历基线：12 页逐页拍照 + 布局体检
@@ -461,8 +463,8 @@ function partial(area, detail) { PASSED.push({ area, detail, tone: 'warn' }); }
 
   await goto('pe');
   await shot('dark-pe');
-  await goto('check');
-  await shot('dark-check');
+  await goto('summary');
+  await shot('dark-summary');
   await goto('output');
   await shot('dark-output');
 
@@ -963,8 +965,6 @@ function partial(area, detail) { PASSED.push({ area, detail, tone: 'warn' }); }
   await shot('light-pe');
   await goto('summary');
   await shot('light-summary');
-  await goto('check');
-  await shot('light-check');
   await goto('output');
   await shot('light-output');
   await ev(`document.getElementById('stepBar').click()`);

@@ -335,20 +335,20 @@ test('getRecord 返回当前病历对象', () => {
   assert.ok(r && r.basic, '应返回有病历结构的对象');
 });
 
-test('STEPS 有 12 个步骤', () => {
+test('STEPS 有 11 个步骤', () => {
   const app = boot();
-  assert.equal(app.run('APP.STEPS.length'), 12);
+  assert.equal(app.run('APP.STEPS.length'), 11);
 });
 
-test('STEPS 含「评分自查」步骤，且排在摘要与诊断之后、生成病历之前', () => {
+test('步骤里不再有「评分自查」，生成病历是最后一步', () => {
   const app = boot();
-  const keys = app.run('APP.STEPS.map(s => s.key)');
-  const names = app.run('APP.STEPS.map(s => s.name)');
-  assert.ok(names.includes('评分自查'), '步骤里应有「评分自查」');
-  const iCheck = keys.indexOf('check');
-  assert.ok(iCheck > 0, '应有 check 步骤');
-  assert.equal(keys[iCheck - 1], 'summary', '「评分自查」应在「摘要与诊断」之后');
-  assert.equal(keys[iCheck + 1], 'output', '「评分自查」应在「生成病历」之前');
+  const keys = Array.from(app.run('APP.STEPS.map(s => s.key)'));
+  const names = Array.from(app.run('APP.STEPS.map(s => s.name)'));
+  // 用户明确要求过：这只是一个写病历的工具，不需要自查打分。
+  assert.ok(!names.includes('评分自查'), '「评分自查」整块已移除');
+  assert.ok(!keys.includes('check'), '不应再有 check 步骤');
+  assert.equal(keys[keys.length - 1], 'output', '「生成病历」应为最后一步');
+  assert.equal(keys[keys.length - 2], 'summary', '「摘要与诊断」紧接其后');
 });
 
 test('沙箱内不发起网络请求', () => {
@@ -368,7 +368,7 @@ test('录入步骤顺序与病历章节顺序一致：既往史在系统回顾�
   // 有人改步骤时只顾一处、把顺序又改乱。
   assert.deepEqual(keys, [
     'basic', 'hpi', 'pmh', 'ros', 'personal', 'marriage',
-    'family', 'pe', 'aux', 'summary', 'check', 'output'
+    'family', 'pe', 'aux', 'summary', 'output'
   ]);
 });
 
@@ -401,7 +401,7 @@ test('stepIndexOf 认得出步骤键，认不出来的一律回第 0 步', () =>
   const app = boot();
   assert.equal(app.run('APP._test.stepIndexOf("basic")'), 0);
   assert.equal(app.run('APP._test.stepIndexOf("pe")'), 7);
-  assert.equal(app.run('APP._test.stepIndexOf("output")'), 11);
+  assert.equal(app.run('APP._test.stepIndexOf("output")'), 10);
   // 空串、旧键、拼错的键都不能让页面白屏
   assert.equal(app.run('APP._test.stepIndexOf("")'), 0);
   assert.equal(app.run('APP._test.stepIndexOf(undefined)'), 0);
@@ -412,7 +412,7 @@ test('刷新后回到上次停留的步骤，不必从第一步重新点', () =>
   const app = boot({
     initial: { 'dabingli.settings.v1': JSON.stringify({ rosMode: 'detail', fontScale: 1, lastStep: 'pe' }) }
   });
-  assert.equal(app.document.querySelector('#stepNum').textContent, '8/12');
+  assert.equal(app.document.querySelector('#stepNum').textContent, '8/11');
   assert.match(app.document.querySelector('#stepTitle').textContent, /体格检查/);
 });
 
@@ -420,7 +420,7 @@ test('存档里的步骤键坏掉时退回第一步，不白屏', () => {
   const app = boot({
     initial: { 'dabingli.settings.v1': JSON.stringify({ lastStep: 'steps-changed' }) }
   });
-  assert.equal(app.document.querySelector('#stepNum').textContent, '1/12');
+  assert.equal(app.document.querySelector('#stepNum').textContent, '1/11');
   assert.match(app.document.querySelector('#stepTitle').textContent, /基本情况/);
   assert.ok(app.document.querySelector('#content').innerHTML.length > 100);
 });
@@ -437,7 +437,7 @@ test('切换步骤后立即写回设置，生成页不记', () => {
 
 /* ======================= 步骤导航 ======================= */
 
-test('步骤导航列出全部 12 步，且当前步被标出来', () => {
+test('步骤导航列出全部 11 步，且当前步被标出来', () => {
   const app = boot();
   app.run('APP._test.gotoStep("pmh")');
   const html = app.run('APP._test.navRowsHtml()');
@@ -446,7 +446,7 @@ test('步骤导航列出全部 12 步，且当前步被标出来', () => {
   assert.match(html, /系统回顾/);
   assert.match(html, /生成病历/);
   const rows = (html.match(/data-navstep=/g) || []).length;
-  assert.equal(rows, 12, '12 个步骤每步一行');
+  assert.equal(rows, 11, '11 个步骤每步一行');
   assert.match(html, /nav-row cur[^>]*data-navstep="pmh"/, '当前步要带 cur 类');
 });
 
@@ -500,16 +500,13 @@ test('点导航里的行会跳到对应步骤', () => {
   assert.equal(app.run('APP._test.getStepKey()'), 'family');
 });
 
-test('导航里「自查」「生成」两步不显示任何状态——它们没有内容多少这回事', () => {
+test('生成病历那一步不显示状态——它没有内容多少这回事', () => {
   const app = boot();
-  // 这两步不是「录入」步骤。给它们标「填了一部分」会让人以为还有东西没填，
+  // 「生成病历」不是录入步骤。给它标「填了一部分」会让人以为还有东西没填，
   // 标「已填」又像是做完了一项检查。状态是 none，导航里整个角标不渲染。
-  assert.equal(app.run('APP._test.stepState("check")'), 'none');
   assert.equal(app.run('APP._test.stepState("output")'), 'none');
   const html = app.run('APP._test.navRowsHtml()');
   const rows = html.split('data-navstep="');
-  const checkRow = rows.find(r => r.startsWith('check"'));
   const outRow = rows.find(r => r.startsWith('output"'));
-  assert.ok(checkRow && !/nav-state/.test(checkRow), '自查那行不该有状态角标');
   assert.ok(outRow && !/nav-state/.test(outRow), '生成那行不该有状态角标');
 });

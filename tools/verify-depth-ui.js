@@ -1,7 +1,7 @@
-/* 问诊深度自查卡片（自查页）的真机验收。
+/* 问诊深度自查卡片的真机验收。
  *
  * 守的是这几件容易坏的事：
- *   ① 自查页里确实出现「问诊深度自查」卡片，而且和「评分自查」是分开的两块
+ *   ① 生成页里确实出现「问诊深度自查」卡片，而且评分自查卡已经不在了
  *   ② 学生写清楚了就不许报（冤枉一次就会关掉整页）
  *   ③ 「去补」按钮能跳到对应录入步骤
  *   ④ 412px 手机上不横向溢出、点击区域 ≥44px
@@ -97,8 +97,8 @@ async function main() {
 
     // ---- ① 空白病历：卡片在，且是「无必补项」而不是一串空话 ----
     const blank = await evaluate(`(() => {
-      APP._test.gotoStep('check');
-      const card = document.querySelector('.check-depth-card');
+      APP._test.gotoStep('output');
+      const card = document.querySelector('.depth-card');
       return {
         step: APP._test.getStepKey(),
         hasCard: !!card,
@@ -107,8 +107,8 @@ async function main() {
         lines: document.querySelectorAll('.depth-line').length,
       };
     })()`);
-    check('自查页同时有「评分自查」和「问诊深度自查」两块',
-      blank.step === 'check' && blank.hasCard && blank.hasScoreCard,
+    check('生成页有「问诊深度自查」卡片，且不再有评分自查卡',
+      blank.step === 'output' && blank.hasCard && !blank.hasScoreCard,
       `步骤=${blank.step} 深度卡=${blank.hasCard} 评分卡=${blank.hasScoreCard}`);
     check('空白病历时深度自查不报任何问题（没写就没有可挑剔的）',
       blank.lines === 0 && blank.text.includes('常见追问点都已问到'),
@@ -185,7 +185,7 @@ async function main() {
       r.hpi.negativeDiscriminating = '';
       r.pmh.longTermMeds = '';
       APP._test.render();
-      APP._test.gotoStep('check');
+      APP._test.gotoStep('output');
       const rows = [...document.querySelectorAll('.depth-line')];
       const jumps = [...document.querySelectorAll('.dl-jump')];
       return {
@@ -204,7 +204,7 @@ async function main() {
     const shotDir = path.join(ROOT, 'dist', 'shots');
     if (!fs.existsSync(shotDir)) fs.mkdirSync(shotDir, { recursive: true });
     await evaluate(`(() => {
-      const card = document.querySelector('.check-depth-card');
+      const card = document.querySelector('.depth-card');
       if (card) card.scrollIntoView({ block: 'start' });
       return true;
     })()`);

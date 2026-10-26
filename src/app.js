@@ -1,15 +1,14 @@
 /* ===========================================================================
- * UI 层：分步骤表单、本地保存、预览导出、评分自查
- * 依赖 RECORD_CORE / SCHEMA / CHECKER / GENERATOR / HINTS（构建时内联到同一文件）
+ * UI 层：分步骤表单、本地保存、预览导出
+ * 依赖 RECORD_CORE / SCHEMA / GENERATOR / HINTS / DEPTH（构建时内联到同一文件）
  *
  * 存储与数据校验一律走 RECORD_CORE（可在 node:test 中单测），
- * 评分一律走 CHECKER，这里只负责 DOM 与用户交互。
+ * 这里只负责 DOM 与用户交互。
  *
  * 界面职责边界：
  *   · 病历正文 = 大病历（12 个章节）
  *   · 首次病程录 = 同一份病历的 SOAP 归纳，不重复抄病历
  *   · 出院记录 = 住院经过的收尾文书
- *   · 评分自查 = 对照评分表逐条核对「还缺什么」，不落盘、不进病历
  * =========================================================================== */
 
 const APP = (() => {
@@ -34,10 +33,6 @@ const APP = (() => {
   /**
    * 步骤清单。
    *
-   * 「评分自查」放在「摘要与诊断」之后、「生成病历」之前：
-   * 自查看的正是病历里已经写下的文字，只有写到摘要与诊断这一步才具备条件；
-   * 而生成/导出是最后一环，自查必须在交卷前完成，不能排在导出之后。
-   *
    * 步骤顺序 == 病历章节顺序（见 GENERATOR.SECTION_ORDER），不是两套。
    * 既往史在系统回顾之前：《诊断学》第10版第六篇的住院病历书写顺序是
    * 「主诉／现病史／既往史／系统回顾／个人史／婚姻史／月经生育史／家族史」，
@@ -54,7 +49,6 @@ const APP = (() => {
     { key: 'pe', name: '体格检查', icon: '⑧' },
     { key: 'aux', name: '实验室检查', icon: '⑨' },
     { key: 'summary', name: '摘要与诊断', icon: '⑩' },
-    { key: 'check', name: '评分自查', icon: '⑪' },
     { key: 'output', name: '生成病历', icon: '✓' }
   ];
 
@@ -1042,22 +1036,28 @@ const APP = (() => {
       (sp.items || []).forEach(it => options.push({ ref: `special_${spKey}.${it.key}`, label: `${sp.name} · ${it.label}` }));
     });
 
-    const picked = keys.map(ref => {
+    // 只显示仍属于当前科室的项。
+    // 切科室后 focusPE.keys 里可能还留着上一个科室的专科项（'special_digestive.giTenderness'），
+    // 那些项在当前科室的 options 里找不到，以前会 fallback 成裸 key 直接印在界面上；
+    // 而生成器也不会把它们写进病历（见 generator.buildFocusPE），两处口径必须一致：
+    // 界面上看不见 = 病历里不出现。
+    const picked = keys.filter(ref => options.some(o => o.ref === ref)).map(ref => {
       const o = options.find(x => x.ref === ref);
-      return `<span class="focus-tag">${esc(o ? o.label : ref)}
+      return `<span class="focus-tag">${esc(o.label)}
         <button type="button" class="focus-x" data-focusdel="${esc(ref)}">×</button></span>`;
     }).join('');
-    const rest = options.filter(o => !keys.includes(o.ref));
+    const liveKeys = keys.filter(ref => options.some(o => o.ref === ref));
+    const rest = options.filter(o => !liveKeys.includes(o.ref));
 
     return `
-      <details class="card pe-group" id="pe-focus" ${keys.length || f.note ? 'open' : ''}>
+      <details class="card pe-group" id="pe-focus" ${liveKeys.length || f.note ? 'open' : ''}>
         <summary>重点查体<span class="tag-score">第4页 · 15分</span></summary>
         <div class="pe-body">
           <div class="hint">挑出与主诉、主要阳性体征直接相关的 3 项左右，再补一句为什么查这些——这一项看的是「会不会挑重点」，不是查得越多越好。</div>
           <div class="focus-picked">${picked || '<span class="muted">还没有标记重点查体部位</span>'}</div>
           ${rest.length ? `
           <details class="mini-details" style="margin-top:8px">
-            <summary>从查体项中添加（已标记 ${keys.length} 项）</summary>
+            <summary>从查体项中添加（已标记 ${liveKeys.length} 项）</summary>
             <div class="chips focus-chips">
               ${rest.map(o => `<button type="button" class="chip small" data-focusadd="${esc(o.ref)}">${esc(o.label)}</button>`).join('')}
             </div>
@@ -1465,6 +1465,8 @@ const APP = (() => {
         ${selfCheckNotes()}
       </div>
 
+      ${renderDepthCard()}
+
       <div class="card">
         <div class="card-title">质控提醒</div>
         <div class="warn-list">
@@ -1636,99 +1638,22 @@ const APP = (() => {
     return { text, view, label };
   }
 
-  /* ---------------------- 评分自查 ---------------------- */
+  /* ---------------------- 问诊深度自查 ---------------------- */
 
   /**
-   * 评分自查页（对照评分表 4 个考站逐条核对）。
+   * 问诊深度自查：读学生自己写的自由文本，指出「提到了但没问深」的地方。
    *
-   * 数据全部来自 CHECKER，界面只负责展示，不参与任何计分：
-   *   · content 项参与得分（score / maxScore）
-   *   · advisory 项是「病历文本层的硬性要求，但折算不了分值」，只进提醒
-   *   · process 项是现场动作分，本工具不评，单独列出避免用户以为漏算
-   * 这样界面上不会出现「写得再全也到不了 100」的错觉。
+   * 它不参与任何计分，也不写进病历正文——只是把带教老师会追问的点列出来。
+   * 放在生成页而不是单开一步：这个软件的目的是写病历，这一栏是写完之后
+   * 顺手看一眼的提醒，为它单设一步反而打断流程。
    */
-  function renderCheck() {
-    const C = typeof CHECKER !== 'undefined' ? CHECKER : null;
-    if (!C) {
-      return '<div class="card"><div class="empty">评分自查模块未加载，请重新构建或刷新页面。</div></div>';
-    }
-    const sum = C.summary(R);
-    const results = [C.checkHistory(R), C.checkPhysical(R), C.checkFirstCourse(R), C.checkWriting(R)];
-
-    const stationsHtml = sum.stations.map(st => {
-      const cls = scoreClass(st.percent);
-      return `<div class="check-mini">
-        <span class="cm-name">${esc(st.station)}</span>
-        <span class="cm-bar"><i class="${cls}" style="width:${pct(st.percent)}%"></i></span>
-        <span class="cm-num ${cls}">${fmtScore(st.score)}/${fmtScore(st.maxScore)}</span>
-      </div>`;
-    }).join('');
-
-    const top3 = sum.top3.length ? sum.top3.map(x => `
-      <li class="top3-item">
-        <div class="top3-head">
-          <span class="top3-rank">${x.rank}</span>
-          <span class="top3-name">${esc(x.item)}</span>
-          <span class="top3-station">${esc(x.station)}</span>
-        </div>
-        <div class="top3-tip">${esc(x.suggestion || '建议补写这一项。')}</div>
-        <div class="top3-meta">${esc(x.page)}${x.maxScore > 0 ? ` · 可补 ${fmtScore(x.missing)} 分` : ''}</div>
-      </li>`).join('') : '<li class="top3-empty">✓ 病历文本里能核对的要素都已具备</li>';
-
-    const stationCards = results.map(res => {
-      const cls = scoreClass(res.percent);
-      const pending = res.items.filter(it => it.status !== 'ok' && it.kind !== 'process');
-      const process = res.items.filter(it => it.kind === 'process');
-      const okCount = res.items.filter(it => it.status === 'ok' && it.kind !== 'process').length;
-
-      const pendHtml = pending.length ? pending.map(it => `
-        <div class="check-line">
-          <span class="cl-dot ${it.status}"></span>
-          <div class="cl-body">
-            <div class="cl-name">${esc(it.item)}
-              <span class="cl-page">${esc(it.page)}</span>
-              ${it.maxScore > 0
-                ? `<span class="cl-score">${fmtScore(it.earned)}/${fmtScore(it.maxScore)}</span>`
-                : '<span class="cl-score">不折算分值</span>'}
-            </div>
-            <div class="cl-tip">${esc(it.suggestion || '建议补写这一项。')}</div>
-          </div>
-        </div>`).join('')
-        : '<div class="ok-item">✓ 本站可核对的病历要素都已具备</div>';
-
-      const processHtml = process.length ? `
-        <div class="check-process">
-          <div class="cp-title">现场动作分 ${fmtScore(res.processMaxScore)} 分 · 本工具不评</div>
-          ${process.map(it => `<div class="cp-line">· ${esc(it.item)}：${esc(it.suggestion || '需在考场上完成。')}</div>`).join('')}
-        </div>` : '';
-
-      return `
-        <details class="card check-station" ${pending.length ? 'open' : ''}>
-          <summary>
-            <span class="cs-name">${esc(res.station)}
-              <span class="cs-page">${esc(res.page)}</span>
-            </span>
-            <span class="cs-score ${cls}">${fmtScore(res.score)}/${fmtScore(res.maxScore)} · ${fmtScore(res.percent)}%</span>
-          </summary>
-          <div class="check-bar"><i class="${cls}" style="width:${pct(res.percent)}%"></i></div>
-          <div class="check-sum-line">
-            已具备 ${okCount} 项；待补 ${pending.length} 项${res.advisoryFailed ? `（另有 ${res.advisoryFailed} 条硬性提醒）` : ''}${res.defaultCount ? `；其中 ${res.defaultCount} 项用的默认描述，建议核对` : ''}
-          </div>
-          <div class="check-lines">${pendHtml}</div>
-          ${processHtml}
-          <button class="btn btn-ghost btn-jump" data-checkjump="${esc(stationStep(res.key))}">去补本站内容</button>
-        </details>`;
-    }).join('');
-
-    const notes = (sum.notes || []).filter(Boolean);
-
-    // 问诊深度自查：读自由文本，指出「提到了但没问深」的地方。
-    // 与上面的评分自查是两回事——那边对评分表，这边对带教老师会追问的点。
+  function renderDepthCard() {
     const D = typeof DEPTH !== 'undefined' ? DEPTH : null;
-    const depthList = D ? D.check(R) : [];
-    const depthCount = { high: 0, mid: 0, low: 0 };
-    depthList.forEach(f => { depthCount[f.level] = (depthCount[f.level] || 0) + 1; });
-    const depthHtml = depthList.length ? depthList.map(f => `
+    if (!D) return '';
+    const list = D.check(R) || [];
+    const count = { high: 0, mid: 0, low: 0 };
+    list.forEach(f => { count[f.level] = (count[f.level] || 0) + 1; });
+    const html = list.length ? list.map(f => `
       <div class="depth-line lv-${f.level}">
         <span class="dl-tag">${esc(f.label)}</span>
         <div class="dl-body">
@@ -1736,53 +1661,14 @@ const APP = (() => {
           <div class="dl-meta">${esc(f.section)}${depthStep(f.section) ? `<button class="btn btn-ghost btn-jump dl-jump" data-checkjump="${esc(depthStep(f.section))}">去补</button>` : ''}</div>
         </div>
       </div>`).join('') : '<div class="ok-item">✓ 常见追问点都已问到</div>';
-    const depthCard = D ? `
-      <div class="card check-depth-card">
+    return `
+      <div class="card depth-card">
         <div class="card-title">问诊深度自查
-          <span class="tag-score">${depthCount.high ? `必补 ${depthCount.high} 条` : '无必补项'}</span>
+          <span class="tag-score">${count.high ? `必补 ${count.high} 条` : '无必补项'}</span>
         </div>
         <div class="hint">这一栏不看你写没写，看你写够了没有。只读你自己敲进去的字，模板和系统默认描述不算；结论只是提醒，不会进病历正文。</div>
-        <div class="depth-lines">${depthHtml}</div>
-      </div>` : '';
-
-    return `
-      <div class="card check-overall-card">
-        <div class="card-title">评分自查
-          <span class="tag-score">对照评分表 · 4 个考站</span>
-        </div>
-        <div class="check-overall">
-          <div class="co-num ${scoreClass(sum.weighted.percent)}">${fmtScore(sum.weighted.percent)}<span>%</span></div>
-          <div class="co-text">
-            可按病历文字核对的部分已完成 ${fmtScore(sum.weighted.percent)}%。
-            还有 <b>${sum.pendingCount}</b> 项可补，其中 ${sum.processTodo.length} 项属现场动作分（本工具不评）。
-            ${sum.defaultCount ? `另有 ${sum.defaultCount} 项（${fmtScore(sum.defaultScore)} 分）用的是系统默认描述，建议逐项核对。` : ''}
-          </div>
-        </div>
-        <div class="check-stations">${stationsHtml}</div>
-      </div>
-
-      <div class="card check-top3-card">
-        <div class="card-title">最该补的 3 项</div>
-        <div class="hint">按「补上能拿回多少分」排序，硬性要求（如腹部查体次序）会被提前。</div>
-        <ol class="top3">${top3}</ol>
-      </div>
-
-      ${stationCards}
-
-      ${depthCard}
-
-      <div class="card check-notes">
-        <div class="card-title">说明</div>
-        <div class="hint">${esc(C.DISCLAIMER)}</div>
-        <ul class="note-list">${notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul>
-        <div class="hint">各考站「可核对满分」只统计能写成病历文字的得分点；现场动作分单独列出，不计入百分比。</div>
-      </div>
-    `;
-  }
-
-  /** 考站 → 对应录入步骤（自查页「去补本站内容」用） */
-  function stationStep(key) {
-    return ({ history: 'hpi', physical: 'pe', firstCourse: 'summary', writing: 'summary' })[key] || 'summary';
+        <div class="depth-lines">${html}</div>
+      </div>`;
   }
 
   /** 深度自查的栏目名 → 对应录入步骤 */
@@ -1923,22 +1809,6 @@ const APP = (() => {
     }).join('');
   }
 
-  /** 得分档位：达标绿 / 待补黄 / 缺失红 */
-  function scoreClass(percent) {
-    const p = Number(percent) || 0;
-    if (p >= 85) return 'ok';
-    if (p >= 60) return 'warn';
-    return 'bad';
-  }
-
-  const pct = p => Math.max(0, Math.min(100, Number(p) || 0));
-
-  /** 分数显示：整数不带小数点，小数保留一位 */
-  function fmtScore(n) {
-    const v = Number(n) || 0;
-    return Number.isInteger(v) ? String(v) : v.toFixed(1);
-  }
-
   /** 步骤键 → 索引。认不出来（空串、旧键、改过步骤）一律回 0，不让页面白屏 */
   function stepIndexOf(key) {
     if (!key) return 0;
@@ -2019,7 +1889,6 @@ const APP = (() => {
       case 'pe': body = renderPe(); break;
       case 'aux': body = renderAux(); break;
       case 'summary': body = renderSummary(); break;
-      case 'check': body = renderCheck(); break;
       case 'output': body = renderOutput(); break;
     }
 
@@ -3142,9 +3011,7 @@ const APP = (() => {
       setOutputView: v => { OUT_VIEW = v; },
       getOutputView: () => OUT_VIEW,
       outputTextOf: v => outputTextOf(v || OUT_VIEW, null),
-      // 自查结果（与界面同一份数据，供测试直接断言）
-      checkSummary: () => (typeof CHECKER !== 'undefined' ? CHECKER.summary(R) : null),
-      // 问诊深度自查（同上，界面走 renderCheck 里的卡片）
+      // 问诊深度自查（界面走生成页的 renderDepthCard）
       depthOf: r => (typeof DEPTH !== 'undefined' ? DEPTH.check(r || R) : []),
       // 步骤导航：界面走 stepbar 点击，测试直接断言状态判定
       stepState,

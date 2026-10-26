@@ -187,7 +187,7 @@ async function main() {
 
   // 6. 步骤顺序：既往史必须排在系统回顾之前（病历章节顺序，不是两套）
   const stepOrder = await evaluate('APP.STEPS.map(s => s.key).join(">")');
-  results.push(['步骤顺序', stepOrder === 'basic>hpi>pmh>ros>personal>marriage>family>pe>aux>summary>check>output', stepOrder]);
+  results.push(['步骤顺序', stepOrder === 'basic>hpi>pmh>ros>personal>marriage>family>pe>aux>summary>output', stepOrder]);
 
   // 7. 跳到体格检查
   await evaluate('APP._test.gotoStep("pe")');
@@ -249,24 +249,14 @@ async function main() {
   const diagCount = await evaluate('document.querySelectorAll("[data-diag]").length');
   results.push(['添加诊断', diagCount === 1, `诊断条数=${diagCount}`]);
 
-  // 11. 评分自查
-  await evaluate('APP._test.gotoStep("check")');
-  await sleep(500);
-  const checkTitle = await evaluate('document.getElementById("stepTitle").textContent');
-  const checkStations = await evaluate('document.querySelectorAll(".check-station").length');
-  const checkTop3 = await evaluate('document.querySelectorAll(".top3-item").length');
-  const checkPct = await evaluate(`(() => {
-    const el = document.querySelector('.check-head .pct, .check-head b');
-    return el ? el.textContent.trim() : '';
-  })()`);
-  results.push(['评分自查页', checkTitle === '评分自查' && checkStations === 4,
-    `标题=${checkTitle} 考站卡片=${checkStations} 待补=${checkTop3} 总分=${checkPct || 'n/a'}`]);
-  await shot('08-check');
-
-  // 12. 生成病历
+  // 11. 生成病历（评分自查已移除，生成页现在带问诊深度自查卡片）
   await evaluate('APP._test.gotoStep("output")');
-  await sleep(500);
+  await sleep(600);
   const outTitle = await evaluate('document.getElementById("stepTitle").textContent');
+  const depthCard = await evaluate('document.querySelectorAll(".depth-card").length');
+  const depthLines = await evaluate('document.querySelectorAll(".depth-line").length');
+  results.push(['生成页带问诊深度自查', depthCard === 1 && depthLines >= 0,
+    `深度自查卡片=${depthCard} 提示行=${depthLines}`]);
   const outText = await evaluate('document.getElementById("outputText").textContent');
   const hasSections = ['一般项目', '主诉', '现病史', '系统回顾', '体格检查', '初步诊断']
     .every(s => outText.includes(s));

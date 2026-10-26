@@ -2,7 +2,10 @@
  * 评审回归测试（node:test）
  *
  * 每个用例对应独立评审发现的一个缺陷，防止修复被无意改回。
- * 编号与评审报告一致（B1/H1/H2/H3/H4/M1/M8）。
+ * 编号与评审报告一致（B1/H1/M1/M8）。
+ *
+ * 曾有一批 H2/H3/H4 用例测的是评分模块（checker.js）的计分，
+ * 评分自查功能移除后，这些用例连同被删的模块一起下线。
  *
  * 这些测试的价值在于：它们描述的是「曾经错过一次」的具体行为，
  * 而不是泛泛的冒烟检查。改回去必须让测试失败。
@@ -12,7 +15,6 @@ const assert = require('node:assert/strict');
 const { bootGlobals } = require('./bootstrap.cjs');
 
 const { SCHEMA, GENERATOR, HINTS } = bootGlobals();
-const CHECKER = require('../src/checker.js');
 
 function mk(over) {
   const r = SCHEMA.emptyRecord();
@@ -74,83 +76,6 @@ test('H1 阴性描述"未闻及病理性杂音"仍应被排除', () => {
   r.pe.chest = { heartAuscultation: '各瓣膜听诊区未闻及病理性杂音' };
   const summary = GENERATOR.draftSummary(r);
   assert.ok(!summary.includes('未闻及病理性杂音'), '阴性描述不应进摘要阳性段落');
-});
-
-/* ======================= H2：S 段计分不得虚高、不得非单调 ======================= */
-
-test('H2 SOAP 全空时 S 段两项均为 0（现病史有内容也不行）', () => {
-  const r = mk();
-  r.hpi.symptoms = '腹痛3天，阵发性';
-  const res = CHECKER.checkFirstCourse(r);
-  const sItems = res.items.filter(it => /^S 段/.test(it.item));
-  assert.ok(sItems.length > 0, '应有 S 段检查项');
-  sItems.forEach(it => {
-    assert.equal(it.earned, 0, `S 段为空时「${it.item}」不应得分，实际 ${it.earned}`);
-  });
-});
-
-test('H2 补写 S 段后总分不得低于不写（单调性）', () => {
-  const base = mk();
-  base.hpi.symptoms = '腹痛3天';
-  const before = CHECKER.checkFirstCourse(base).score;
-
-  const withS = JSON.parse(JSON.stringify(base));
-  withS.soap.s.summary = '中年男性，腹痛3天。';
-  const after = CHECKER.checkFirstCourse(withS).score;
-
-  assert.ok(after >= before, `补写 S 段后得分不应下降：${before} → ${after}`);
-});
-
-/* ======================= H3：重点查体不得空手拿满 ======================= */
-
-test('H3 只有空子项与非法 key 时，重点查体不得拿满 15 分', () => {
-  const r = mk();
-  r.focusPE = {
-    keys: ['abdomen.abdPalpSuperficial', 'abdomen.abdPalpDeep', 'abdomen.liverPalpation', 'nope.x'],
-    note: '测试'
-  };
-  const it = CHECKER.checkPhysical(r).items.find(x => /重点查体/.test(x.item));
-  assert.ok(it.earned < it.maxScore, `空内容不应拿满分，实际 ${it.earned}/${it.maxScore}`);
-});
-
-test('H3 有效重点查体内容才能拿满', () => {
-  const r = mk();
-  r.pe.abdomen = {
-    abdPalpSuperficial: '右下腹压痛',
-    abdPalpDeep: '深触诊无反跳痛',
-    liverPalpation: '肝肋下未触及'
-  };
-  r.focusPE = {
-    keys: ['abdomen.abdPalpSuperficial', 'abdomen.abdPalpDeep', 'abdomen.liverPalpation'],
-    note: '以腹部为重点，寻找压痛定位'
-  };
-  const it = CHECKER.checkPhysical(r).items.find(x => /重点查体/.test(x.item));
-  assert.equal(it.earned, it.maxScore, '内容齐全时应满分');
-});
-
-/* ======================= H4：腹部次序判定 ======================= */
-
-test('H4 旧存档（旧默认文案）不得被误判为腹部次序错误', () => {
-  const r = mk();
-  r.pe.abdomen = {
-    abdInspect: '腹平软，未见腹壁静脉曲张',
-    abdAuscultation: '肠鸣音正常，约4次/分',
-    abdPercussion: '肝区及双肾区无叩击痛，移动性浊音阴性',
-    abdPalpation: '全腹无压痛、反跳痛，未触及包块，肝脾肋下未触及'
-  };
-  const it = CHECKER.checkPhysical(r).items.find(x => /腹部查体次序/.test(x.item));
-  assert.equal(it.status, 'ok', `旧存档不应被判次序错误：${it.suggestion || ''}`);
-});
-
-test('H4 只写 3 个相位不得判"次序正确"', () => {
-  const r = mk();
-  r.pe.abdomen = {
-    abdInspect: '腹部平坦',
-    abdAuscultation: '肠鸣音4次/分',
-    abdPercussion: '移动性浊音阴性'
-  };
-  const it = CHECKER.checkPhysical(r).items.find(x => /腹部查体次序/.test(x.item));
-  assert.notEqual(it.status, 'ok', '相位不全时不应判通过');
 });
 
 /* ======================= M1：尾部标点不得引发假提示 ======================= */
@@ -263,30 +188,6 @@ test('H1 回归：阴性/正常描述不得被识别为阳性体征', () => {
     if (found.length) bad.push(`${g}.${k} = ${v} → ${found.map(x => x.text).join('|')}`);
   });
   assert.deepEqual(bad, [], '这些阴性/正常描述被误判成阳性体征');
-});
-
-/* ======================= 专科重点查体 ======================= */
-
-test('专科重点查体（special_ 前缀）应能解析并计分', () => {
-  const r = SCHEMA.emptyRecord();
-  r.basic.name = 'x';
-  r.basic.gender = '男';
-  r.basic.age = '50';
-  r.basic.department = 'neurology';
-  r.basic.chiefComplaint = '肢体无力';
-  r.hpi.onset = '肢体无力1天';
-  r.pe.special_neurology = {
-    neuroExtra1: '定位体征1',
-    neuroExtra2: '定位体征2',
-    neuroExtra3: '定位体征3'
-  };
-  r.focusPE = {
-    keys: ['special_neurology.neuroExtra1', 'special_neurology.neuroExtra2', 'special_neurology.neuroExtra3'],
-    note: '神经系统定位'
-  };
-  const it = CHECKER.checkPhysical(r).items.find(x => /重点查体/.test(x.item));
-  assert.equal(it.earned, it.maxScore,
-    `专科重点项应能计分，实际 ${it.earned}/${it.maxScore}：${it.suggestion || ''}`);
 });
 
 /* ======================= 标点容错 ======================= */

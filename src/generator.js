@@ -1377,6 +1377,7 @@ const GENERATOR = (() => {
   function buildFocusPE(r) {
     const f = r.focusPE || {};
     const parts = [];
+    const deptKey = (r.basic || {}).department || 'general';
     (f.keys || []).forEach(ref => {
       const text = String(ref || '');
       const dot = text.indexOf('.');
@@ -1386,7 +1387,14 @@ const GENERATOR = (() => {
       let item = null;
       let groupName = '';
       if (groupKey.startsWith('special_')) {
-        const sp = SCHEMA.PE_SPECIAL[groupKey.slice('special_'.length)];
+        // 切过科室以后，focusPE.keys 里可能还留着上一个科室的专科项
+        // （例如从消化内科切到心内科，special_digestive.giTenderness 还在）。
+        // 病历是给现在的科室看的，写别人的专科查体只会让带教莫名其妙——
+        // 而且那几项在界面上已经点不到了，学生想删都找不到地方。
+        const spKey = groupKey.slice('special_'.length);
+        const dept = SCHEMA.DEPARTMENTS.find(d => d.key === deptKey) || SCHEMA.DEPARTMENTS[0];
+        if (!(dept.special || []).includes(spKey)) return;
+        const sp = SCHEMA.PE_SPECIAL[spKey];
         if (!sp) return;
         item = (sp.items || []).find(it => it.key === itemKey) || null;
         groupName = sp.name;

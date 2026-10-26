@@ -12,12 +12,20 @@
     "sweep": "node tools/sweep-abnormal.js",
     "cases": "node tools/case-table.js",
     "review-cases": "node tools/verify-review-cases.js",
-    "coverage": "node --experimental-test-coverage --test --test-coverage-include=src/core.js --test-coverage-include=src/generator.js --test-coverage-include=src/hints.js --test-coverage-include=src/checker.js tests/core.test.cjs tests/generator.test.cjs tests/generator.scoring.test.cjs tests/checker.test.cjs tests/review-regression.test.cjs tests/abnormal-pe.test.cjs",
+    "coverage": "node --experimental-test-coverage --test --test-coverage-include=src/core.js --test-coverage-include=src/generator.js --test-coverage-include=src/hints.js --test-coverage-include=src/depth.js tests/core.test.cjs tests/generator.test.cjs tests/generator.scoring.test.cjs tests/depth.test.cjs tests/review-regression.test.cjs tests/abnormal-pe.test.cjs",
     "verify": "node build.js && node tools/sweep-abnormal.js && node tools/case-table.js && node tools/verify-review-cases.js && node --test tests/*.test.cjs",
     "samples": "node test/samples.js",
     "e2e:browser": "node test/browser-check.js",
     "e2e:file": "node test/file-scenario.js",
-    "e2e:online": "node test/online-check.js"
+    "e2e:online": "node test/online-check.js",
+    "e2e:pe": "node tools/verify-pe-ui.js",
+    "e2e:templates": "node tools/verify-templates-ui.js",
+    "e2e:depth": "node tools/verify-depth-ui.js",
+    "e2e:nav": "node tools/verify-nav-ui.js",
+    "audit:ui": "node tools/verify-ui-audit.js",
+    "audit:touch": "node tools/verify-touch-data.js",
+    "audit:fields": "node tools/check-field-reach.js",
+    "audit:top1": "node tools/check-top1.js"
   },
   "engines": {
     "node": ">=22"

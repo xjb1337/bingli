@@ -20,8 +20,6 @@ const assert = require('node:assert/strict');
 const { bootGlobals } = require('./bootstrap.cjs');
 
 const { SCHEMA, GENERATOR } = bootGlobals();
-// checker.js 不在 bootGlobals 的返回里（它不进浏览器全局链的返回值），单独 require
-const CHECKER = require('../src/checker.js');
 const G = GENERATOR;
 const S = SCHEMA;
 
@@ -167,23 +165,68 @@ test('主诉只有时长没有症状时，现病史用「上述症状」兜底',
   assert.match(G.draftHPI(r).onset, /上述症状/);
 });
 
-/* ========================= 评分自查跟着改 ========================= */
+/* ========================= 主诉时长只写在正文里 ========================= */
 
-test('时长只写在主诉正文里，起病时间那一项照样给分', () => {
-  // checker 原来只认 basic.chiefComplaintDuration 字段。
-  // 输入框删掉以后，如果这里不跟着改，
-  // 一份「反复上腹痛2年」的规范主诉会被判「还缺持续时间」，白扣 2.5 分。
+test('时长只写在主诉正文里，起病时间那一项照样算写过了', () => {
+  // 主诉时长输入框删掉以后，学生写的是「反复上腹部疼痛2年」这一整句。
+  // 如果校验只认 basic.chiefComplaintDuration 字段，一份规范主诉会被
+  // 判「还缺持续时间」——那是拿一个界面上不存在的输入框去卡人。
   const r = mk('digestive');
   r.basic.chiefComplaint = '反复上腹部疼痛2年';
   r.hpi.onset = '2年前无明显诱因出现上腹部疼痛';
-  const text = JSON.stringify(CHECKER.summary(r));
-  assert.doesNotMatch(text, /主诉末尾还缺持续时间/);
+  const warns = G.validate(r);
+  assert.ok(!warns.some(w => /缺少持续时间|还缺持续时间/.test(w)),
+    `正文里已有「2年」，不该再提醒补时长，实际：${warns.join(' | ')}`);
 });
 
 test('主诉完全没有时长时仍会提醒补', () => {
   const r = mk('digestive');
   r.basic.chiefComplaint = '反复上腹部疼痛';
   r.hpi.onset = '无明显诱因出现上腹部疼痛';
-  const text = JSON.stringify(CHECKER.summary(r));
-  assert.match(text, /持续时间/);
+  const warns = G.validate(r);
+  assert.ok(warns.some(w => /持续时间/.test(w)),
+    `主诉和现病史都没有时长，应当提醒，实际：${warns.join(' | ')}`);
+});
+
+/* ========================= 切科室之后不许留上一个科室的东西 ========================= */
+
+test('切到心内科后，消化内科的专科重点查体不再写进病历', () => {
+  // 学生常这么干：先在消化内科填了一半，发现走错科室，改选心内科继续。
+  // focusPE.keys 里那条 special_digestive.giTenderness 没人清，
+  // 而界面上心内科已经看不到它了 —— 学生想删都找不到地方。
+  // 病历最后却还写着「重点查体：消化内科专科查体：中上腹压痛」，带教看了只会觉得走错科。
+  const r = mk('cardiology');
+  SCHEMA.setPeChecked(r, 'special_digestive', 'giTenderness', true);
+  r.pe.special_digestive = { giTenderness: '中上腹压痛' };
+  SCHEMA.setPeChecked(r, 'chest', 'lungAuscultation', true);
+  r.pe.chest = { lungAuscultation: '双肺未闻及湿啰音' };
+  r.focusPE = {
+    keys: ['special_digestive.giTenderness', 'chest.lungAuscultation'],
+    note: '听诊为主',
+  };
+  const t = G.buildFocusPE(r);
+  assert.ok(!t.includes('中上腹压痛'), `不该出现消化内科的体征，实际：${t}`);
+  assert.ok(t.includes('双肺未闻及湿啰音'), `本院的查体项要留下，实际：${t}`);
+});
+
+test('切到心内科后，消化内科的专科重点查体在专科查体段里也不出现', () => {
+  // 上面那条只测「重点查体」段。专科段由 buildPE 的另一段代码负责，
+  // 它本来就是按当前科室的 dept.special 遍历，理论上不会串——
+  // 但用户报过一次「切了科室还写着上个科室的查体」，所以这里一并锁死。
+  const r = mk('cardiology');
+  SCHEMA.setPeChecked(r, 'special_digestive', 'giTenderness', true);
+  r.pe.special_digestive = { giTenderness: '中上腹压痛' };
+  const t = G.buildPE(r);
+  assert.ok(!t.includes('中上腹压痛'), `切科后不该出现消化内科查体，实际：${t}`);
+  assert.ok(!t.includes('消化内科专科查体'), `科室名也不该出现，实际：${t}`);
+});
+
+test('不切科室时，本专业的专科重点查体照常写', () => {
+  // 上一条的护栏不能顺手把正常路径也挡掉。
+  const r = mk('digestive');
+  SCHEMA.setPeChecked(r, 'special_digestive', 'giTenderness', true);
+  r.pe.special_digestive = { giTenderness: '中上腹压痛' };
+  r.focusPE = { keys: ['special_digestive.giTenderness'], note: '' };
+  const t = G.buildFocusPE(r);
+  assert.ok(t.includes('中上腹压痛'), `本科室的重点查体要写出来，实际：${t}`);
 });

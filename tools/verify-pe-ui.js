@@ -236,10 +236,13 @@ async function main() {
     const afterReload = await evaluate(`(() => ({
       num: document.querySelector('#stepNum').textContent,
       title: document.querySelector('#stepTitle').textContent,
+      // 进度分子分母都由 STEPS 推导，页面写死的只在第十一项那处，
+      // 这里一并取回来比，避免以后加删步骤又要改这份断言。
+      want: (APP._test.stepIndexOf('summary') + 1) + '/' + APP.STEPS.length,
     }))()`);
     check('刷新后回到上次停留的步骤',
-      afterReload.num === '10/12' && /摘要与诊断/.test(afterReload.title),
-      `${afterReload.num} ${afterReload.title}`);
+      afterReload.num === afterReload.want && /摘要与诊断/.test(afterReload.title),
+      `${afterReload.num} ${afterReload.title}（期望 ${afterReload.want}）`);
 
     // 生成页不记：在输出页刷新，应该回到上一个编辑步骤而不是停在只读的生成页
     await evaluate(`(() => { APP._test.gotoStep('output'); return true; })()`);
@@ -249,10 +252,11 @@ async function main() {
     const afterOutputReload = await evaluate(`(() => ({
       num: document.querySelector('#stepNum').textContent,
       title: document.querySelector('#stepTitle').textContent,
+      want: (APP._test.stepIndexOf('summary') + 1) + '/' + APP.STEPS.length,
     }))()`);
     check('停在生成页时刷新，回到上一个编辑步骤',
-      afterOutputReload.num === '10/12',
-      `${afterOutputReload.num} ${afterOutputReload.title}`);
+      afterOutputReload.num === afterOutputReload.want,
+      `${afterOutputReload.num} ${afterOutputReload.title}（期望 ${afterOutputReload.want}）`);
 
     const failed = results.filter(r => !r.ok);
     console.log(`\n通过 ${results.length - failed.length}/${results.length}`);

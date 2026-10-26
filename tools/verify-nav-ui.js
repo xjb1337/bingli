@@ -100,10 +100,10 @@ cdp._id = 0;
   const rowInfo = await ev(`(() => {
     const rows = Array.from(document.querySelectorAll('.nav-row'));
     const cur = document.querySelector('.nav-row.cur');
-    return { n: rows.length, cur: cur ? cur.dataset.navstep : null };
+    return { n: rows.length, cur: cur ? cur.dataset.navstep : null, want: APP.STEPS.length };
   })()`);
-  check('导航列出 12 步，当前步高亮', rowInfo.n === 12 && rowInfo.cur === 'basic',
-    `行=${rowInfo.n} 当前=${rowInfo.cur}`);
+  check('导航列出全部步骤，当前步高亮', rowInfo.n === rowInfo.want && rowInfo.cur === 'basic',
+    `行=${rowInfo.n}/${rowInfo.want} 当前=${rowInfo.cur}`);
 
   // 4. 每行 ≥44px 高
   const rowH = await ev(`(() => {
@@ -132,7 +132,7 @@ cdp._id = 0;
   const iRos = order.indexOf('ros');
   check('既往史排在系统回顾之前', iRob >= 0 && iRos === iRob + 1, `pmh=${iRob} ros=${iRos}`);
 
-  // 7. 状态角标：空记录时都是「还没填」（自查/生成除外）
+  // 7. 状态角标：空记录时录入步骤都标「还没填」，生成页不带角标
   const states = await ev(`(() => {
     const rows = Array.from(document.querySelectorAll('.nav-row'));
     return rows.map(r => ({
@@ -147,9 +147,10 @@ cdp._id = 0;
   })()`);
   const empties = states.filter(s => s.st === 'st-empty').map(s => s.key);
   const noState = states.filter(s => s.st === null).map(s => s.key);
-  check('空病历里 10 个录入步骤都标「还没填」，自查/生成不带角标',
-    empties.length === 10 && noState.join(',') === 'check,output',
-    `还没填=${empties.join(',')} 无角标=${noState.join(',')}`);
+  // 「生成病历」不是录入步骤，不该有内容角标；其余每一步空记录时都是「还没填」。
+  check('空病历里录入步骤都标「还没填」，生成页不带角标',
+    empties.length === states.length - 1 && noState.join(',') === 'output',
+    `还没填=${empties.length}/${states.length} 无角标=${noState.join(',')}`);
 
   // 8. 填一点内容后，重启打开导航能看到「已填」
   await ev(`document.querySelector('[data-navstep="basic"]').click()`);
@@ -186,8 +187,8 @@ cdp._id = 0;
 
   // 11. 不要把我改动之前的顺序又改回去——这条是对着用户诉求的回归锁
   const finalOrder = await ev(`APP.STEPS.map(s => s.key).join('>')`);
-  check('步骤顺序是 basic>hpi>pmh>ros>personal>marriage>family>pe>aux>summary>check>output',
-    finalOrder === 'basic>hpi>pmh>ros>personal>marriage>family>pe>aux>summary>check>output', finalOrder);
+  check('步骤顺序是 basic>hpi>pmh>ros>personal>marriage>family>pe>aux>summary>output',
+    finalOrder === 'basic>hpi>pmh>ros>personal>marriage>family>pe>aux>summary>output', finalOrder);
 
   ws.close();
   proc.kill();
