@@ -298,6 +298,7 @@ async function main() {
         itemCount: r.auxiliary.items.length,
         items: r.auxiliary.items.map(x => x.name),
         confirm: window.__lungConfirm,
+        sourceNote: APP._test.templatesOf('surgery').find(t => t.key === 'lungNodule').source.note,
         sourceStillShown: !!(button && button.querySelector('.tpl-source')),
         sourceInBody: text.includes('院内范例') || text.includes('依据用户提供的肺结节病历截图整理'),
         hasUncertainty: text.includes('原发性肺癌可能性大') && text.includes('性质待定'),
@@ -306,7 +307,7 @@ async function main() {
       };
     })()`);
     check('点击肺结节范例后 confirm 告知来源 note，病历保留不确定性及病理暂缺',
-      lungApplied.confirm.includes('依据用户提供的肺结节病历截图整理') &&
+      lungApplied.confirm.includes(lungApplied.sourceNote) &&
       lungApplied.hasUncertainty && lungApplied.hasPathologyGap && !lungApplied.sourceInBody,
       `诊断=${lungApplied.diagnosis.join('、')} note=${lungApplied.confirm.includes('依据用户提供的肺结节病历截图整理')} 正文来源=${lungApplied.sourceInBody}`);
     check('肺结节套用后4项辅助检查均保留，身份/生命体征仍空',
