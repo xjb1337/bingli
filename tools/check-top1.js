@@ -45,7 +45,8 @@ const EXPECT = {
   uti:'泌尿系感染', valve:'心脏瓣膜病', vertigo:'眩晕 / 前庭疾病'
 };
 let hit=0, miss=[];
-T.all().forEach(t=>{
+const teaching = T.all().filter(t => !t.source || t.source.kind !== 'hospital-example');
+teaching.forEach(t=>{
   const r = S.emptyRecord(); r.basic.department = t.dept; CORE.fillBlanks(r, t.record);
   const out = H.analyze(r);
   const top1 = out[0] ? out[0].name : '(无)';
@@ -53,5 +54,5 @@ T.all().forEach(t=>{
   const ok = top1.startsWith(want.split(' ')[0]) || want.startsWith(top1.split(' ')[0]);
   if (ok) hit++; else miss.push(`${t.key.padEnd(16)} 期望「${want}」 实际「${top1}」`);
 });
-console.log(`top1 命中 ${hit}/${T.all().length}`);
+console.log(`教学模板 top1 命中 ${hit}/${teaching.length}；院内范例 ${T.all().length - teaching.length} 份按原始证据核验`);
 if (miss.length) console.log(miss.join('\n'));

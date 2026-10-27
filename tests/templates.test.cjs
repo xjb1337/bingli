@@ -18,6 +18,13 @@ const { SCHEMA: S, CORE, TEMPLATES, GENERATOR: G, HINTS: H } = bootGlobals();
 
 const ROOT = path.join(__dirname, '..');
 const PARTS_DIR = path.join(ROOT, 'tools', 'tpl-parts');
+function hasMeaningfulValue(v) {
+  if (v === undefined || v === null) return false;
+  if (typeof v === 'string') return !!v.trim();
+  if (Array.isArray(v)) return v.some(hasMeaningfulValue);
+  if (typeof v === 'object') return Object.values(v).some(hasMeaningfulValue);
+  return true;
+}
 
 /* ---------------------------- 数据完整性 ---------------------------- */
 
@@ -43,6 +50,9 @@ test('模板数据文件与 tools/tpl-parts 同步（不是过期产物）', () 
     );
     assert.equal(g.dept, p.dept);
     assert.equal(g.name, p.name);
+    for (const k of ['alias', 'hint', 'source']) {
+      assert.deepEqual(g[k], p[k], `模板「${p.key}」的 ${k} 元数据未与源码同步`);
+    }
   });
 });
 
@@ -74,6 +84,92 @@ test('模板不写患者身份信息（那只能学生自己填）', () => {
       );
     });
   });
+});
+
+test('lungNodule 院内范例按原始证据保留空白与不确定性', () => {
+  const t = TEMPLATES.get('lungNodule');
+  assert.ok(t, '缺少 lungNodule 模板');
+  assert.equal(t.dept, 'surgery');
+  assert.equal(t.name, '肺结节（院内范例）');
+  assert.deepEqual(t.source, {
+    kind: 'hospital-example',
+    label: '院内范例',
+    note: '依据用户提供的肺结节病历截图整理；截图未展示完整摘要及诊断，这两项为整理示例。身份、生命体征及未展示病史留空，检查日期、机构和编号需按实际报告补录。'
+  });
+
+  const b = t.record.basic || {};
+  ['name', 'gender', 'age', 'marital', 'nativePlace', 'birthPlace', 'nationality',
+    'occupation', 'workUnit', 'address', 'phone', 'recordNo', 'bedNo', 'admitDate', 'recordDate']
+    .forEach(k => assert.ok(!String(b[k] || '').trim(), `basic.${k} 应留空`));
+  assert.equal(Object.values(t.record.pe.vitals || {}).filter(v => String(v || '').trim()).length, 0,
+    '原始范例没有生命体征数字');
+  assert.deepEqual(t.record.pe, {
+    vitals: {},
+    general: { conscious: '神志清楚，精神可' },
+    chest: {
+      lungAuscultation: '双肺呼吸音清，未闻及干湿性啰音',
+      heartAuscultation: '心律齐，各瓣膜听诊区未闻及病理性杂音'
+    },
+    abdomen: {
+      abdAuscultation: '肠鸣音正常',
+      abdPalpation: '腹平软，全腹无压痛、反跳痛，肝脾肋下未触及'
+    },
+    spine: { limbs: '双下肢无水肿' },
+    nervousPE: { nerve: '神经系统常见阴性' }
+  }, '只保留范例有记录的阴性查体，不推断阳性体征或补齐一般查体');
+  assert.equal(Object.keys(t.record.ros || {}).length, 0, '未展示的系统回顾必须留空');
+  ['relief', 'negativeDiscriminating', 'treatment'].forEach(k =>
+    assert.equal(String(t.record.hpi[k] || '').trim(), '', `未提供的 hpi.${k} 不得补写`));
+  ['personal', 'marriage', 'menstruation', 'childbirth', 'family'].forEach(k => {
+    assert.ok(!hasMeaningfulValue(t.record[k]), `未展示的 ${k} 内容应留空`);
+  });
+
+  assert.match(t.record.pmh.diseaseDetail, /慢性乙型病毒性肝炎/);
+  assert.match(t.record.pmh.longTermMeds, /恩替卡韦分散片0\.5mg每晚1次/);
+  assert.match(t.record.pmh.longTermMeds, /病史记载/);
+  const exams = t.record.auxiliary.items;
+  assert.equal(exams.length, 4, '范例应有4项辅助检查');
+  assert.deepEqual(exams.map(x => x.name), ['胸部CT', '腹部超声', 'PET/CT', '病理检查']);
+  exams.forEach((x, i) => {
+    assert.ok(String(x.result || '').trim(), `第${i + 1}项检查须保留原始结果或病理状态`);
+    ['date', 'hospital', 'no'].forEach(k => assert.equal(String(x[k] || '').trim(), '', `${x.name}.${k} 不得补造`));
+  });
+  assert.match(exams.find(x => x.name === '病理检查').result, /暂缺/);
+  assert.match(exams.find(x => x.name === 'PET/CT').result, /原发性肺癌可能性大/);
+  assert.doesNotMatch(JSON.stringify(t.record), /SUV|分期|T[0-4]N[0-3]M[0-1]|\b\d+(?:\.\d+)?\s*(?:mm|cm)\b/i,
+    '原始记录未提供 SUV、分期或结节尺寸');
+  assert.deepEqual(t.record.diagnosis.confirmed,
+    ['右肺上叶部分实性结节（性质待定）', '慢性乙型病毒性肝炎']);
+
+  const r = S.emptyRecord();
+  const applied = TEMPLATES.apply(r, t.key);
+  assert.ok(applied.ok && applied.count > 0);
+  const text = G.generate(r).text;
+  assert.ok(text.includes('原发性肺癌可能性大'), '生成病历须保留影像不确定性');
+  assert.ok(text.includes('暂缺'), '生成病历须保留病理暂缺状态');
+  assert.ok(text.includes('性质待定'), '生成病历诊断须保留性质待定');
+  assert.ok(text.includes('恩替卡韦分散片0.5mg每晚1次'), '长期药物须作为既往史保留');
+  assert.ok(!text.includes(t.source.note) && !text.includes(t.source.label), '来源说明不能混入病历正文');
+});
+
+test('院内范例套用保留已有字段与整组辅助检查，默认空白行可以填入', () => {
+  const t = TEMPLATES.get('lungNodule');
+  const blank = S.emptyRecord();
+  TEMPLATES.apply(blank, t.key);
+  assert.equal(blank.auxiliary.items.length, 4, '默认全空辅助检查预置行应由模板填入4项');
+
+  for (const [field, value] of [['date', '2026-10-01'], ['hospital', '院内检查室']]) {
+    const current = S.emptyRecord();
+    current.basic.name = '本人已填姓名';
+    current.hpi.symptoms = '本人已写症状';
+    current.auxiliary.items = [{ name: '', result: '', date: '', hospital: '', no: '', [field]: value }];
+    const existing = JSON.parse(JSON.stringify(current.auxiliary.items));
+    TEMPLATES.apply(current, t.key);
+    assert.equal(current.basic.name, '本人已填姓名');
+    assert.equal(current.hpi.symptoms, '本人已写症状');
+    assert.deepEqual(current.auxiliary.items, existing,
+      `辅助检查只有 ${field} 已有内容时也应整组保留，不能拼入范例检查`);
+  }
 });
 
 test('模板不写生命体征数字（学生自己测的）', () => {
@@ -220,9 +316,9 @@ test('每个模板套用后都能生成一份结构完整的病历', () => {
   assert.deepEqual(bad, [], bad.join('\n'));
 });
 
-test('模板套用后诊断提示能命中该病种', () => {
+test('完整教学模板套用后诊断提示能命中该病种', () => {
   const bad = [];
-  TEMPLATES.all().forEach(t => {
+  TEMPLATES.all().filter(t => t.source?.kind !== 'hospital-example').forEach(t => {
     const r = S.emptyRecord();
     TEMPLATES.apply(r, t.key);
     const hits = H.analyze(r).map(h => h.name);

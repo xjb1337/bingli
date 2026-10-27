@@ -145,7 +145,7 @@ test('H1 回归：schema 里所有非默认异常选项都应被识别为阳性�
   const missed = [];
   const check = (groupKey, it, dept) => {
     (it.options || []).forEach(o => {
-      if (o === it.default || o === it.normal) return;
+      if (o === it.default || o === it.normal || (it.normalVariants || []).includes(o)) return;
       const positive = POSITIVE_DESPITE_NEG.has(o) || MIXED.has(o) ||
         (!NOT_A_FINDING.has(o) && !NEG_START.test(o));
       if (!positive) return;
@@ -167,6 +167,19 @@ test('H1 回归：schema 里所有非默认异常选项都应被识别为阳性�
 
   assert.deepEqual(missed.slice(0, 5), [],
     `有 ${missed.length} 个异常选项未被识别为阳性体征（会导致摘要漏报）`);
+});
+
+test('院内简短正常所见不补写额外体征、不产生阳性提示', () => {
+  const r = mk();
+  SCHEMA.PE_COMMON.forEach(group => group.items.forEach(item => {
+    (item.normalVariants || []).forEach(value => {
+      r.pe = { [group.key]: { [item.key]: value } };
+      assert.equal(SCHEMA.peValueIsDefault(item, value + '。'), true);
+      assert.deepEqual(GENERATOR.abnormalPE(r), [], `${group.key}.${item.key}: ${value}`);
+      assert.deepEqual(HINTS.analyze(r), [], `正常所见不得产生诊断提示: ${value}`);
+      assert.ok(GENERATOR.generate(r).text.includes(value), '正文仍保留简短原文');
+    });
+  }));
 });
 
 test('H1 回归：阴性/正常描述不得被识别为阳性体征', () => {

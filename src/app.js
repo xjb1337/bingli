@@ -398,13 +398,14 @@ const APP = (() => {
         <span class="tpl-name">${esc(t.name)}</span>
         ${aliases}
         ${t.hint ? `<span class="tpl-hint">${esc(t.hint)}</span>` : ''}
+        ${t.source ? `<span class="tpl-source">${esc(t.source.label)}：${esc(t.source.note)}</span>` : ''}
       </button>`;
     }).join('');
 
     return `<details class="card tpl-card" id="tplCard">
       <summary>用模板开始（可选）<span class="tpl-count">${list.length} 个病种</span></summary>
-      <div class="hint">选一个病种，工具会填好一份<b>典型病例</b>的病历初稿（现病史、既往史、
-        查体、辅助检查、诊断都写了）。<b>然后必须按你实际问到的改</b>——它是模板，不是你的病人。</div>
+      <div class="hint">选一个病种，工具会填入一份<b>病历范例</b>已有的内容。院内范例按原资料保留缺项和诊断不确定性。
+        <b>请按实际问诊、查体和报告逐条核对补充</b>——模板不代表当前患者。</div>
       <div class="tpl-list">${items}</div>
       <div class="hint">套用只补空白项：你已经写过的内容一个字都不会被覆盖。</div>
     </details>`;
@@ -1922,9 +1923,10 @@ const APP = (() => {
 
     const ok = window.confirm(
       `套用模板：${t.name}\n\n` +
-      '这会把一份典型病例的内容填进**空白项**（现病史、既往史、查体、辅助检查、诊断等），' +
+      (t.source ? `${t.source.label}：${t.source.note}\n\n` : '') +
+      '这会把病历范例已有的内容填进**空白项**（现病史、既往史、查体、辅助检查、诊断等），' +
       '你已经写过的内容不会被覆盖。\n\n' +
-      '套完之后必须按你实际问到的、查到的逐条改——模板是教学用的标准病例，不是你的病人。\n\n' +
+      '套用后请按实际问到的、查到的逐条核对补充；缺项保持待填，影像考虑不能替代病理诊断。\n\n' +
       '确定套用吗？'
     );
     if (!ok) return;

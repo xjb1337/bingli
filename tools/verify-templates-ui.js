@@ -245,7 +245,91 @@ async function main() {
       afterSecond.diag.length === 1 && afterSecond.diag[0] === '我自己下的诊断',
       `姓名=${afterSecond.name} 主诉=${afterSecond.chief} 诊断=${afterSecond.diag.join('/')}`);
 
-    // ---- ⑤ 412px 布局 ----
+    // ---- ⑤ 外科肺结节院内范例：真实点击、来源说明和检查组保护 ----
+    await evaluate(`(() => {
+      const r = APP.getRecord();
+      APP._test.setRecord(SCHEMA.emptyRecord());
+      APP.getRecord().basic.department = 'surgery';
+      APP._test.gotoStep('basic');
+      APP._test.render();
+      const card = document.getElementById('tplCard');
+      if (card) card.open = true;
+      return true;
+    })()`);
+    await sleep(400);
+    const surgeryCard = await evaluate(`(() => {
+      const card = document.getElementById('tplCard');
+      const btns = [...document.querySelectorAll('[data-tpl]')];
+      const lung = document.querySelector('[data-tpl="lungNodule"]');
+      return {
+        count: btns.length,
+        lungName: lung && lung.querySelector('.tpl-name').textContent.trim(),
+        source: lung && lung.querySelector('.tpl-source') && lung.querySelector('.tpl-source').textContent.trim(),
+        scrollW: document.documentElement.scrollWidth,
+        clientW: document.documentElement.clientWidth,
+        cardRight: card && Math.round(card.getBoundingClientRect().right),
+      };
+    })()`);
+    check('外科模板列表含肺结节院内范例并显示来源/缺项说明',
+      surgeryCard.count === 7 && surgeryCard.lungName === '肺结节（院内范例）' &&
+      surgeryCard.source && surgeryCard.source.includes('院内范例') && surgeryCard.source.includes('未展示病史留空') &&
+      surgeryCard.scrollW <= surgeryCard.clientW + 1,
+      `列表=${surgeryCard.count} 名称=${surgeryCard.lungName} 来源=${surgeryCard.source || ''} 横宽=${surgeryCard.scrollW}/${surgeryCard.clientW}`);
+
+    await evaluate(`(() => {
+      window.__lungConfirm = '';
+      window.confirm = msg => { window.__lungConfirm = msg; return true; };
+      document.querySelector('[data-tpl="lungNodule"]').click();
+      return true;
+    })()`);
+    await sleep(700);
+    const lungApplied = await evaluate(`(() => {
+      const r = APP.getRecord();
+      APP._test.gotoStep('output');
+      const text = document.getElementById('outputText').textContent;
+      APP._test.gotoStep('basic');
+      const button = document.querySelector('[data-tpl="lungNodule"]');
+      return {
+        dept: r.basic.department,
+        identityEmpty: !r.basic.name && !r.basic.gender && !r.basic.age && !r.basic.recordNo && !r.basic.bedNo,
+        vitalsEmpty: Object.keys(r.pe.vitals || {}).length === 0,
+        diagnosis: (r.diagnosis.confirmed || []).slice(),
+        itemCount: r.auxiliary.items.length,
+        items: r.auxiliary.items.map(x => x.name),
+        confirm: window.__lungConfirm,
+        sourceStillShown: !!(button && button.querySelector('.tpl-source')),
+        sourceInBody: text.includes('院内范例') || text.includes('依据用户提供的肺结节病历截图整理'),
+        hasUncertainty: text.includes('原发性肺癌可能性大') && text.includes('性质待定'),
+        hasPathologyGap: text.includes('暂缺'),
+        toast: (document.getElementById('toast') || {}).textContent || '',
+      };
+    })()`);
+    check('点击肺结节范例后 confirm 告知来源 note，病历保留不确定性及病理暂缺',
+      lungApplied.confirm.includes('依据用户提供的肺结节病历截图整理') &&
+      lungApplied.hasUncertainty && lungApplied.hasPathologyGap && !lungApplied.sourceInBody,
+      `诊断=${lungApplied.diagnosis.join('、')} note=${lungApplied.confirm.includes('依据用户提供的肺结节病历截图整理')} 正文来源=${lungApplied.sourceInBody}`);
+    check('肺结节套用后4项辅助检查均保留，身份/生命体征仍空',
+      lungApplied.dept === 'surgery' && lungApplied.identityEmpty && lungApplied.vitalsEmpty && lungApplied.itemCount === 4 &&
+      lungApplied.items.join('|') === '胸部CT|腹部超声|PET/CT|病理检查' &&
+      lungApplied.diagnosis[0] === '右肺上叶部分实性结节（性质待定）',
+      `科室=${lungApplied.dept} 检查=${lungApplied.items.join('/')}`);
+
+    // 已有检查中的日期属于已填内容；再套范例时整组都要原样保留。
+    const retainedAux = await evaluate(`(() => {
+      const r = APP.getRecord();
+      r.auxiliary.items = [{ name: '', result: '', date: '2026-10-01', hospital: '', no: '' }];
+      APP._test.render();
+      window.confirm = () => true;
+      document.querySelector('[data-tpl="lungNodule"]').click();
+      return true;
+    })()`);
+    await sleep(500);
+    const auxAfterRepeat = await evaluate(`(() => JSON.stringify(APP.getRecord().auxiliary.items))()`);
+    check('仅有日期的既有检查也会阻止整组辅助检查覆盖',
+      auxAfterRepeat === '[{"name":"","result":"","date":"2026-10-01","hospital":"","no":""}]',
+      auxAfterRepeat);
+
+    // ---- ⑥ 412px 布局 ----
     const layout = await evaluate(`(() => {
       const card = document.getElementById('tplCard');
       if (card) card.open = true;
@@ -272,10 +356,12 @@ async function main() {
     if (!fs.existsSync(shotDir)) fs.mkdirSync(shotDir, { recursive: true });
     await evaluate(`(() => {
       const r = APP.getRecord();
-      r.basic.department = 'digestive';
+      r.basic.department = 'surgery';
       APP._test.gotoStep('basic');
       const card = document.getElementById('tplCard');
-      if (card) { card.open = true; card.scrollIntoView({block:'start'}); }
+      if (card) card.open = true;
+      const lung = document.querySelector('[data-tpl="lungNodule"]');
+      if (lung) lung.scrollIntoView({block:'center'});
       return true;
     })()`);
     await sleep(500);

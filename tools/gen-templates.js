@@ -43,6 +43,13 @@ function main() {
       name: String(part.name || ''),
       alias: Array.isArray(part.alias) ? part.alias.map(String) : [],
       hint: String(part.hint || ''),
+      ...(part.source && part.source.kind === 'hospital-example' ? {
+        source: {
+          kind: 'hospital-example',
+          label: String(part.source.label || '院内范例'),
+          note: String(part.source.note || '')
+        }
+      } : {}),
       record: part.record
     });
   });

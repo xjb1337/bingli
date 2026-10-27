@@ -27,6 +27,9 @@ const ROOT = path.join(__dirname, '..');
 const PARTS_DIR = path.join(ROOT, 'tools', 'tpl-parts');
 
 const ALL = TEMPLATES.all();
+// 院内范例按原始证据守真实性，不套用完整典型教学病例的补齐要求。
+const isHospitalExample = t => t.source?.kind === 'hospital-example';
+const TEACHING = ALL.filter(t => !isHospitalExample(t));
 const DEPT_KEYS = S.DEPARTMENTS.map(d => d.key);
 const DEPT_NAME = {};
 S.DEPARTMENTS.forEach(d => { DEPT_NAME[d.key] = d.name; });
@@ -88,6 +91,12 @@ function positiveSigns(t) {
 /* =========================================================================
  * ① 三处视图必须一致：all() / get() / listByDept()
  * ========================================================================= */
+
+test('57份模板与外科7份覆盖（含唯一的肺结节院内范例）', () => {
+  assert.equal(ALL.length, 57);
+  assert.equal(TEMPLATES.listByDept('surgery').length, 7);
+  assert.deepEqual(ALL.filter(isHospitalExample).map(t => t.key), ['lungNodule']);
+});
 
 test('① 每份模板都能被 get() 取到，且 listByDept 给出的每个 key 都在 all() 里', () => {
   assert.ok(ALL.length > 0, '模板库是空的——任何「按科室找模板」的功能都会空手而归');
@@ -168,7 +177,7 @@ test('② 模板的 dept 与它出现在 listByDept 的科室完全一致（不�
  * ③ 套用后可生成、够长、不含模糊诊断词
  * ========================================================================= */
 
-test('③ 每份模板套用后都能生成 ≥60 行，且不含「可能/疑似/待查/?」', () => {
+test('③ 每份模板可套用；完整教学模板生成 ≥60 行且不含模糊诊断词', () => {
   const tooShort = [];
   const hasBanned = [];
   const failedApply = [];
@@ -177,6 +186,8 @@ test('③ 每份模板套用后都能生成 ≥60 行，且不含「可能/疑�
     const { res } = applied(t.key);
     if (!res.ok || res.count === 0) failedApply.push(`${t.key}: apply ok=${res.ok} count=${res.count}`);
     const text = textOf(t.key);
+    assert.ok(text.includes('【初步诊断】'), `${t.key}: 生成病历缺少初步诊断章节`);
+    if (isHospitalExample(t)) return;
     const n = linesOf(text).length;
     if (n < 60) tooShort.push(`${t.key}: 只有 ${n} 行`);
     BANNED.forEach(w => {
@@ -208,9 +219,9 @@ test('③ 每份模板套用后都能生成 ≥60 行，且不含「可能/疑�
  * ④ 套用后诊断提示至少命中一条
  * ========================================================================= */
 
-test('④ 每份模板套用后 H.analyze() 至少命中 1 条诊断提示（症状体征写到了点上）', () => {
+test('④ 完整教学模板套用后 H.analyze() 至少命中 1 条诊断提示', () => {
   const noHit = [];
-  ALL.forEach(t => {
+  TEACHING.forEach(t => {
     const { r } = applied(t.key);
     const hits = H.analyze(r) || [];
     if (!hits.length) {
@@ -462,10 +473,10 @@ test('同一份记录重复 generate 输出完全一致（生成是确定性的�
  * 内容密度：模板得真的写满了，不能只有骨架
  * ========================================================================= */
 
-test('每份模板都有实质内容：现病史九项齐全、至少有 1 个阳性体征', () => {
+test('完整教学模板都有实质内容：现病史九项齐全、至少有 1 个阳性体征', () => {
   const hpiMissing = [];
   const noPositive = [];
-  ALL.forEach(t => {
+  TEACHING.forEach(t => {
     const h = t.record.hpi || {};
     const miss = HPI_REQUIRED.filter(k => !String(h[k] || '').trim());
     if (miss.length) hpiMissing.push(`${t.key}: 缺 ${miss.join('/')}`);
@@ -508,7 +519,7 @@ test('每份模板的辅助检查逐条可追溯：有项目名和结果，且�
   );
 });
 
-test('每份模板的初步诊断都用确定语气（不许留模糊词），且没有空项', () => {
+test('每份模板的初步诊断无空项，完整教学模板须用确定语气', () => {
   const bad = [];
   ALL.forEach(t => {
     const confirmed = ((t.record.diagnosis || {}).confirmed) || [];
@@ -516,7 +527,7 @@ test('每份模板的初步诊断都用确定语气（不许留模糊词），�
     confirmed.forEach(d => {
       const s = String(d || '').trim();
       if (!s) { bad.push(`${t.key}: 有空的诊断项`); return; }
-      if (BANNED.some(w => s.includes(w))) bad.push(`${t.key}: 诊断「${s}」含模糊词`);
+      if (!isHospitalExample(t) && BANNED.some(w => s.includes(w))) bad.push(`${t.key}: 诊断「${s}」含模糊词`);
       // 只挡「一个字」这种明显残留；「便秘」「单活胎」这类两字病名是合法的，不能误伤
       if (s.length < 2) bad.push(`${t.key}: 诊断「${s}」只剩一个字，是没写完的残留`);
     });
