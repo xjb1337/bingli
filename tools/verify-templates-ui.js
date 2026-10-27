@@ -13,12 +13,13 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const { spawn } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
 const DIST = path.join(ROOT, 'dist', '大病历生成器.html');
 const PORT = 9317;
-const PROFILE = path.join(require('os').tmpdir(), 'tpl-ui-profile-' + Date.now());
+const PROFILE = path.join(os.tmpdir(), 'tpl-ui-profile-' + Date.now());
 
 const CHROME_CANDIDATES = [
   'C:/Program Files/Google/Chrome/Application/chrome.exe',
@@ -352,7 +353,7 @@ async function main() {
     await evaluate(`(() => { if (window.__origConfirm) window.confirm = window.__origConfirm; return true; })()`);
 
     // ---- 截图：卡片展开的样子，供人工过一眼 ----
-    const shotDir = path.join(ROOT, 'dist', 'shots');
+    const shotDir = process.env.TPL_UI_SHOT_DIR || path.join(ROOT, 'dist', 'shots');
     if (!fs.existsSync(shotDir)) fs.mkdirSync(shotDir, { recursive: true });
     await evaluate(`(() => {
       const r = APP.getRecord();
