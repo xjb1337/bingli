@@ -315,20 +315,29 @@ async function main() {
       lungApplied.diagnosis[0] === '右肺上叶部分实性结节（性质待定）',
       `科室=${lungApplied.dept} 检查=${lungApplied.items.join('/')}`);
 
-    // 已有检查中的日期属于已填内容；再套范例时整组都要原样保留。
-    const retainedAux = await evaluate(`(() => {
-      const r = APP.getRecord();
-      r.auxiliary.items = [{ name: '', result: '', date: '2026-10-01', hospital: '', no: '' }];
-      APP._test.render();
-      window.confirm = () => true;
-      document.querySelector('[data-tpl="lungNodule"]').click();
-      return true;
-    })()`);
-    await sleep(500);
-    const auxAfterRepeat = await evaluate(`(() => JSON.stringify(APP.getRecord().auxiliary.items))()`);
-    check('仅有日期的既有检查也会阻止整组辅助检查覆盖',
-      auxAfterRepeat === '[{"name":"","result":"","date":"2026-10-01","hospital":"","no":""}]',
-      auxAfterRepeat);
+    // 已有检查中的日期/机构属于已填内容；真实点击后整组都应原样保留。
+    const retained = [];
+    for (const [field, value] of [['date', '2026-10-01'], ['hospital', '院内检查室']]) {
+      const before = await evaluate(`(() => {
+        const r = APP.getRecord();
+        r.basic.chiefComplaint = '本人原有主诉';
+        r.hpi.symptoms = '本人原有症状';
+        r.auxiliary.items = [{ name: '', result: '', date: '', hospital: '', no: '', [${JSON.stringify(field)}]: ${JSON.stringify(value)} }];
+        const original = JSON.stringify(r.auxiliary.items);
+        APP._test.render();
+        window.confirm = () => true;
+        document.querySelector('[data-tpl="lungNodule"]').click();
+        return original;
+      })()`);
+      await sleep(300);
+      const after = await evaluate(`(() => {
+        const r = APP.getRecord();
+        return { items: JSON.stringify(r.auxiliary.items), chief: r.basic.chiefComplaint, symptoms: r.hpi.symptoms };
+      })()`);
+      retained.push({ field, ok: after.items === before && after.chief === '本人原有主诉' && after.symptoms === '本人原有症状' });
+    }
+    check('仅有日期/机构的既有检查整组保留，既有主诉和症状不覆盖',
+      retained.every(x => x.ok), retained.map(x => `${x.field}=${x.ok}`).join(' '));
 
     // ---- ⑥ 412px 布局 ----
     const layout = await evaluate(`(() => {
