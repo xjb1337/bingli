@@ -165,13 +165,14 @@ test('发病诱因补成完整分句，且与起病描述不矛盾', () => {
   assert.match(GENERATOR.buildHPI(r), /受凉后起病/);
   assert.doesNotMatch(GENERATOR.buildHPI(r), /受凉后。/, '不应出现孤立的短语短句');
 
-  // 已有明确诱因时，起病句里的「无明显诱因」要去掉，避免自相矛盾
+  // 两处录入有冲突时不能擅自删除原话，必须提醒用户核对。
   const r2 = makeRecord('respiratory');
   r2.hpi.onset = '3天前无明显诱因出现咳嗽';
   r2.hpi.cause = '受凉后';
   const hpi = GENERATOR.buildHPI(r2);
-  assert.doesNotMatch(hpi, /无明显诱因/, `有明确诱因时不应再写「无明显诱因」：${hpi}`);
+  assert.match(hpi, /无明显诱因/);
   assert.match(hpi, /受凉后起病/);
+  assert.ok(GENERATOR.validate(r2).some(w => /诱因.*核对/.test(w)));
 
   // 「无明显诱因」本身不是诱因，只保留起病句里那一处
   const r3 = makeRecord('respiratory');

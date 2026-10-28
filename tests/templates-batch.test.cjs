@@ -35,7 +35,7 @@ const DEPT_NAME = {};
 S.DEPARTMENTS.forEach(d => { DEPT_NAME[d.key] = d.name; });
 
 /* 模板绝不许替学生决定的患者身份字段 */
-const PRIVACY = ['name', 'gender', 'age', 'recordNo', 'bedNo', 'admitDate', 'recordDate'];
+const PRIVACY = ['name', 'gender', 'age', 'birthDate', 'recordNo', 'bedNo', 'admitDate', 'admitTime', 'recordDate', 'recordTime'];
 /* 病历里出现这些词就是在教学生「先写个不确定的诊断」——初步诊断必须落地 */
 const BANNED = ['可能', '疑似', '待查', '?', '？'];
 /* 现病史十项里必须有实质内容的那几项 */

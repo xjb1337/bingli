@@ -531,6 +531,32 @@ test('沙箱内不发起网络请求', () => {
   assert.ok(app.document.querySelector('#content').innerHTML.length > 0);
 });
 
+test('病历界面不再显示考核分数，核对提示不宣称病历已经完整', () => {
+  const app = boot();
+  for (const step of ['basic', 'hpi', 'pmh', 'personal', 'family', 'pe', 'summary', 'output']) {
+    app.run(`APP._test.gotoStep(${JSON.stringify(step)})`);
+    const html = app.document.querySelector('#content').innerHTML;
+    assert.doesNotMatch(html, /评分表|第\s*\d+\s*页\s*[·（]|拿满\s*\d+\s*分|扣\s*\d+\s*分|该填的都填了|常见追问点都已问到/, step);
+  }
+  const html = app.document.querySelector('#content').innerHTML;
+  assert.match(html, /核对提醒/);
+  assert.match(html, /自动检查不能保证病历正确或完整/);
+});
+
+test('折叠补充项在已有内容时自动展开，旧数据仍可编辑', () => {
+  const app = boot();
+  app.run('APP.getRecord().hpi.negativeDiscriminating = "无头痛"');
+  app.run('APP._test.gotoStep("hpi")');
+  let html = app.document.querySelector('#content').innerHTML;
+  assert.match(html, /<details class="optional-details" open>/);
+  assert.match(html, /data-path="hpi.negativeDiscriminating"[^>]*>无头痛/);
+  app.run('APP.getRecord().basic.address = "已有地址"');
+  app.run('APP._test.gotoStep("basic")');
+  html = app.document.querySelector('#content').innerHTML;
+  assert.match(html, /<details class="optional-details" open>\s*<summary>工作单位和联系方式/);
+  assert.match(html, /value="已有地址"/);
+});
+
 test('录入步骤顺序与病历章节顺序一致：既往史在系统回顾之前', () => {
   const app = boot();
   // vm 沙箱里的数组 prototype 与宿主不同，deepStrictEqual 会因原型不等而失败，
@@ -558,7 +584,7 @@ test('录入步骤顺序与 SECTION_ORDER 的病史部分一一对应', () => {
   const map = {
     basic: '一般项目', hpi: '现病史', pmh: '既往史', ros: '系统回顾',
     personal: '个人史', marriage: '婚姻史', family: '家庭史',
-    pe: '体格检查', aux: '实验室检查', summary: '摘要'
+    pe: '体格检查', aux: '辅助检查', summary: '摘要'
   };
   const pairs = keys.filter(k => map[k]).map(k => [k, sec.indexOf(map[k])]);
   const idx = pairs.map(p => p[1]);

@@ -31,7 +31,7 @@ const G = global.GENERATOR;
 const H = global.HINTS;
 
 const PARTS_DIR = path.join(__dirname, 'tpl-parts');
-const FORBIDDEN_BASIC = ['name', 'gender', 'age', 'recordNo', 'bedNo', 'admitDate', 'recordDate'];
+const FORBIDDEN_BASIC = ['name', 'gender', 'age', 'birthDate', 'recordNo', 'bedNo', 'admitDate', 'admitTime', 'recordDate', 'recordTime'];
 
 let problems = 0;
 let warns = 0;

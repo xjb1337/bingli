@@ -74,7 +74,7 @@ test('每个模板的 key 唯一、dept 是合法科室、有 name', () => {
 });
 
 test('模板不写患者身份信息（那只能学生自己填）', () => {
-  const FORBIDDEN = ['name', 'gender', 'age', 'recordNo', 'bedNo', 'admitDate', 'recordDate'];
+  const FORBIDDEN = ['name', 'gender', 'age', 'birthDate', 'recordNo', 'bedNo', 'admitDate', 'admitTime', 'recordDate', 'recordTime'];
   TEMPLATES.all().forEach(t => {
     FORBIDDEN.forEach(k => {
       const v = (t.record.basic || {})[k];
@@ -98,8 +98,8 @@ test('lungNodule 院内范例按原始证据保留空白与不确定性', () => 
   });
 
   const b = t.record.basic || {};
-  ['name', 'gender', 'age', 'marital', 'nativePlace', 'birthPlace', 'nationality',
-    'occupation', 'workUnit', 'address', 'phone', 'recordNo', 'bedNo', 'admitDate', 'recordDate']
+  ['name', 'gender', 'age', 'birthDate', 'marital', 'nativePlace', 'birthPlace', 'nationality',
+    'occupation', 'workUnit', 'address', 'phone', 'recordNo', 'bedNo', 'admitDate', 'admitTime', 'recordDate', 'recordTime']
     .forEach(k => assert.ok(!String(b[k] || '').trim(), `basic.${k} 应留空`));
   assert.equal(Object.values(t.record.pe.vitals || {}).filter(v => String(v || '').trim()).length, 0,
     '原始范例没有生命体征数字');
@@ -301,7 +301,7 @@ test('listByDept 只给本科室的模板，通用科给空', () => {
 
 test('每个模板套用后都能生成一份结构完整的病历', () => {
   const REQUIRED = ['一般项目', '主诉', '现病史', '既往史', '系统回顾', '个人史',
-    '婚姻史', '月经与生育史', '家庭史', '体格检查', '实验室检查', '摘要', '诊断依据', '初步诊断'];
+    '婚姻史', '月经与生育史', '家庭史', '体格检查', '辅助检查', '摘要', '诊断依据', '初步诊断'];
   const bad = [];
   TEMPLATES.all().forEach(t => {
     const r = S.emptyRecord();

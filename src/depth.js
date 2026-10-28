@@ -303,8 +303,7 @@ var DEPTH = (function () {
       id: 'neg-symptom',
       level: 'high',
       section: '现病史',
-      message: '现病史里一条有鉴别诊断意义的阴性症状都没有。带教原话：「你这里面没有写任何的阴性症状」。' +
-        '至少补上与本病例最需要排除的那几个（例如消化科的上消化道出血要写无呕血、无发热、无体重下降）。'
+      message: '现病史尚未记录相关阴性症状；请按实际询问结果补充有鉴别意义的内容。'
     });
     return out;
   }
@@ -335,9 +334,7 @@ var DEPTH = (function () {
         id: 'chronic-meds',
         level: 'high',
         section: '既往史',
-        message: '「' + hit.join('」「') + '」只写了病名，没写用什么药、多大剂量、控制得怎么样。' +
-          '带教原话：「高血压的药尽量要问出来，因为就涉及到接下来这个血压高我们要用什么药」。' +
-          '还要问一句家里有没有监测血压／血糖。'
+        message: '「' + hit.join('」「') + '」仅记录了病名，可核对既往用药、剂量及控制情况。'
       });
       return out;
     }
@@ -374,8 +371,7 @@ var DEPTH = (function () {
       id: 'surgery-detail',
       level: 'high',
       section: '既往史',
-      message: '手术史写了「' + s + '」，但没写' + missing.join('、') + '。' +
-        '带教原话：「你们问手术的时候没有问几几年做的，在哪里做的手术，手术过程是怎样的，这些也要写进去」。'
+      message: '手术史写了「' + s + '」，可核对' + missing.join('、') + '。'
     });
     return out;
   }
@@ -426,9 +422,8 @@ var DEPTH = (function () {
       id: 'duration-mismatch',
       level: 'mid',
       section: '主诉',
-      message: '主诉写的时长和现病史的起病时间对不上（主诉约 ' + fmtDays(ccDays) +
-        '，现病史起病于 ' + fmtDays(onsetDays) + ' 前）。' +
-        '带教原话：「上面七天，下面不要写六天」——上下必须一致。'
+      message: '主诉写的时长和现病史的起病时间可能不同（主诉约 ' + fmtDays(ccDays) +
+        '，现病史起病于 ' + fmtDays(onsetDays) + ' 前），请核对是否描述不同阶段。'
     });
     return out;
   }
@@ -477,9 +472,7 @@ var DEPTH = (function () {
       id: 'onset-trace',
       level: 'high',
       section: '主诉',
-      message: '主诉只写了 ' + fmtDays(ccDays) + '，但现病史里提到「' + (shown || fmtDays(days)) + '」。' +
-        '这段时间里有没有症状？带教的原话是「这个病史就要从之前他的头晕开始讲，那才是他一个完整的病史」——' +
-        '主诉很可能要从更早那次算起，比如「上腹胀痛数月，加重伴解黑便3日」。'
+      message: '主诉写了 ' + fmtDays(ccDays) + '，现病史还提到「' + (shown || fmtDays(days)) + '」，请核对较早症状与本次病情的关系。'
     });
     return out;
   }
@@ -503,8 +496,7 @@ var DEPTH = (function () {
         id: 'ambiguous-date',
         level: 'low',
         section: '现病史',
-        message: '现病史里的「' + m[0] + '」有歧义——是 14 号，还是 14 天前？' +
-          '带教要求写成「三天前」或「10月14号」，别让读病历的人猜。'
+        message: '现病史里的「' + m[0] + '」可能有歧义，请写明具体日期或距今时长。'
       });
       break;
     }
@@ -525,8 +517,7 @@ var DEPTH = (function () {
       id: 'aux-hospital',
       level: 'mid',
       section: '辅助检查',
-      message: '辅助检查都没写是在哪做的。带教反复强调要区分「本院」和「外院」——' +
-        '外院做的要写清机构名称和检查号，入院后做的检查不能出现在入院时的大病历里。'
+      message: '辅助检查尚未填写机构。请按实际报告核对检查机构、检查号和时间。'
     });
     return out;
   }
@@ -558,8 +549,7 @@ var DEPTH = (function () {
         id: 'aux-grade:' + g.name,
         level: 'mid',
         section: '辅助检查',
-        message: '做了' + hit[0].name + '，但没抄' + g.name + '。带教原话：「你只写了外院 B 超异常，' +
-          'BI-RADS 几级、建议手术这一段全丢了」——分级直接决定要不要手术，必须原样抄进病历。'
+        message: hit[0].name + '尚未记录' + g.name + '；如原报告包含分级，请核对后补充。'
       });
     });
     return out;
@@ -589,9 +579,7 @@ var DEPTH = (function () {
       id: 'menstrual',
       level: 'mid',
       section: '月经史',
-      message: '乳腺／甲状腺的病人要问月经史——月经来潮早晚是乳腺肿瘤的相关因素，' +
-        '而且手术要尽量避开月经期。50～55 岁的直接问是否绝经，年轻的问末次月经。' +
-        '带教原话：「不要不好意思问，病历上面都要写下来」。'
+      message: '可结合本次病情核对月经史，并按实际询问结果填写。'
     });
     return out;
   }
@@ -610,9 +598,7 @@ var DEPTH = (function () {
       id: 'pediatric-personal',
       level: 'high',
       section: '个人史',
-      message: '儿科病人的个人史是核心模块，现在出生史、喂养史、生长发育史一项都没填。' +
-        '带教原话：「六个月了，他这个抬头还抬不稳，那你要想到他可能会有什么，我们发育落后」——' +
-        '这三项直接对应发育落后、体重不达标、神经系统异常的鉴别。'
+      message: '出生史、喂养史和生长发育史尚未填写，请根据实际情况核对。'
     });
     return out;
   }
@@ -650,7 +636,7 @@ var DEPTH = (function () {
   // ---------- 汇总 ----------
 
   var ORDER = { high: 0, mid: 1, low: 2 };
-  var LABEL = { high: '必补', mid: '建议补', low: '留意' };
+  var LABEL = { high: '核对', mid: '建议', low: '留意' };
 
   /**
    * 跑全部规则。

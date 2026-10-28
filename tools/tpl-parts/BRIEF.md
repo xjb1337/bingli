@@ -54,8 +54,7 @@ node tools/check-templates.js tools/tpl-parts/<你的文件>.cjs
 
 `abdomen.abdPalpation` 有 8 个子项（abdPalpSuperficial / abdPalpDeep / liverPalpation /
 spleenPalpation / gallbladderPalpation / kidneyPalpation / bladderPalpation / fluidThrill）,
-**写了任一子项，父项 `abdPalpation` 就会被让位不输出**。
-要么只写父项，要么写子项组合，不要既写父项又写子项。
+已填写的父项与子项都会保留；编写模板时应核对两处是否重复或冲突。
 
 ## 第二批起的补充约定（2026-10-25 加）
 

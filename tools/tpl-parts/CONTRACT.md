@@ -166,8 +166,7 @@ record: {
    没有「中上腹压痛」这个值——照抄 `opt=` 里的字，别自己改词。
    ⚠️ `abdomen.abdPalpation` 有 8 个子项（abdPalpSuperficial/abdPalpDeep/liverPalpation/
    spleenPalpation/gallbladderPalpation/kidneyPalpation/bladderPalpation/fluidThrill），
-   **写了子项，父项 abdPalpation 就会被让位**（不输出）。要么只写父项，要么写子项组合，
-   不要既写父项又写子项。
+   已填写的父项与子项都会保留；应核对两处是否重复或冲突。
 
 ## 绝对禁止
 

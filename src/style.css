@@ -143,8 +143,39 @@ main {
   border-radius: var(--radius);
   padding: 14px;
   margin-bottom: 12px;
-  box-shadow: var(--shadow);
+  box-shadow: none;
 }
+
+.section-title {
+  margin: 18px 0 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--gray-2);
+  font-size: calc(14px * var(--fs-scale));
+  font-weight: 600;
+}
+
+.optional-details {
+  margin: 12px 0;
+  padding: 0;
+  border: 0;
+}
+
+.optional-details > summary {
+  cursor: pointer;
+  color: var(--blue);
+  font-size: calc(14px * var(--fs-scale));
+  font-weight: 500;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  list-style: none;
+}
+
+.optional-details > summary::-webkit-details-marker { display: none; }
+.optional-details > summary::before { content: '▸'; transition: transform .2s; }
+.optional-details[open] > summary::before { transform: rotate(90deg); }
+.optional-details > .field:last-child { margin-bottom: 0; }
 
 .card-title {
   font-size: calc(15px * var(--fs-scale));
@@ -201,13 +232,13 @@ main {
 
 /* 查体项：默认值 vs 已填，用左侧色条区分 */
 .pe-item.is-default {
-  border-left: 3px solid var(--gray-3);
-  padding-left: 8px;
+  border-left: 0;
+  padding-left: 0;
 }
 
 .pe-item.is-blank {
-  border-left: 3px solid var(--red);
-  padding-left: 8px;
+  border-left: 0;
+  padding-left: 0;
 }
 
 .pe-item.is-blank .pe-text {
@@ -215,8 +246,8 @@ main {
 }
 
 .pe-item.is-filled {
-  border-left: 3px solid var(--green);
-  padding-left: 8px;
+  border-left: 0;
+  padding-left: 0;
 }
 
 .pe-item.is-default .pe-text {
@@ -232,9 +263,9 @@ main {
 /* 未勾选：本次没查这一项，病历里完全不出现。
    用虚线灰条，和「需填」的红色实线区分开——它不是没做完，是主动不选。 */
 .pe-item.is-off {
-  border-left: 3px dashed var(--gray-3);
-  padding-left: 8px;
-  opacity: .62;
+  border-left: 0;
+  padding-left: 0;
+  opacity: .8;
 }
 
 .pe-item.is-off .pe-text {
@@ -329,6 +360,7 @@ main {
 input[type="text"],
 input[type="number"],
 input[type="date"],
+input[type="time"],
 textarea,
 select {
   width: 100%;
@@ -361,9 +393,10 @@ select {
 
 .row2 {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 10px;
 }
+.row2 > * { min-width: 0; }
 
 .grid3 {
   display: grid;
@@ -709,7 +742,8 @@ select {
 
 .pe-body { padding: 0 14px 12px; }
 
-.pe-item { margin-bottom: 12px; }
+.pe-item { margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--gray-2); }
+.pe-item:last-child { border-bottom: 0; }
 
 .pe-label {
   font-size: calc(13px * var(--fs-scale));
@@ -953,6 +987,23 @@ select {
   border-radius: 6px;
   line-height: 1.5;
   border-left: 3px solid #f9ab00;
+}
+
+.review-panel .warn-list { gap: 0; margin-top: 6px; }
+.review-panel .warn-item {
+  position: relative;
+  background: transparent;
+  color: var(--gray-6);
+  border: 0;
+  border-bottom: 1px solid var(--gray-2);
+  border-radius: 0;
+  padding: 8px 0 8px 16px;
+}
+.review-panel .warn-item::before {
+  content: '•';
+  position: absolute;
+  left: 2px;
+  color: var(--score-warn);
 }
 
 .ok-item {
@@ -1579,6 +1630,7 @@ footer .btn:disabled {
   input[type="text"],
   input[type="number"],
   input[type="date"],
+  input[type="time"],
   textarea,
   select {
     background: #2c2c2c;

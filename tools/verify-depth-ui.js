@@ -95,10 +95,11 @@ async function main() {
       console.log(`${ok ? '✓' : '✗'} ${name}${detail ? '  —— ' + detail : ''}`);
     };
 
-    // ---- ① 空白病历：卡片在，且是「无必补项」而不是一串空话 ----
+    // ---- ① 空白病历：提示存在，但不声称问诊已经完整 ----
     const blank = await evaluate(`(() => {
       APP._test.gotoStep('output');
       const card = document.querySelector('.depth-card');
+      if (card && card.closest('details')) card.closest('details').open = true;
       return {
         step: APP._test.getStepKey(),
         hasCard: !!card,
@@ -107,11 +108,11 @@ async function main() {
         lines: document.querySelectorAll('.depth-line').length,
       };
     })()`);
-    check('生成页有「问诊深度自查」卡片，且不再有评分自查卡',
+    check('生成页有问诊补充提示，且不再有评分自查卡',
       blank.step === 'output' && blank.hasCard && !blank.hasScoreCard,
       `步骤=${blank.step} 深度卡=${blank.hasCard} 评分卡=${blank.hasScoreCard}`);
     check('空白病历时深度自查不报任何问题（没写就没有可挑剔的）',
-      blank.lines === 0 && blank.text.includes('常见追问点都已问到'),
+      blank.lines === 0 && blank.text.includes('仍请人工核对'),
       `条目=${blank.lines} 文案=${blank.text.slice(0, 50)}`);
 
     // ---- ② 笔记1 的真实病例：四件被扣分的事都要点出来 ----
@@ -127,6 +128,8 @@ async function main() {
       r.pmh.health = '一般';
       r.pmh.diseaseChecks = { 高血压: true };
       APP._test.render();
+      const depthCard = document.querySelector('.depth-card');
+      if (depthCard && depthCard.closest('details')) depthCard.closest('details').open = true;
       const ids = APP._test.depthOf(r).map(f => f.id);
       const lines = [...document.querySelectorAll('.depth-line')].map(el => ({
         lv: el.className.replace('depth-line ',''),
@@ -186,6 +189,8 @@ async function main() {
       r.pmh.longTermMeds = '';
       APP._test.render();
       APP._test.gotoStep('output');
+      const depthCard = document.querySelector('.depth-card');
+      if (depthCard && depthCard.closest('details')) depthCard.closest('details').open = true;
       const rows = [...document.querySelectorAll('.depth-line')];
       const jumps = [...document.querySelectorAll('.dl-jump')];
       return {

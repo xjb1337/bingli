@@ -156,7 +156,7 @@ test('约数词「余」不能孤零零掉在句尾', () => {
   const r = mk('respiratory');
   r.basic.chiefComplaint = '咳嗽3月余';
   const onset = G.draftHPI(r).onset;
-  assert.equal(onset, '3月前无明显诱因出现咳嗽');
+  assert.equal(onset, '3月前出现咳嗽');
 });
 
 test('主诉只有时长没有症状时，现病史用「上述症状」兜底', () => {

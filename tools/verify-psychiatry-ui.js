@@ -167,7 +167,7 @@ cdp._id = 0;
   const gen1 = await ev(`(() => {
     APP._test.gotoStep('output');
     const t = document.querySelector('#outputText').textContent;
-    const pe = t.split('【体格检查】')[1].split('【实验室检查】')[0];
+    const pe = t.split('【体格检查】')[1].split('【辅助检查】')[0];
     return pe;
   })()`);
   check('未勾的九项一个字都不写进病历，只写勾了的那一项',
@@ -184,7 +184,7 @@ cdp._id = 0;
     APP._test.applyTemplate('depression');
     APP._test.gotoStep('output');
     const t = document.querySelector('#outputText').textContent;
-    const pe = t.split('【体格检查】')[1].split('【实验室检查】')[0];
+    const pe = t.split('【体格检查】')[1].split('【辅助检查】')[0];
     const per = t.split('【个人史】')[1].split('【婚姻史】')[0];
     APP._test.gotoStep('summary');
     const hints = Array.from(document.querySelectorAll('.hint-card .hint-name'))

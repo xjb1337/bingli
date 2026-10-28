@@ -294,7 +294,7 @@ test('专科项全被去重时写「见前述体格检查」，不能静默消�
   const line = text.split('\n').find(l => l.startsWith(S.PE_SPECIAL.digestive.name));
   assert.ok(line,
     `勾了专科项、内容又全被去重时，专科段整段消失了，学生只会以为工具坏了。\n` +
-    `全文查体段：\n${text.split('【体格检查】')[1].split('【实验室检查】')[0]}`);
+    `全文查体段：\n${text.split('【体格检查】')[1].split('【辅助检查】')[0]}`);
   assert.match(line, /见前述体格检查/,
     `专科段应在全被去重时指向通用查体，实际写的是：${JSON.stringify(line)}`);
 });
@@ -313,7 +313,7 @@ test('全勾时每科专科段都在，且查体段内没有分句重复', () =>
     });
     // 只在【体格检查】段里查重复——去重规则管的是查体段。
     // 摘要段复述现病史是设计使然（教材要求摘要「高度概述病史要点」），不在此列。
-    const pe = text.split('【体格检查】')[1].split('【实验室检查】')[0];
+    const pe = text.split('【体格检查】')[1].split('【辅助检查】')[0];
     const seen = new Map();
     pe.split(/[，,；;。\n]/).map(s => s.trim()).filter(s => s.length >= 4)
       .forEach(c => seen.set(c, (seen.get(c) || 0) + 1));

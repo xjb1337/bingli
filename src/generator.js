@@ -103,7 +103,27 @@ const GENERATOR = (() => {
       effective.push({ core, neg, text: standAlone ? c : core, standAlone });
     });
 
-    const kept = effective.filter(e => !(e.core.length >= 2 && existing.includes(squash(e.core))));
+    // 只删除极性也相同的重复项。仅比较症状名会把「出现视物模糊」后的
+    // 「无视物模糊」当作重复而丢掉，掩盖需要人工核对的矛盾。
+    const previous = [];
+    seg.forEach(part => {
+      String(part || '').split(/[。；;]/).forEach(sentence => {
+        let negScope = '';
+        sentence.split(/[、，,]/).forEach(piece => {
+          const clause = piece.trim();
+          if (!clause) return;
+          const head = (clause.match(NEG_HEAD) || [''])[0];
+          if (head) negScope = head;
+          else if (/(出现|伴有|伴|存在|诉|有|患者)/.test(clause)) negScope = '';
+          previous.push({ core: squash(clause.replace(NEG_HEAD, '')), neg: !!(head || negScope) });
+        });
+      });
+    });
+    const kept = effective.filter(e => {
+      if (e.standAlone) return !existing.includes(squash(e.text));
+      const core = squash(e.core);
+      return !previous.some(p => p.core === core && p.neg === !!e.neg);
+    });
     if (kept.length === effective.length) return t;
     if (!kept.length) return '';
 
@@ -126,33 +146,16 @@ const GENERATOR = (() => {
    * 直接拼进现病史会得到一个孤零零的短句（"受凉后。"），读起来像病句。
    * 这里补足谓词让它成为完整分句；已经写成完整句的保持原样。
    *
-   * 「无明显诱因」不是诱因，是「没有诱因」的表述，属于起病情况那一句的内容，
-   * 所以这里直接返回空串，交由 onset 去说，避免出现两句「无明显诱因」。
+   * 「无明显诱因」等原话也保留；与起病情况重复时再做安全去重。
    */
   function normalizeCause(v) {
     const t = stripTail(v);
     if (!t) return '';
-    if (/^(无明显诱因|无诱因|无明显原因|诱因不明)/.test(t)) return '';
+    if (/^(无明显诱因|无诱因|无明显原因|诱因不明)/.test(t)) return t;
     // 已经是完整分句（含谓词或连接词）就不再加工
     if (/[。；;]/.test(t) || /(出现|发生|诱发|起病|引起)/.test(t)) return t;
     if (/后$/.test(t)) return `${t}起病`;
-    return `${t}为本次发病诱因`;
-  }
-
-  /**
-   * 起病与诱因不能自相矛盾。
-   *
-   * 「起病情况」常被草稿成「无明显诱因出现腹痛」；如果用户随后又填了「受凉后」，
-   * 两句话并列就成了「无明显诱因…受凉后…」的矛盾表述。有明确诱因时，
-   * 把起病描述里的「无明显诱因」去掉，诱因由 cause 单独交代。
-   */
-  function reconcileOnsetWithCause(onset, cause) {
-    const o = stripTail(onset);
-    if (!o || !stripTail(cause)) return o;
-    return stripTail(
-      o.replace(/，?(无明显诱因|无诱因|无明显原因)/g, '')
-       .replace(/^(无明显诱因|无诱因|无明显原因)/, '')
-    );
+    return t;
   }
 
   /**
@@ -258,6 +261,7 @@ const GENERATOR = (() => {
 
     lines.push(`姓名：${filledOrPH(b.name)}`);
     lines.push(`性别：${filledOrPH(b.gender)}`);
+    lines.push(`出生日期：${filledOrPH(b.birthDate)}`);
     lines.push(`年龄：${filledOrPH(age)}`);
     lines.push(`科别：${filledOrPH(deptName)}`);
     lines.push(`床号：${filledOrPH(b.bedNo)}`);
@@ -274,17 +278,12 @@ const GENERATOR = (() => {
     lines.push(`工作单位：${filledOrPH(b.workUnit)}`);
     lines.push(`通讯地址：${filledOrPH(b.address)}`);
     lines.push(`电话号码：${filledOrPH(b.phone)}`);
-    lines.push(`入院日期：${filledOrPH(b.admitDate)}`);
-    lines.push(`记录日期：${filledOrPH(b.recordDate)}`);
-    // 病史陈述者：成人默认「患者本人」。14 岁以下患儿说不清自己的病史，
-    // 按《诊断学》第10版问诊要求应由家属代述；但「母亲/父亲/祖父」这类具体关系
-    // 系统无从得知，编造等于伪造病历，所以未填写时只写「家属」。
-    // ⚠️ 这段主语/代述逻辑归 narrative 同事维护，本轮保持原样不动；
-    //    只在最终为空时补占位符，保证一行不缺。
+    const validTime = value => /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(stripTail(value)) ? ' ' + stripTail(value) : '';
+    lines.push(`入院日期：${filledOrPH(b.admitDate)}${validTime(b.admitTime)}`);
+    lines.push(`记录日期：${filledOrPH(b.recordDate)}${validTime(b.recordTime)}`);
+    // 未填写时保留占位，不根据患者年龄推断陈述者。
     const informant = stripTail(b.informant);
-    const isChildInformant = ageYears(b) < 14;
-    const who = informant || (isChildInformant ? '家属' : (b.name ? `患者本人（${b.name}）` : ''));
-    lines.push(`病史陈述者：${filledOrPH(who)}`);
+    lines.push(`病史陈述者：${filledOrPH(informant)}`);
     lines.push(`病史可靠程度：${filledOrPH(b.reliability)}`);
     return lines.join('\n');
   }
@@ -335,49 +334,9 @@ const GENERATOR = (() => {
 
   /* ---------------------------- 现病史 ---------------------------- */
 
-  const HPI_DEFAULTS = {
-    generalCondition: '发病以来，精神、食欲、睡眠可，大小便正常，体重无明显变化'
-  };
-
-  /**
-   * 现病史末句「发病以来一般情况」该写什么。
-   *
-   * ⚠️ 指令B 已复现：空记录时 buildHPI 仍凭空写
-   * 「患者发病以来，精神、食欲、睡眠可，大小便正常，体重无明显变化。」，
-   * 摘要又复述一遍。学生一个字都没填，程序却断言病人吃喝睡大小便体重全都正常，
-   * 正是《诊断学》第10版禁止的「臆断或虚构」（「无内容者画"/"或"—"」）。
-   *
-   * 规则：
-   *   ① 用户自己填了就按原话写（不加工）；
-   *   ② 没填时，只有本次现病史本身已有实质内容（起病、症状、诊疗经过…），
-   *      才用默认句式兜底——此时这一段是真实病人，默认句起到
-   *      「这一项必须问」的提示作用；
-   *   ③ 现病史为空 → 返回空串，由 generate() 统一补「／」占位，
-   *      绝不替病人写「一切正常」。
-   *
-   * ⚠️ 判据里**不再包含主诉**（已复现的缺陷B1）：只填「上腹痛3天」、hpi 全空时，
-   * 旧判据 `hasHistory || hasCC` 把主诉当成「问过现病史」的证据，于是凭空写出
-   * 「发病以来，精神、食欲、睡眠可，大小便正常，体重无明显变化」。
-   * 主诉有内容 ≠ 问过食欲睡眠体重；这句话只有在学生真的写了现病史时才作为
-   * 「这一项该问」的提示存在。只填主诉时 buildHPI 返回空串，正文由 generate() 补「／」。
-   *
-   * 注意：起病时间只有一个光秃秃的时间短语（「3天前」）不算实质内容，见 buildHPI。
-   *
-   * @param {object} r record
-   * @returns {string} 一句话（不带句号），空串表示不写
-   */
+  /** 一般情况只使用明确录入的内容，未填写时不自动假定正常。 */
   function hpiGeneralSentence(r) {
-    const h = r.hpi || {};
-    const own = stripTail(h.generalCondition);
-    if (own) return own;
-    const fields = ['onset', 'cause', 'symptoms', 'relief', 'evolution',
-      'accompanying', 'negativeDiscriminating', 'treatment', 'extra'];
-    const hasHistory = fields.some(k => {
-      const v = stripTail(h[k]);
-      // 只有「3天前」这类裸时间短语，不足以证明问过一般情况（缺陷B1/H6）
-      return v && !isBareOnsetPhrase(v);
-    });
-    return hasHistory ? HPI_DEFAULTS.generalCondition : '';
+    return stripTail((r.hpi || {}).generalCondition);
   }
 
   /**
@@ -413,7 +372,8 @@ const GENERATOR = (() => {
     }
     const seg = [];
     const causeText = normalizeCause(h.cause);
-    const onset = reconcileOnsetWithCause(h.onset, causeText);
+    // 不改写已经录入的起病描述；与诱因冲突时由质控提示人工核对。
+    const onset = stripTail(h.onset);
     if (onset) seg.push(onset);
 
     // 诱因：起病描述里已经写了「受凉后/进食后」等就不再重复
@@ -485,13 +445,13 @@ const GENERATOR = (() => {
     const m = String(b.chiefComplaint || '').match(
       /([0-9０-９一二三四五六七八九十百千万两半十几数]+(?:个)?(?:天|日|周|星期|月|年|小时|分钟))/i
     );
-    let cc = stripTail(b.chiefComplaint) || '上述症状';
+    let cc = stripTail(b.chiefComplaint);
     const durText = m ? m[1]
       : (stripTail(b.chiefComplaintDuration)
         ? stripTail(b.chiefComplaintDuration) + (b.chiefComplaintDurationUnit || '')
         : '');
     const out = { ...h };
-    if (!stripTail(out.onset)) {
+    if (!stripTail(out.onset) && cc) {
       // 时长已经从主诉里提走了，症状名里就不能再带一遍，
       // 否则会写出「2年前无明显诱因出现反复上腹痛2年」这种自己重复自己的句子。
       // 连着后面的约数词一起吃掉：「咳嗽3月余」→「3月前…咳嗽」，
@@ -501,10 +461,7 @@ const GENERATOR = (() => {
         const rest = stripTail(cc.replace(new RegExp(esc + '(?:余|多|左右|来|许)?'), ''));
         cc = rest || '上述症状';
       }
-      out.onset = `${durText ? durText + '前' : ''}无明显诱因出现${cc}`;
-    }
-    if (!stripTail(out.generalCondition)) {
-      out.generalCondition = HPI_DEFAULTS.generalCondition;
+      out.onset = `${durText ? durText + '前' : ''}出现${cc}`;
     }
     return out;
   }
@@ -726,12 +683,10 @@ const GENERATOR = (() => {
     if (stripTail(p.feeding)) seg.push(`喂养史：${stripTail(p.feeding)}`);
     if (stripTail(p.growth)) seg.push(`生长发育史：${stripTail(p.growth)}`);
     // 籍贯已在一般项目，个人史这里只写居住情况
-    if (stripTail(p.residence) && !/^久居/.test(stripTail(p.residence))) {
-      seg.push(`居住史：久居${stripTail(p.residence)}`);
-    } else if (stripTail(p.residence)) {
+    if (stripTail(p.residence)) {
       seg.push(`居住史：${stripTail(p.residence)}`);
     }
-    if (stripTail(p.travel)) seg.push(`疫区接触史：近期${stripTail(p.travel)}`);
+    if (stripTail(p.travel)) seg.push(`疫区接触史：${stripTail(p.travel)}`);
     // 吸烟：三态都可能来自用户选择；没选（''）写占位符，不能默认成「无」。
     // 旧代码 `else if (p.smoking === '无' || p.smoking)` 会把任何回答（含空串以外的杂值）
     // 一律写成「无」，本次收紧成严格三态。
@@ -1166,15 +1121,35 @@ const GENERATOR = (() => {
     return String(raw).trim();
   }
 
+  /** 父项与细项存在明显相反描述时提醒核对；不推断哪一项才是事实。 */
+  function peParentChildConflict(groupKey, parentKey, parentText, childKey, childText) {
+    const parent = String(parentText || '');
+    const child = String(childText || '');
+    if (groupKey === 'abdomen' && parentKey === 'abdPalpation') {
+      const positivePain = /压痛/.test(child) && !/(无|未见|否认|没有)[^，。；、]{0,8}压痛/.test(child);
+      const palpable = /(?:可触及|触及包块|触及肿块)/.test(child) && !/(未|无|不能)触及/.test(child);
+      if (/无压痛/.test(parent) && positivePain &&
+        ['abdPalpSuperficial', 'abdPalpDeep', 'gallbladderPalpation'].includes(childKey)) return true;
+      if (/(未触及|肝脾肋下未触及)/.test(parent) && palpable) return true;
+      if (/腹平软|腹软/.test(parent) && /腹肌紧张|板状腹/.test(child)) return true;
+    }
+    if (groupKey === 'nervousPE' && parentKey === 'nerve') {
+      if (/病理反射未引出|神经系统常见阴性/.test(parent) && /阳性/.test(child)) return true;
+    }
+    if (groupKey === 'spine' && parentKey === 'limbs') {
+      if (/活动自如/.test(parent) && childKey === 'limbMuscle' && /偏瘫|不能活动|不能行走/.test(child)) return true;
+      if (/无水肿/.test(parent) && /水肿/.test(child) && !/无水肿/.test(child)) return true;
+    }
+    return false;
+  }
+
   /**
    * 一组查体里，哪些条目应该参与输出。
    *
    *  1) 没勾选的项一律不参与（勾选制：没查的不能写成正常，见 SCHEMA.peChecked）；
    *  2) 勾了但没写具体所见 → 补该项的规范正常描述（peNormalText）；
-   *  3) abdomen.abdPalpation 这类「父项 + 子项」结构：子项一旦被填写，父项必须让位，
-   *     否则病历里会同时出现「全腹无压痛」和「右下腹浅触诊压痛」两种互相打架的描述。
-   *     这里统一用 schema 导出的 parentSupersededByChild 判断，不在 generator 里
-   *     再散落一套自己的规则。
+   *  3) 已录入的父项和细项都保留；存在明显冲突时提醒人工核对。
+   *     对空白父项，仅在其默认描述与已检查细项冲突时省略该默认描述。
    *
    * @returns {Array<{item:object, value:string}>} 只保留有值（要输出）的条目
    */
@@ -1183,9 +1158,17 @@ const GENERATOR = (() => {
     return items
       // 没勾 = 这一次没查，不能出现在病历里
       .filter(it => SCHEMA.peChecked(r, groupKey, it.key))
-      // 父项被已填写的子项接管时，整项跳过
-      .filter(it => !(SCHEMA.childPEItems(groupKey, it.key).length &&
-        SCHEMA.parentSupersededByChild(store, groupKey, it.key)))
+      // 手填的父项始终保留。只有空白父项的默认描述与已勾选细项明显冲突时，
+      // 才暂不输出默认描述；未勾选的旧细项不能影响父项。
+      .filter(it => {
+        if (SCHEMA.peItemFilled(store, it)) return true;
+        const parent = stripTail(peValue(r, groupKey, it)) || stripTail(SCHEMA.peNormalText(it));
+        return !SCHEMA.childPEItems(groupKey, it.key).some(child =>
+          SCHEMA.peChecked(r, groupKey, child.key) &&
+          peParentChildConflict(groupKey, it.key, parent, child.key,
+            stripTail(peValue(r, groupKey, child)) || stripTail(SCHEMA.peNormalText(child)))
+        );
+      })
       .map(it => {
         const own = stripTail(peValue(r, groupKey, it));
         // 勾了却没写所见 → 用规范正常描述兜底；连正常描述都没有就跳过
@@ -1444,14 +1427,7 @@ const GENERATOR = (() => {
       }
       if (!item) return;
 
-      // 父项已被子项接管时跳过：否则重点查体会输出父项的默认"全腹无压痛、反跳痛"，
-      // 而同一次查体里又写着"右下腹浅触诊压痛"，同一份病历自相矛盾。
       const store = (r.pe || {})[groupKey] || {};
-      if (!groupKey.startsWith('special_') &&
-        typeof SCHEMA.parentSupersededByChild === 'function' &&
-        SCHEMA.parentSupersededByChild(store, groupKey, itemKey)) {
-        return;
-      }
 
       // 只写用户真正填过的项，默认值不写进"重点查体"（否则等于把没查的也列成重点）；
       // 同时必须是通过勾选的项——把没勾（这次没查）的项列进重点查体是自相矛盾的。
@@ -1476,7 +1452,7 @@ const GENERATOR = (() => {
    * 三条判定规则：
    *   1) 用户没改过的（等于 default 或旧的 legacyDefault）不算阳性——t2 重写了
    *      腹部四项默认文案，旧存档里存的是旧文案，只认 default 会把它误判成阳性；
-   *   2) 被填写的子项接管的父项不再参与，避免同一条体征重复出现；
+   *   2) 查体条目按勾选及父子项冲突规则筛选；
    *   3) 只挑真正阳性的短句：逐句拆分后剔除「无…/未见…」等否定句。
    */
   function abnormalPE(r) {
@@ -1512,16 +1488,19 @@ const GENERATOR = (() => {
     const NORMAL_EXACT = [
       /^腹部平坦$/, /^腹软$/, /^腹平软$/, /^腹部柔软$/,
       /^肠鸣音正常$/, /^肠鸣音正常[，,]?约?\d+次\/分$/,
-      /^心界不大$/, /^心律齐$/, /^律齐$/
+      /^心界不大$/, /^心律齐$/, /^律齐$/,
+      /^营养(?:情况)?(?:良好|中等|一般)$/, /^神志清$/,
+      /^瞳孔等大等圆$/, /^对光反射(?:灵敏|灵敏正常)$/
     ];
     // 公认的「正常」表述
     const NORMAL_PHRASE = /(营养良好|营养中等|营养一般|发育正常|发育良好|神志清楚|精神一般|精神可|自主体位|自动体位|面容自然|查体合作|皮肤弹性良好|毛发分布均匀|气管居中|颈软|腹平软|脊柱生理弯曲存在|生理反射存在|肌力正常|肌力5级|肌力Ⅴ级|双肺呼吸音清|呼吸音清|前囟平软|愈合良好)/;
 
     /** 单个片段是否明确是阴性/正常 */
-    const isNegativeClause = c =>
+    const isNegativeClause = (c, item) =>
       NEG_PREFIX.test(c) || NEG_FINDING.test(c) || NEG_SUFFIX.test(c) ||
       NOT_A_FINDING.test(c) ||
-      NORMAL_EXACT.some(rx => rx.test(c)) || NORMAL_PHRASE.test(c);
+      NORMAL_EXACT.some(rx => rx.test(c)) || NORMAL_PHRASE.test(c) ||
+      (item.key === 'face' && /^自然$/.test(c));
 
     const isPositiveFinding = (item, val) => {
       if (!val) return false;
@@ -1543,7 +1522,7 @@ const GENERATOR = (() => {
             negScope = false;
             return;
           }
-          if (isNegativeClause(c)) {
+          if (isNegativeClause(c, item)) {
             // 这一片段本身是阴性；若它含否定词，否定可能延续到后面的列举项
             if (/(无|未见|未闻及|未触及|未引出|否认|没有)/.test(c)) negScope = true;
             return;
@@ -2018,7 +1997,7 @@ const GENERATOR = (() => {
         history: hpiText,
         // 缺陷H1（已复现）：通用腹部触诊与专科 giTenderness 常写同一句，
         // 诊断依据就成了「上腹部压痛，上腹部压痛」。这里按分句去重（dedupeClauses）。
-        pe: abn.length ? dedupeClauses(abn.slice(0, 2).map(a => a.text)).join('，') : '',
+        pe: abn.length ? dedupeClauses(abn.map(a => a.text)).join('，') : '',
         aux: aux.length ? `${aux[0].name}${aux[0].result}` : ''
       }
       : { diagnosis: d, history: '', pe: '', aux: '' });
@@ -2090,7 +2069,7 @@ const GENERATOR = (() => {
       const check = diffRelatedToDiagnosis(r);
       if (check.unrelated.length) {
         out.push(`${check.unrelated.join('、')} 与现有诊断的关联不明确，`
-          + '请确认是否保留（评分表对「与诊断无关的鉴别诊断」扣 5 分）。');
+          + '请结合病情核对是否保留。');
       }
     }
     return out;
@@ -2325,7 +2304,7 @@ const GENERATOR = (() => {
 
   const SECTION_ORDER = [
     '一般项目', '主诉', '现病史', '既往史', '系统回顾', '个人史',
-    '婚姻史', '月经与生育史', '家庭史', '体格检查', '实验室检查',
+    '婚姻史', '月经与生育史', '家庭史', '体格检查', '辅助检查',
     '摘要', '诊断依据', '初步诊断'
   ];
 
@@ -2379,7 +2358,7 @@ const GENERATOR = (() => {
     sections['月经与生育史'] = buildMenstruationChildbirth(r);
     sections['家庭史'] = buildFamily(r);
     sections['体格检查'] = buildPE(r);
-    sections['实验室检查'] = buildAuxiliary(r);
+    sections['辅助检查'] = buildAuxiliary(r);
     sections['摘要'] = buildSummary(r);
     sections['诊断依据'] = buildBasisSection(r);
     sections['初步诊断'] = buildDiagnosis(r);
@@ -2653,9 +2632,21 @@ const GENERATOR = (() => {
     };
     const admit = okDate(b.admitDate);
     const record = okDate(b.recordDate);
+    const birth = okDate(b.birthDate);
     const discharge = okDate((r.discharge || {}).dischargeDate);
+    if (birth && admit && birth > admit) w.push('【日期】出生日期晚于入院日期，请核对。');
+    [['入院', b.admitTime, admit], ['记录', b.recordTime, record]].forEach(([label, value, date]) => {
+      const time = stripTail(value);
+      if (!time) return;
+      if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time)) w.push(`【日期】${label}时间「${time}」格式有误，请核对。`);
+      if (!date) w.push(`【日期】已填写${label}时间，请同时核对${label}日期。`);
+    });
     if (admit && record && record < admit) {
       w.push(`【日期】记录日期 ${record} 早于入院日期 ${admit}，请核对。`);
+    }
+    if (admit && record && admit === record && /^\d\d:\d\d$/.test(b.admitTime || '') &&
+      /^\d\d:\d\d$/.test(b.recordTime || '') && b.recordTime < b.admitTime) {
+      w.push('【日期】记录时间早于入院时间，请核对。');
     }
     if (admit && discharge && discharge < admit) {
       w.push(`【日期】出院日期 ${discharge} 早于入院日期 ${admit}，请核对。`);
@@ -2676,6 +2667,77 @@ const GENERATOR = (() => {
     } else if (dept && dept !== 'pediatrics' && dept !== 'emergency' && age < 14) {
       w.push(`【一般项目】年龄 ${age} 岁，科室却是${name}；14 岁以下建议选儿科。`);
     }
+  }
+
+  /** 只提示可能存在的冲突，保留原始录入供人工判断时间和语境。 */
+  function checkRecordConsistency(r, w) {
+    const h = r.hpi || {};
+    const history = [h.onset, h.symptoms, h.relief, h.evolution, h.accompanying,
+      h.negativeDiscriminating, h.treatment, h.extra].filter(Boolean).join('。');
+    const laterality = /([左右])(?:侧)?(?:上下|上|下|四)?肢(?:体)?[^，。；;]{0,8}(?:无力|乏力|瘫痪)/g;
+    const sides = new Set();
+    for (const match of history.matchAll(laterality)) {
+      const before = history.slice(0, match.index).split(/[，,。；;、]/).pop() || '';
+      if (!/(无|否认|未见|没有)[^，。；、]{0,6}$/.test(before)) sides.add(match[1]);
+    }
+    if (sides.has('左') && sides.has('右')) {
+      w.push('【现病史】左右侧肢体无力均被提及，请核对患侧及是否为不同时间的表现。');
+    }
+
+    // 在同一条文本中，顿号后的症状可继承前面的否定词；句号、分号结束否定范围。
+    ['视物模糊', '头痛', '呛咳', '发热'].forEach(symptom => {
+      const seen = { positive: false, negative: false };
+      history.split(/[。；;]/).forEach(sentence => {
+        let negative = false;
+        sentence.split(/[，,、]/).forEach(raw => {
+          const clause = raw.trim().replace(/无明显诱因|无诱因/g, '');
+          if (!clause) return;
+          if (/^(无|否认|没有|未见|未出现)/.test(clause)) negative = true;
+          else if (/出现|伴有|伴|诉|存在|有症状/.test(clause)) negative = false;
+          if (!clause.includes(symptom)) return;
+          const prefix = clause.slice(0, clause.indexOf(symptom));
+          const localNeg = /(无|否认|没有|未见|未出现)[^，。；、]{0,8}$/.test(prefix);
+          if (localNeg || negative) seen.negative = true;
+          else seen.positive = true;
+        });
+      });
+      if (seen.positive && seen.negative) {
+        w.push(`【现病史】「${symptom}」同时出现有和无的描述，请核对是否对应不同时间。`);
+      }
+    });
+
+    const cause = stripTail(h.cause);
+    const explicitTrigger = /受凉|进食|饮食|劳累|外伤|摔倒|搬重|情绪激动|饮酒后|感染后|服药后|诱发/.test(cause);
+    if (/无明显诱因|无诱因/.test(String(h.onset || '')) && explicitTrigger &&
+      !/^(无明显诱因|无诱因|无明显原因|诱因不明)/.test(cause)) {
+      w.push('【现病史】起病描述写无明显诱因，诱因栏又填写了其他内容，请核对。');
+    }
+    if (/症状同前/.test(history) && /较(?:上述|前).{0,4}好转/.test(history)) {
+      w.push('【现病史】同时写了症状同前和较前好转，请核对各自对应的时间。');
+    }
+    if (/发病至入院(?:时间)?[^。；;]{0,12}(?:小时|分钟)/.test(history)) {
+      w.push('【现病史】请按起病、就诊、治疗和入院的实际时间核对所写的时长。');
+    }
+    if (!auxItems(r).length && /(?:血常规|生化|血糖|凝血|头颅CT|CTA|MRI|磁共振)/i.test(history)) {
+      w.push('【辅助检查】现病史提到了检查，但辅助检查栏目尚未录入结果；请按实际报告补充或确认。');
+    }
+
+    SCHEMA.PE_COMMON.forEach(group => {
+      const store = ((r.pe || {})[group.key]) || {};
+      group.items.forEach(parent => {
+        if (!SCHEMA.peChecked(r, group.key, parent.key)) return;
+        const parentText = stripTail(peValue(r, group.key, parent)) || stripTail(SCHEMA.peNormalText(parent));
+        SCHEMA.childPEItems(group.key, parent.key).forEach(child => {
+          if (!SCHEMA.peChecked(r, group.key, child.key)) return;
+          const childText = stripTail(peValue(r, group.key, child)) || stripTail(SCHEMA.peNormalText(child));
+          if (!peParentChildConflict(group.key, parent.key, parentText, child.key, childText)) return;
+          const detail = SCHEMA.peItemFilled(store, parent)
+            ? '两项内容可能不一致，请核对后修改。'
+            : '默认描述与细项可能冲突，默认描述未写入，请填写实际所见。';
+          w.push(`【体格检查】${group.name}「${parent.label}」与「${child.label}」：${detail}`);
+        });
+      });
+    });
   }
 
   function validate(r) {
@@ -2743,6 +2805,7 @@ const GENERATOR = (() => {
     checkVitals(r, w);
     checkDates(r, w);
     checkDeptAge(r, w);
+    checkRecordConsistency(r, w);
     if (!((r.diagnosis || {}).confirmed || []).length) w.push('【初步诊断】未填写，可参考"诊断提示"。');
     else warnDiagnosisOrder(r, w);
     if (!stripTail(r.summary || '')) {

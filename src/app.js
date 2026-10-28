@@ -47,7 +47,7 @@ const APP = (() => {
     { key: 'marriage', name: '婚姻与生育史', icon: '⑥' },
     { key: 'family', name: '家庭史', icon: '⑦' },
     { key: 'pe', name: '体格检查', icon: '⑧' },
-    { key: 'aux', name: '实验室检查', icon: '⑨' },
+    { key: 'aux', name: '辅助检查', icon: '⑨' },
     { key: 'summary', name: '摘要与诊断', icon: '⑩' },
     { key: 'output', name: '生成病历', icon: '✓' }
   ];
@@ -92,7 +92,7 @@ const APP = (() => {
     const lv = fieldLevel(path);
     if (lv === 'must') return '<span class="tag-req">必填</span>';
     if (lv === 'should') return '<span class="tag-should">建议填</span>';
-    return '<span class="tag-auto">可留空</span>';
+    return '';
   }
 
   /* ========================= 存储（委托给 core） ========================= */
@@ -181,7 +181,6 @@ const APP = (() => {
     currentSaveBlocked = false;
     corruptCurrentRaw = '';
     R = SCHEMA.emptyRecord();
-    if (!R.basic.recordDate) R.basic.recordDate = todayStr();
     storageAlert = '';
     return saveCurrent();
   }
@@ -371,13 +370,13 @@ const APP = (() => {
     if (!list.length) {
       // 通用科没有「标准病例」，说清楚比留个空卡片好
       if (deptKey === 'general') {
-        return `<details class="card tpl-card" id="tplCard">
-          <summary>用模板开始（可选）<span class="tpl-count">先在上一张卡片选科室</span></summary>
+        return `<details class="tpl-card optional-details" id="tplCard">
+          <summary>用模板开始（可选）<span class="tpl-count">先选择科室</span></summary>
           <div class="hint">通用科不提供模板——不同系统的病差别太大，没有一份能通用的初稿。
             选了具体科室后，这里会列出该科室的常见病种。</div>
         </details>`;
       }
-      return `<details class="card tpl-card" id="tplCard">
+      return `<details class="tpl-card optional-details" id="tplCard">
         <summary>用模板开始（可选）<span class="tpl-count">本科室暂无模板</span></summary>
         <div class="hint">目前只做了消化内科的模板，其他科室会陆续加。你可以直接从
           <b>一般项目</b>开始自己写。</div>
@@ -402,59 +401,58 @@ const APP = (() => {
       </button>`;
     }).join('');
 
-    return `<details class="card tpl-card" id="tplCard">
+    return `<details class="tpl-card optional-details" id="tplCard">
       <summary>用模板开始（可选）<span class="tpl-count">${list.length} 个病种</span></summary>
       <div class="hint">选一个病种，工具会填入一份<b>病历范例</b>已有的内容。院内范例按原资料保留缺项和诊断不确定性。
         <b>请按实际问诊、查体和报告逐条核对补充</b>——模板不代表当前患者。</div>
       <div class="tpl-list">${items}</div>
-      <div class="hint">套用只补空白项：你已经写过的内容一个字都不会被覆盖。</div>
+      <div class="hint">套用只补空白项；一份病历只能套用一个模板。要换模板，请先新建病历。</div>
     </details>`;
   }
 
   function renderBasic() {
     const b = R.basic;
+    const hasContact = ['workUnit', 'address', 'phone'].some(k => String(b[k] || '').trim());
     return `
       <div class="card">
-        <div class="card-title">科室</div>
-        ${select('本次见习科室', 'basic.department', deptGroups(), {
+        <div class="card-title">基本情况</div>
+        ${select('科室', 'basic.department', deptGroups(), {
           hint: '选择科室后，体格检查会自动追加该科室的专科查体项目。'
         })}
-      </div>
-
-      ${renderTemplates()}
-
-      <div class="card">
-        <div class="card-title">一般项目</div>
+        ${renderTemplates()}
+        <div class="section-title">一般项目</div>
         ${input('姓名', 'basic.name', { placeholder: '如：张三' })}
         ${seg('性别', 'basic.gender', SCHEMA.GENDERS)}
+        <div class="row2">${input('出生日期', 'basic.birthDate', { type: 'date' })}
         ${input('年龄', 'basic.age', {
           placeholder: '58 或 7月 / 3天',
-          hint: '成人直接写数字（自动补「岁」）；婴儿写「7月」「3天」这类，不要再加「岁」。'
-        })}
+          hint: '成人填数字；婴儿可填「7月」或「3天」。'
+        })}</div>
         ${input('民族', 'basic.nationality', { placeholder: '汉族', hint: '不填则病历里写「／」。' })}
         ${seg('婚姻', 'basic.marital', SCHEMA.MARITAL)}
         ${input('职业', 'basic.occupation', { placeholder: '退休 / 农民 / 工人…' })}
-        ${input('工作单位', 'basic.workUnit', { placeholder: '无 / ××公司' })}
-        ${input('籍贯', 'basic.nativePlace', { placeholder: '浙江温州' })}
-        ${input('出生地', 'basic.birthPlace', { placeholder: '浙江温州' })}
-        ${input('通讯地址', 'basic.address', {
-          placeholder: '如：浙江省温州市鹿城区××路××号',
-          hint: '一般项目里的通讯地址；留空则病历里不出现这一项。'
-        })}
-        ${input('电话号码', 'basic.phone', { placeholder: '138××××××××' })}
-        ${input('病历号 / 住院号', 'basic.recordNo', {
+        <div class="row2">${input('籍贯', 'basic.nativePlace', { placeholder: '浙江温州' })}
+          ${input('出生地', 'basic.birthPlace', { placeholder: '浙江温州' })}</div>
+        <details class="optional-details"${hasContact ? ' open' : ''}>
+          <summary>工作单位和联系方式</summary>
+          ${input('工作单位', 'basic.workUnit', { placeholder: '无 / ××公司' })}
+          ${input('通讯地址', 'basic.address', { placeholder: '通讯地址' })}
+          ${input('电话号码', 'basic.phone', { placeholder: '联系电话' })}
+        </details>
+        <div class="row2">${input('病历号 / 住院号', 'basic.recordNo', {
           placeholder: '如：01234567',
-          hint: '出院记录的一般情况也会用到。'
         })}
         ${input('床号', 'basic.bedNo', {
-          placeholder: '如：32 / 12-3',
-          hint: '教材要求每张记录用纸的眉栏（姓名、住院号、科别、床号）都填全；不填则病历里写「／」。'
-        })}
-        ${input('入院日期', 'basic.admitDate', { type: 'date' })}
-        ${input('记录日期', 'basic.recordDate', { type: 'date' })}
+          placeholder: '如：32 / 12-3'
+        })}</div>
+        <div class="row2">${input('入院日期', 'basic.admitDate', { type: 'date' })}
+          ${input('入院时间', 'basic.admitTime', { type: 'time' })}</div>
+        <div class="row2">${input('记录日期', 'basic.recordDate', { type: 'date' })}
+          ${input('记录时间', 'basic.recordTime', { type: 'time' })}</div>
+        <div class="hint">日期和时间请按实际情况填写，不自动使用当天日期。</div>
         ${input('病史陈述者', 'basic.informant', {
           placeholder: '如：患者本人；儿科写「母亲」',
-          hint: '14 岁以下留空自动写「家属」（不猜是父亲还是母亲）；成人留空写患者本人姓名。'
+          hint: '请按实际陈述者填写；留空不会自动推断。'
         })}
         ${/* 加空选项：schema 里 reliability 的默认值已清空（不能替学生判断病史可靠程度），
              若这里不给空项，下拉框会「看起来选中了可靠」而实际存的是空值。 */ ''}
@@ -462,10 +460,7 @@ const APP = (() => {
           empty: '未评估',
           hint: '不选＝没评估，病历里写「／」。'
         })}
-      </div>
-
-      <div class="card">
-        <div class="card-title">主诉 <span class="tag-req">必填</span></div>
+        <div class="section-title">主诉 <span class="tag-req">必填</span></div>
         ${textarea('主诉症状', 'basic.chiefComplaint', {
           rows: 2,
           placeholder: '如：发热、咳嗽、咳黄痰3天',
@@ -485,7 +480,9 @@ const APP = (() => {
   }
 
   function renderHpi() {
-    const h = R.hpi;
+    const h = R.hpi || {};
+    const hasDetails = ['cause', 'relief', 'evolution', 'accompanying', 'negativeDiscriminating', 'extra']
+      .some(k => String(h[k] || '').trim());
     return `
       <div class="card">
         <div class="card-title">现病史
@@ -497,31 +494,9 @@ const APP = (() => {
           rows: 3,
           placeholder: '如：3天前受凉后出现发热，体温最高39.2℃，伴畏寒'
         })}
-        ${input('发病诱因', 'hpi.cause', {
-          placeholder: '如：受凉后 / 进食油腻食物后 / 无明显诱因',
-          hint: '评分表第2页「诱因」2 分。只写短语即可，生成时会补成完整分句；与起病描述写重时自动去重。'
-        })}
         ${textarea('主要症状特点（部位、性质、程度、持续时间、加重缓解因素）', 'hpi.symptoms', {
           rows: 3,
           placeholder: '如：咳嗽呈阵发性连声咳，咳黄色黏痰，量中等，不易咳出'
-        })}
-        ${textarea('缓解因素（什么情况下症状减轻）', 'hpi.relief', {
-          rows: 2,
-          placeholder: '如：休息后腹痛可稍缓解 / 服布洛芬后体温下降',
-          hint: '评分表第6页入院记录「现病史」把缓解因素单列为 1 分；与伴随症状写重时会自动去重。'
-        })}
-        ${textarea('病情进展（症状如何变化）', 'hpi.evolution', {
-          rows: 2,
-          placeholder: '如：症状逐渐加重，夜间咳嗽明显，影响睡眠'
-        })}
-        ${textarea('伴随症状（有则写，无则写"无…"）', 'hpi.accompanying', {
-          rows: 2,
-          placeholder: '如：伴右侧胸痛，咳嗽及深呼吸时加重；无咯血、盗汗'
-        })}
-        ${textarea('有鉴别诊断意义的阴性病史', 'hpi.negativeDiscriminating', {
-          rows: 2,
-          placeholder: '如：无咯血、盗汗、消瘦，无夜间阵发性呼吸困难',
-          hint: '评分表第2页「伴随症状和阴性鉴别症状」5 分、第6页现病史单列 1 分。写「无…」形式，越具体越能体现问诊思路。'
         })}
         ${textarea('诊治经过（在何处就诊、检查、用药及效果）', 'hpi.treatment', {
           rows: 3,
@@ -530,9 +505,19 @@ const APP = (() => {
         ${textarea('一般情况（精神、食欲、睡眠、大小便、体重）', 'hpi.generalCondition', {
           rows: 2,
           placeholder: '如：发病以来精神、食欲、睡眠可，大小便正常，体重无明显变化',
-          hint: '只有现病史其它内容或主诉填了，留空才会自动补这句常规收尾；全空时代码不替你写——那是编造。'
+          hint: '留空时不会自动填入正常情况。'
         })}
-        ${textarea('其他补充', 'hpi.extra', { rows: 2 })}
+        <details class="optional-details"${hasDetails ? ' open' : ''}>
+          <summary>补充诱因、进展和伴随症状</summary>
+          ${input('发病诱因', 'hpi.cause', { placeholder: '如：受凉后 / 无明显诱因' })}
+          ${textarea('缓解因素', 'hpi.relief', { rows: 2, placeholder: '如：休息后腹痛稍缓解' })}
+          ${textarea('病情进展', 'hpi.evolution', { rows: 2, placeholder: '如：症状逐渐加重' })}
+          ${textarea('伴随症状', 'hpi.accompanying', { rows: 2, placeholder: '如：伴胸痛；无咯血' })}
+          ${textarea('有鉴别诊断意义的阴性病史', 'hpi.negativeDiscriminating', {
+            rows: 2, placeholder: '如：无咯血、盗汗、消瘦', hint: '只填写实际询问过的阴性症状。'
+          })}
+          ${textarea('其他补充', 'hpi.extra', { rows: 2 })}
+        </details>
       </div>
     `;
   }
@@ -651,10 +636,7 @@ const APP = (() => {
         ${seg('健康状况', 'pmh.health', [{ value: '', text: '未问' }, '良好', '一般', '较差'], {
           hint: '不选＝没问过，病历里写「／」；选了才写「平素良好」等。'
         })}
-      </div>
-
-      <div class="card">
-        <div class="card-title">既往慢性病</div>
+        <div class="section-title">既往慢性病</div>
         ${checks('勾选既往疾病（可多选）', 'pmh.diseaseChecks', SCHEMA.COMMON_PMH)}
         ${input('其他疾病', 'pmh.diseaseOther', { placeholder: '补充未列出的疾病' })}
         ${textarea('疾病详情（病程、治疗、控制情况）', 'pmh.diseaseDetail', {
@@ -665,17 +647,14 @@ const APP = (() => {
         ${textarea('长期用药史', 'pmh.longTermMeds', {
           rows: 2,
           placeholder: '如：长期口服氨氯地平 5mg qd（3 年）',
-          hint: '评分表第2页既往史六项之一（1 分）。与上一条「疾病详情」可并存：详情讲病情，这里单列药名与用法。'
+          hint: '可补充实际长期使用的药名和用法。'
         })}
         ${textarea('与本病无关但仍需治疗的其他疾病', 'pmh.otherTreatDiseases', {
           rows: 2,
           placeholder: '如：慢性乙型病毒性肝炎（定期复查）',
-          hint: '评分表第6页现病史末项（1 分）。会写进现病史结尾，并计入病历书写考站。'
+          hint: '填写后会写入现病史结尾。'
         })}
-      </div>
-
-      <div class="card">
-        <div class="card-title">传染病史</div>
+        <div class="section-title">其他既往史</div>
         ${textarea('传染病史', 'pmh.infection', {
           rows: 2, placeholder: '如：否认肝炎、结核等传染病史'
         })}
@@ -689,10 +668,7 @@ const APP = (() => {
           placeholder: '如：既往有类似发作史（3年前同样出现右下腹痛，保守治疗好转）',
           hint: '和本次发病直接相关的既往情况，例如反复发作、既往同样症状、相关手术史。'
         })}
-      </div>
-
-      <div class="card">
-        <div class="card-title">过敏史</div>
+        <div class="section-title">过敏史</div>
         ${/* 同 pmh.health：原来只有「无/有」两态，默认停在「无」，
              等于工具替学生否认了过敏史。加空选项表示「没问」。 */ ''}
         ${seg('有无过敏史', 'pmh.allergy', [{ value: '', text: '未问' }, '无', '有'], {
@@ -707,10 +683,7 @@ const APP = (() => {
             hint: '勾了上面的反应表现时，生成的病历会写成「表现为皮疹、瘙痒」；此处手写描述优先，可与勾选并用或只用其一。'
           })}
         ` : ''}
-      </div>
-
-      <div class="card">
-        <div class="card-title">其他</div>
+        <div class="section-title">其他</div>
         ${textarea('其他需补充的既往史', 'pmh.special', {
           rows: 2, placeholder: '如：否认疫区接触史'
         })}
@@ -727,8 +700,11 @@ const APP = (() => {
     const ageNum = Number(String(R.basic.age || '').match(/\d+/));
     const isChild = Number.isFinite(ageNum) && ageNum > 0 && ageNum < 14;
     const growthOpen = hasGrowth || isChild;
+    const psychOpen = R.basic.department === 'psychiatry' || !!(p.premorbidPersonality || p.stressEvent);
     return `
-      <details class="card mini-details"${growthOpen ? ' open' : ''}>
+      <div class="card">
+      <div class="card-title">个人史</div>
+      <details class="optional-details"${growthOpen ? ' open' : ''}>
         <summary>出生与成长 <span class="muted">儿科填写，成人一般不写</span></summary>
         ${textarea('母孕史', 'personal.maternal', {
           rows: 2,
@@ -752,14 +728,10 @@ const APP = (() => {
         })}
       </details>
 
-      <div class="card">
-        <div class="card-title">居住与接触</div>
+        <div class="section-title">居住与接触</div>
         ${input('长期居住地', 'personal.residence', { placeholder: '温州' })}
         ${input('近期旅行/居住史', 'personal.travel', { placeholder: '近1月无外地旅居史' })}
-      </div>
-
-      <div class="card">
-        <div class="card-title">嗜好</div>
+        <div class="section-title">吸烟与饮酒</div>
         ${/* 加「未问」空选项：原默认停在「无」，空记录会凭空输出「吸烟史：无」。 */ ''}
         ${seg('吸烟', 'personal.smoking', [{ value: '', text: '未问' }, '无', '有', '已戒'], {
           hint: '不选＝没问过，病历里写「／」。'
@@ -773,10 +745,7 @@ const APP = (() => {
         ${input('饮酒情况', 'personal.drinkingAmount', {
           placeholder: '如：饮白酒约2两/日，已戒酒5年'
         })}
-      </div>
-
-      <div class="card">
-        <div class="card-title">接触史</div>
+        <div class="section-title">接触史</div>
         ${/* 《诊断学》第10版 个人史：「职业与工作条件及有无工业毒物、粉尘、
              放射性物质接触史，有无冶游史」——这两项教材点名要求，此前全项目缺失。 */ ''}
         ${textarea('职业与工作条件', 'personal.occupationEnv', {
@@ -794,10 +763,8 @@ const APP = (() => {
         })}
         ${textarea('疫区、疫水、动物接触史', 'personal.environment', { rows: 2 })}
         ${textarea('其他生活习惯', 'personal.habits', { rows: 2 })}
-      </div>
-
-      <div class="card">
-        <div class="card-title">精神科相关（其它科室可留空）</div>
+      <details class="optional-details"${psychOpen ? ' open' : ''}>
+        <summary>精神科相关</summary>
         ${/* 精神科病史采集必问「病前性格」和「发病前有没有遇到什么事」。
              放到个人史里而不是单开一步，是因为综合医院病历根本不用这两栏，
              留空就不输出（generator 的 buildPersonal 里判了 stripTail）。 */ ''}
@@ -811,6 +778,7 @@ const APP = (() => {
           placeholder: '如：3个月前因工作调动与同事发生冲突后逐渐出现情绪低落',
           hint: '精神科必填；其它科室留空即可。'
         })}
+      </details>
       </div>
     `;
   }
@@ -922,7 +890,7 @@ const APP = (() => {
         ${textarea('与本病相似的病情', 'family.similarDisease', {
           rows: 2,
           placeholder: '如：父亲患高血压，母亲患2型糖尿病；或写「家族中无类似疾病患者」',
-          hint: '评分表第2页家族史「与本病相似的病情」2.5 分。手写内容优先于勾选；全空则病历里写「家族中类似疾病史：／」。'
+          hint: '手写内容优先；未询问时可留空。'
         })}
         ${textarea('家族传染病史', 'family.infectionHistory', {
           rows: 2,
@@ -932,7 +900,7 @@ const APP = (() => {
         ${textarea('两系三代遗传性疾病史', 'family.threeGeneration', {
           rows: 2,
           placeholder: '留空则默认：两系三代否认遗传性疾病史',
-          hint: '评分表第2页家族史「两系三代遗传性疾病史」2.5 分。'
+          hint: '按实际询问范围填写。'
         })}
         ${textarea('其他补充', 'family.other', {
           rows: 2, placeholder: '如：否认家族性遗传病及传染病史'
@@ -950,7 +918,7 @@ const APP = (() => {
         <div><strong>体格检查</strong></div>
         <div class="hint">
           <b>勾了才算查过。</b>没勾的项目＝本次没做，病历里不会出现，也不会替你写「正常」。
-          常规问诊会做的项目，可以用每张卡片里的「全选」，或点「常用描述」直接选一句（会自动勾上）。
+          常规查体项目，可以用每张卡片里的「全选」，或点「常用描述」直接选一句（会自动勾上）。
           生命体征没填的项，病历里写「／」。
         </div>
       </div>
@@ -973,6 +941,7 @@ const APP = (() => {
         <div class="btn-row" style="margin-top:10px">
           <button class="btn btn-ghost" data-act="fillVitalsNormal">填入正常值</button>
         </div>
+        <div class="hint">这是示例数值，不是实测结果；请按实际测量值逐项修改。</div>
         <div class="live-preview" id="bmiPreview"></div>
         <div class="ros-jump pe-jump">
           ${SCHEMA.PE_COMMON.map(g => `<button class="jump-btn" data-jump="pe-${g.key}">${esc(g.name)}</button>`).join('')}
@@ -1057,13 +1026,10 @@ const APP = (() => {
       `<button type="button" class="chip small${shown === o ? ' on' : ''}"
         data-pequick="${containerKey}" data-pekey="${it.key}" data-val="${esc(o)}">${esc(o)}</button>`
     ).join('');
-    const hint = state === 'off'
-      ? `未勾选：本次没做这一项，病历里不会出现「${esc(it.label)}」。`
-      : (state === 'default'
-        ? '已勾选但没填具体所见，生成时自动写这句正常描述。'
-        : (state === 'blank'
-          ? '这一项没有默认描述，留空则病历里不会出现这句。'
-          : ''));    return `<div class="pe-item is-${state}" data-pe-group="${esc(groupKey)}" data-pe-key="${esc(it.key)}">
+    const hint = state === 'default'
+      ? '已勾选但没填具体所见，生成时自动写这句正常描述。'
+      : (state === 'blank' ? '这一项没有默认描述，留空则病历里不会出现这句。' : '');
+    return `<div class="pe-item is-${state}" data-pe-group="${esc(groupKey)}" data-pe-key="${esc(it.key)}">
       <div class="pe-label">
         <label class="pe-check"><input type="checkbox" data-pecheck="${esc(groupKey)}" data-pekey="${esc(it.key)}"${checked ? ' checked' : ''}><span>本次检查</span></label>
         ${esc(it.label)}${badge}
@@ -1071,7 +1037,7 @@ const APP = (() => {
       <div class="pe-input">
         <textarea rows="2" class="pe-text" data-path="pe.${containerKey}.${it.key}"
           placeholder="${esc(normalText || '填写检查所见')}">${esc(shown)}</textarea>
-        ${hint ? `<div class="hint pe-hint">${hint}</div>` : ''}
+        <div class="hint pe-hint"${hint ? '' : ' hidden'}>${hint}</div>
         <details class="pe-opts">
           <summary>常用描述</summary>
           <div class="chips">${quick}</div>
@@ -1132,9 +1098,9 @@ const APP = (() => {
 
     return `
       <details class="card pe-group" id="pe-focus" ${liveKeys.length || f.note ? 'open' : ''}>
-        <summary>重点查体<span class="tag-score">第4页 · 15分</span></summary>
+        <summary>重点查体</summary>
         <div class="pe-body">
-          <div class="hint">挑出与主诉、主要阳性体征直接相关的 3 项左右，再补一句为什么查这些——这一项看的是「会不会挑重点」，不是查得越多越好。</div>
+          <div class="hint">可标记与本次病情相关的查体，并补充说明。</div>
           <div class="focus-picked">${picked || '<span class="muted">还没有标记重点查体部位</span>'}</div>
           ${rest.length ? `
           <details class="mini-details" style="margin-top:8px">
@@ -1220,11 +1186,11 @@ const APP = (() => {
 
     const warnHtml = warnings.length
       ? warnings.map(w => `<div class="warn-item">${esc(w)}</div>`).join('')
-      : '<div class="ok-item">✓ 主要项目已填写完整</div>';
+      : '<div class="hint">当前规则未发现提醒，仍请逐项核对。</div>';
 
     return `
-      <div class="card">
-        <div class="card-title">质控提醒</div>
+      <div class="card review-panel">
+        <div class="card-title">核对提醒</div>
         <div class="warn-list">${warnHtml}</div>
       </div>
 
@@ -1336,25 +1302,28 @@ const APP = (() => {
 
     return `
       <details class="card mini-details soap-card" id="soapCard">
-        <summary>首次病程录（SOAP）<span class="tag-score">第5页 · 100分</span></summary>
-        <div class="hint">同一份内容同时服务第 5 页「首次病程录」（100 分）与第 6 页「首次病程记录」（20 分），写一次两处都用得上。全部留空也能生成一版兜底稿，但只有这里手写的内容才算真正归纳过。</div>
+        <summary>首次病程录（SOAP）</summary>
+        <div class="hint">可根据已录入的病史生成初稿，再核对、补充。</div>
         <div class="btn-row" style="margin:8px 0 12px">
           <button class="btn btn-ghost" data-act="draftSoap">按已填内容生成初稿</button>
         </div>
 
         <div class="soap-sec">
-          <div class="soap-sec-title">S 主观资料 <span class="muted">病历特点 10 + 与病史一致 5</span></div>
+          <div class="soap-sec-title">S 主观资料</div>
           ${textarea('病历特点（概括现病史要点：起病、诱因、主要症状、进展）', 'soap.s.summary', {
             rows: 3,
             placeholder: '留空则自动归纳现病史，并标注「待补充」'
           })}
-          ${input('与病史采集一致性的补充说明', 'soap.s.consistency', {
-            placeholder: '如：上述病史由患者本人陈述，与现病史记录一致'
-          })}
+          <details class="optional-details"${String(s.consistency || '').trim() ? ' open' : ''}>
+            <summary>补充说明</summary>
+            ${input('与病史采集一致性的补充说明', 'soap.s.consistency', {
+              placeholder: '如：上述病史由患者本人陈述'
+            })}
+          </details>
         </div>
 
         <div class="soap-sec">
-          <div class="soap-sec-title">O 客观资料 <span class="muted">查体 5 + 辅助检查 5</span></div>
+          <div class="soap-sec-title">O 客观资料</div>
           ${textarea('对诊断有意义的体格检查', 'soap.o.pe', {
             rows: 2,
             placeholder: '留空则由阳性体征自动生成（只取阳性，不抄整段查体）'
@@ -1366,7 +1335,7 @@ const APP = (() => {
         </div>
 
         <div class="soap-sec">
-          <div class="soap-sec-title">A 评估与鉴别 <span class="muted">依据 15 + 主次 10 + 鉴别 10 + 不跑题 5</span></div>
+          <div class="soap-sec-title">A 评估与鉴别</div>
           ${textarea('诊断依据概述（简洁完整、不堆砌）', 'soap.a.basis', {
             rows: 3,
             placeholder: '把病史、体检、辅助检查三方面的关键点各写一两句，不要逐条罗列全部检查'
@@ -1374,20 +1343,18 @@ const APP = (() => {
           <div class="soap-subtitle">各项诊断的依据（每条诊断都要病史 / 体检 / 辅助检查齐全）</div>
           ${basisRows || '<div class="empty">还没有按诊断列依据，点下面添加</div>'}
           <button class="btn btn-ghost" data-act="addSoapBasis">+ 添加一条诊断依据</button>
-          ${input('诊断主次排序说明', 'soap.a.ranking', {
-            placeholder: '如：主要诊断放首位，其次是合并症，理由……'
-          })}
           <div class="soap-subtitle">鉴别诊断（围绕主要诊断写 2 条左右）</div>
           ${diffRows || '<div class="empty">还没有鉴别诊断，点下面添加</div>'}
           <button class="btn btn-ghost" data-act="addSoapDiff">+ 添加一条鉴别诊断</button>
-          ${textarea('为什么只鉴别这几条（不跑题说明）', 'soap.a.diffNote', {
-            rows: 2,
-            placeholder: '如：上述鉴别均围绕「发热伴咳嗽」展开，与主诊断的鉴别要点明确'
-          })}
+          <details class="optional-details"${String(a.ranking || a.diffNote || '').trim() ? ' open' : ''}>
+            <summary>诊断与鉴别补充说明</summary>
+            ${input('诊断主次排序说明', 'soap.a.ranking', { placeholder: '按实际情况补充' })}
+            ${textarea('鉴别诊断补充说明', 'soap.a.diffNote', { rows: 2 })}
+          </details>
         </div>
 
         <div class="soap-sec">
-          <div class="soap-sec-title">P 诊疗计划 <span class="muted">符合原则 10 + 对应诊断 10 + 个体化 5</span></div>
+          <div class="soap-sec-title">P 诊疗计划</div>
           ${textarea('诊疗计划总述（检查安排 + 治疗原则，简明扼要）', 'soap.p.principle', {
             rows: 3,
             placeholder: '如：完善血常规、胸片等检查，予抗感染、对症支持治疗，观察体温变化'
@@ -1426,8 +1393,8 @@ const APP = (() => {
     `).join('');
     return `
       <details class="card mini-details soap-card" id="dischargeCard">
-        <summary>出院记录<span class="tag-score">第6-7页 · 15分</span></summary>
-        <div class="hint">六项对应评分表六个得分点。出院诊断留空则沿用「初步诊断」；填了出院日期就能自动算出住院天数。</div>
+        <summary>出院记录</summary>
+        <div class="hint">出院诊断留空时沿用初步诊断；填写出院日期后可计算住院天数。</div>
         ${input('出院日期', 'discharge.dischargeDate', { type: 'date' })}
         ${textarea('入院情况（入院时主要症状、体征与入院诊断）', 'discharge.admitCondition', {
           rows: 3, placeholder: '留空则按主诉 + 阳性体征 + 初步诊断自动生成'
@@ -1442,7 +1409,7 @@ const APP = (() => {
         <div class="soap-subtitle">出院诊断</div>
         ${rows || '<div class="empty">留空则沿用初步诊断</div>'}
         <button class="btn btn-ghost" data-act="addDischargeDiag">+ 添加一条出院诊断</button>
-        <div class="soap-subtitle">出院医嘱（四项齐全才拿满 2 分）</div>
+        <div class="soap-subtitle">出院医嘱</div>
         ${input('药物治疗', 'discharge.advice.drug', { placeholder: '如：口服头孢克洛 0.25g tid × 5 天' })}
         ${input('非药物治疗', 'discharge.advice.nonDrug', { placeholder: '如：戒烟、呼吸功能锻炼' })}
         ${input('生活指导', 'discharge.advice.lifestyle', { placeholder: '如：注意休息，避免受凉' })}
@@ -1508,26 +1475,38 @@ const APP = (() => {
   function renderOutput() {
     const res = GENERATOR.generate(R, { rosMode: settings.rosMode });
     GENERATED = res;
+    const relevantWarnings = res.warnings.filter(w => {
+      if (OUT_VIEW !== 'firstCourse' && w.startsWith('【首次病程录】')) return false;
+      if (OUT_VIEW !== 'discharge' && w.startsWith('【出院记录】')) return false;
+      return true;
+    });
     const text = outputTextOf(OUT_VIEW, res);
     const viewBtns = OUTPUT_VIEWS.map(v => `
       <button type="button" class="view-btn${OUT_VIEW === v.key ? ' on' : ''}"
         data-view="${v.key}">${esc(v.name)}</button>`).join('');
     return `
-      ${renderFillStatus()}
-
-      <div class="card">
-        <div class="card-title">生成设置</div>
-        ${seg('系统回顾详略', 'settings.rosMode', [
-          { value: 'detail', text: '逐系统写出（推荐）' },
-          { value: 'brief', text: '只写阳性' }
-        ])}
-        <div class="hint">科室：${esc((SCHEMA.DEPARTMENTS.find(d => d.key === R.basic.department) || {}).name || '通用')}</div>
+      <div class="card review-panel">
+        <div class="card-title">核对提醒</div>
+        <div class="hint">请结合实际问诊、查体和报告核对；自动检查不能保证病历正确或完整。</div>
+        <div class="warn-list">
+          ${relevantWarnings.length ? relevantWarnings.map(w => `<div class="warn-item">${esc(w)}</div>`).join('') : '<div class="hint">当前规则未发现提醒，仍请逐项核对。</div>'}
+        </div>
+        <details class="optional-details">
+          <summary>填写情况和问诊补充提示</summary>
+          ${renderFillStatus()}
+          ${renderDepthCard()}
+        </details>
       </div>
 
       <div class="card">
-        <div class="card-title">生成结果
-          <span class="tag-score">${esc(outputViewMeta())}</span>
-        </div>
+        <div class="card-title">生成结果</div>
+        <details class="optional-details output-options">
+          <summary>输出选项</summary>
+          ${seg('系统回顾详略', 'settings.rosMode', [
+            { value: 'detail', text: '逐系统写出（推荐）' },
+            { value: 'brief', text: '只写阳性' }
+          ])}
+        </details>
         <div class="view-tabs">${viewBtns}</div>
         ${OUT_VIEW === 'firstCourse' ? `
           <label class="field">
@@ -1544,15 +1523,6 @@ const APP = (() => {
         <pre id="outputText" class="output">${esc(text)}</pre>
         <div class="hint">${esc(outputViewHint())}</div>
         ${selfCheckNotes()}
-      </div>
-
-      ${renderDepthCard()}
-
-      <div class="card">
-        <div class="card-title">质控提醒</div>
-        <div class="warn-list">
-          ${res.warnings.length ? res.warnings.map(w => `<div class="warn-item">${esc(w)}</div>`).join('') : '<div class="ok-item">✓ 主要项目已填写完整</div>'}
-        </div>
       </div>
     `;
   }
@@ -1613,18 +1583,16 @@ const APP = (() => {
       });
     });
 
-    const okAll = !mustMissing.length && !shouldMissing.length;
     return `
-      <div class="card fill-status">
-        <div class="card-title">填写情况
-          ${okAll ? '<span class="tag-done">该填的都填了</span>' : ''}
-        </div>
+      <div class="fill-status">
+        <div class="section-title">填写情况</div>
+        <div class="hint">这里只检查部分字段是否有内容，不判断事实是否准确或病历是否完整。</div>
 
         <div class="fs-row">
           <div class="fs-head"><span class="tag-req">必填</span> ${mustMissing.length ? `还差 ${mustMissing.length} 项` : '已填齐'}</div>
           ${mustMissing.length
             ? `<div class="fs-miss">${mustMissing.map(n => `<span class="fs-chip bad">${esc(n)}</span>`).join('')}</div>
-               <div class="hint">这几项不填，病历开头就是残缺的，无法提交。</div>`
+               <div class="hint">这些基础字段尚未填写。</div>`
             : '<div class="hint">姓名、性别、年龄、科室、主诉都已填。</div>'}
         </div>
 
@@ -1632,7 +1600,7 @@ const APP = (() => {
           <div class="fs-head"><span class="tag-should">建议填</span> ${shouldMissing.length ? `还差 ${shouldMissing.length} 项` : '已填齐'}</div>
           ${shouldMissing.length
             ? `<div class="fs-miss">${shouldMissing.map(n => `<span class="fs-chip warn">${esc(n)}</span>`).join('')}</div>
-               <div class="hint">不填也能生成，但这几处会空着或只剩通用说法，病历会被带教挑出来。</div>`
+               <div class="hint">这些字段尚未填写，请结合实际情况核对。</div>`
             : '<div class="hint">建议项都已填。</div>'}
         </div>
 
@@ -1676,9 +1644,9 @@ const APP = (() => {
    * 不能只给一个「复制全文」——把三篇拼在一起贴进病历系统是错的。
    */
   const OUTPUT_VIEWS = [
-    { key: 'record', name: '大病历', meta: '12 个章节' },
-    { key: 'firstCourse', name: '首次病程录', meta: '第5页 · SOAP' },
-    { key: 'discharge', name: '出院记录', meta: '第6-7页 · 6 项' }
+    { key: 'record', name: '大病历', meta: '' },
+    { key: 'firstCourse', name: '首次病程录', meta: '' },
+    { key: 'discharge', name: '出院记录', meta: '' }
   ];
 
   /** 当前生成视图（只在界面层保存，不写进病历存档） */
@@ -1696,9 +1664,9 @@ const APP = (() => {
       return '首次病程录是归纳而非复制：S 段概括现病史，O 段只取阳性体征，A 段按诊断给依据，P 段按诊断列检查与治疗。标「待补充」的地方就是还没写的内容。';
     }
     if (OUT_VIEW === 'discharge') {
-      return '出院记录占 15 分：一般情况、入院情况、诊疗经过、出院情况、出院诊断、出院医嘱六项齐全才拿满；出院诊断留空时自动沿用初步诊断。';
+      return '出院记录包括入院情况、诊疗经过、出院情况、出院诊断和出院医嘱；出院诊断留空时沿用初步诊断，请核对。';
     }
-    return '大病历 = 一般项目 → 主诉 → 现病史 → 既往史 → 系统回顾 → 个人史 → 婚姻史 → 月经与生育史 → 家庭史 → 体格检查 → 实验室检查 → 摘要 → 诊断依据 → 初步诊断。';
+    return '大病历 = 一般项目 → 主诉 → 现病史 → 既往史 → 系统回顾 → 个人史 → 婚姻史 → 月经与生育史 → 家庭史 → 体格检查 → 辅助检查 → 摘要 → 诊断依据 → 初步诊断。';
   }
 
   /** 取某个生成视图的纯文本（始终按当前 record 现算，不用旧缓存） */
@@ -1732,8 +1700,6 @@ const APP = (() => {
     const D = typeof DEPTH !== 'undefined' ? DEPTH : null;
     if (!D) return '';
     const list = D.check(R) || [];
-    const count = { high: 0, mid: 0, low: 0 };
-    list.forEach(f => { count[f.level] = (count[f.level] || 0) + 1; });
     const html = list.length ? list.map(f => `
       <div class="depth-line lv-${f.level}">
         <span class="dl-tag">${esc(f.label)}</span>
@@ -1741,13 +1707,11 @@ const APP = (() => {
           <div class="dl-msg">${esc(f.message)}</div>
           <div class="dl-meta">${esc(f.section)}${depthStep(f.section) ? `<button class="btn btn-ghost btn-jump dl-jump" data-checkjump="${esc(depthStep(f.section))}">去补</button>` : ''}</div>
         </div>
-      </div>`).join('') : '<div class="ok-item">✓ 常见追问点都已问到</div>';
+      </div>`).join('') : '<div class="hint">当前规则未发现需要补充的追问，仍请人工核对。</div>';
     return `
-      <div class="card depth-card">
-        <div class="card-title">问诊深度自查
-          <span class="tag-score">${count.high ? `必补 ${count.high} 条` : '无必补项'}</span>
-        </div>
-        <div class="hint">这一栏不看你写没写，看你写够了没有。只读你自己敲进去的字，模板和系统默认描述不算；结论只是提醒，不会进病历正文。</div>
+      <div class="depth-card">
+        <div class="section-title">问诊补充提示</div>
+        <div class="hint">根据已录入的文字提供提示，不代表问诊已经完整。</div>
         <div class="depth-lines">${html}</div>
       </div>`;
   }
@@ -1921,11 +1885,16 @@ const APP = (() => {
     const t = TEMPLATES.get(tplKey);
     if (!t) return;
 
+    if (R.__templateKey && R.__templateKey !== tplKey) {
+      showModal('不能混合模板', '<div class="warn-item">这份病历已套用其他模板。为避免混入不同病例的内容，请先新建病历，再选择新模板。</div><div class="btn-row"><button class="btn" data-close>关闭</button></div>');
+      return;
+    }
+
     const ok = window.confirm(
       `套用模板：${t.name}\n\n` +
       (t.source ? `${t.source.label}：${t.source.note}\n\n` : '') +
       '这会把病历范例已有的内容填进**空白项**（现病史、既往史、查体、辅助检查、诊断等），' +
-      '你已经写过的内容不会被覆盖。\n\n' +
+      '你已经写过的内容不会被覆盖。已有内容若来自另一份旧模板，会与新模板混合，请先新建病历。\n\n' +
       '套用后请按实际问到的、查到的逐条核对补充；缺项保持待填，影像考虑不能替代病理诊断。\n\n' +
       '确定套用吗？'
     );
@@ -1934,6 +1903,7 @@ const APP = (() => {
     const before = R.basic.chiefComplaint || R.hpi.symptoms || '';
     const res = TEMPLATES.apply(R, tplKey);
     if (!res || !res.ok) { toast('套用失败，模板数据可能不完整'); return; }
+    R.__templateKey = tplKey;
 
     // 模板没写科室而当前是通用科时，apply 会把科室补上；此时要提示，
     // 否则学生不知道自己的科室被改了。
@@ -2101,10 +2071,10 @@ const APP = (() => {
     // 提示文案跟着状态切换（只动我们自己加的那条，别碰别的 hint）
     const hintBox = item.querySelector('.pe-hint');
     if (hintBox) {
-      if (state === 'off') hintBox.textContent = `未勾选：本次没做这一项，病历里不会出现「${it.label}」。`;
-      else if (state === 'default') hintBox.textContent = '已勾选但没填具体所见，生成时自动写这句正常描述。';
+      if (state === 'default') hintBox.textContent = '已勾选但没填具体所见，生成时自动写这句正常描述。';
       else if (state === 'blank') hintBox.textContent = '这一项没有默认描述，留空则病历里不会出现这句。';
-      else hintBox.remove();
+      else hintBox.textContent = '';
+      hintBox.hidden = !hintBox.textContent;
     }
     refreshPeCount(groupKey);
   }
@@ -2607,6 +2577,7 @@ const APP = (() => {
         break;
       }
       case 'fillVitalsNormal': {
+        if (!confirm('这些是示例数值，不是患者的实测结果。填入后请逐项改为实际测量值。确定填入吗？')) return;
         const normal = { temperature: '36.5', pulse: '78', respiration: '18', sbp: '120', dbp: '80' };
         Object.keys(normal).forEach(k => { if (!R.pe.vitals[k]) R.pe.vitals[k] = normal[k]; });
         saveCurrent();
@@ -2753,8 +2724,9 @@ const APP = (() => {
         document.body.appendChild(ta);
         ta.select();
         ta.setSelectionRange(0, ta.value.length);
-        document.execCommand('copy');
+        const copied = document.execCommand('copy');
         document.body.removeChild(ta);
+        if (!copied) throw new Error('复制未成功');
       }
       toast('已复制到剪贴板');
     } catch (err) {
@@ -2824,6 +2796,31 @@ const APP = (() => {
 
   /* ========================= 病历列表 ========================= */
 
+  // 对比整个病历与空白记录，忽略自动生成的元数据及界面设置。
+  function hasRecordContent(record) {
+    const blank = SCHEMA.emptyRecord();
+    function differs(value, base, path) {
+      if (path === 'meta' || path === 'id' || path === 'updatedAt' || path.startsWith('__')) return false;
+      if (value && typeof value === 'object') {
+        return Object.keys(value).some(k => differs(value[k], base && base[k], path ? path + '.' + k : k));
+      }
+      if (base === undefined && (value === '' || value == null || value === false)) return false;
+      return value !== base;
+    }
+    return differs(record, blank, '');
+  }
+
+  function switchRecord(next) {
+    const previous = R;
+    R = next;
+    if (!saveCurrent()) {
+      R = previous;
+      return false;
+    }
+    step = 0;
+    return true;
+  }
+
   function openList() {
     loadList();
     const rows = CORE.sortByUpdated(LIST).map(item => {
@@ -2855,28 +2852,25 @@ const APP = (() => {
         <div class="btn-row">
           <button class="btn" data-new>新建病历</button>
           <button class="btn btn-ghost" data-backup>导出备份</button>
+          <button class="btn btn-ghost" data-backup-current>导出当前病历</button>
           <button class="btn btn-ghost" data-import-file>导入备份</button>
           <button class="btn btn-ghost" data-close>关闭</button>
         </div>
-        <div class="hint">数据只存在本机浏览器。换手机或清理浏览器数据前，务必先「导出备份」并保存到手机外（如微信收藏、电脑）。</div>
+        <div class="hint">病历和备份文件未加密，请妥善保管。数据只存在本机浏览器；换设备或清理数据前请先备份。</div>
       </div>`;
     document.body.appendChild(wrap);
 
     wrap.addEventListener('click', ev => {
       if (ev.target === wrap || ev.target.hasAttribute('data-close')) { wrap.remove(); return; }
       if (ev.target.hasAttribute('data-backup')) { exportBackup(); return; }
+      if (ev.target.hasAttribute('data-backup-current')) { exportCurrentBackup(); return; }
       if (ev.target.hasAttribute('data-import-file')) { wrap.remove(); importBackup(); return; }
       if (ev.target.hasAttribute('data-new')) {
-        if (!R.basic.name && !R.basic.chiefComplaint) {
-          // 空白病历不必确认
-          R = SCHEMA.emptyRecord();
-          step = 0; saveCurrent(); wrap.remove(); render(); return;
+        if (hasRecordContent(R)) {
+          if (!confirm('新建病历？当前病历会先保存。')) return;
+          if (!saveToLibrary()) { wrap.remove(); render(); return; }
         }
-        if (!confirm('新建病历？当前病历会先保存。')) return;
-        saveToLibrary();
-        R = SCHEMA.emptyRecord();
-        step = 0;
-        saveCurrent();
+        if (!switchRecord(SCHEMA.emptyRecord())) { wrap.remove(); render(); return; }
         wrap.remove();
         render();
         return;
@@ -2892,20 +2886,22 @@ const APP = (() => {
       }
       const openId = ev.target.closest('[data-open]') && ev.target.closest('[data-open]').dataset.open;
       if (openId) {
-        const found = CORE.findRecord(LIST, openId);
+        let found = CORE.findRecord(LIST, openId);
         if (!found) return;
         if (!confirm('打开这份病历？当前病历会先保存。')) return;
-        saveToLibrary();
+        if (hasRecordContent(R) && !saveToLibrary()) { wrap.remove(); render(); return; }
+        // 保存当前记录可能刚好更新了用户选择的那一条。
+        found = CORE.findRecord(LIST, openId) || found;
         // 用 core 规范化，兼容旧版本存档
+        let next;
         try {
-          R = CORE.normalizeRecord(JSON.parse(JSON.stringify(found.data)), SCHEMA.emptyRecord, deptKeys());
+          next = CORE.normalizeRecord(JSON.parse(JSON.stringify(found.data)), SCHEMA.emptyRecord, deptKeys());
         } catch (e) {
-          R = deepMerge(SCHEMA.emptyRecord(), JSON.parse(JSON.stringify(found.data || found)));
+          next = deepMerge(SCHEMA.emptyRecord(), JSON.parse(JSON.stringify(found.data || found)));
           storageAlert = '该病历结构较旧，已尽量补齐字段。';
         }
-        R.id = found.id;
-        step = 0;
-        saveCurrent();
+        next.id = found.id;
+        if (!switchRecord(next)) { wrap.remove(); render(); return; }
         wrap.remove();
         render();
       }
@@ -2915,10 +2911,7 @@ const APP = (() => {
   function saveToLibrary() {
     if (!R) return false;
     loadList();
-    // 列表读不出来、或当前病历读不出来，一律什么都不写。
-    // 否则会「列表写不进去、当前病历写进去了」（或反过来），用户看到的是
-    // 「保存失败」，实际上数据已经被改了一半——下次打开就分不清哪份是新的。
-    // 宁可什么都不动，也不留一个半截状态。
+    // 已知损坏时不写任何槽，避免覆盖原始数据。
     if (listSaveBlocked || currentSaveBlocked) {
       storageAlert = listSaveBlocked
         ? '病历列表读不出来，已停止写入以免覆盖原数据。这次保存没有写入任何内容，'
@@ -2929,15 +2922,17 @@ const APP = (() => {
     }
     const before = { id: R.id, updatedAt: R.updatedAt };
     const res = CORE.upsertRecord(LIST, R, new Date().toISOString());
-    LIST = res.list;
     R.id = res.id;
-    R.updatedAt = LIST.find(x => x.id === res.id).updatedAt;
-    const okList = saveList();
-    const okCur = saveCurrent();
-    if (!okList || !okCur) {
-      // 库没写成，内存里的 id 也退回去，免得下次保存把这份当成另一份
+    R.updatedAt = res.list.find(x => x.id === res.id).updatedAt;
+    // 先保存当前记录和稳定 ID；若列表写失败，重试会更新同一条记录。
+    if (!saveCurrent()) {
       R.id = before.id;
       R.updatedAt = before.updatedAt;
+      return false;
+    }
+    LIST = res.list;
+    if (!saveList()) {
+      storageAlert = '当前病历已保存在本机编辑槽，但未能写入病历列表。请先导出当前病历，再重试保存。';
       return false;
     }
     storageAlert = '';
@@ -2955,6 +2950,13 @@ const APP = (() => {
     const name = `大病历备份_${SCHEMA.todayStr()}.json`;
     downloadBlob(JSON.stringify(payload, null, 2), name, 'application/json');
     toast(`已导出 ${payload.records.length} 份病历`);
+  }
+
+  function exportCurrentBackup() {
+    const record = CORE.upsertRecord([], R, new Date().toISOString()).list;
+    const payload = CORE.buildExport(record, new Date().toISOString());
+    downloadBlob(JSON.stringify(payload, null, 2), `当前病历备份_${SCHEMA.todayStr()}.json`, 'application/json');
+    toast('已导出当前病历，请妥善保管未加密的备份');
   }
 
   function downloadBlob(text, filename, mime) {
@@ -3099,8 +3101,6 @@ const APP = (() => {
     if (!loadCurrent()) {
       R = SCHEMA.emptyRecord();
     }
-    if (!R.basic.recordDate) R.basic.recordDate = SCHEMA.todayStr();
-    if (!R.basic.admitDate) R.basic.admitDate = SCHEMA.todayStr();
 
     // 回到上次停留的那一步。键不认识（改过步骤、旧存档）就退回第一步，
     // 不因为一个字符串对不上就让页面白屏。

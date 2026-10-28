@@ -1427,6 +1427,7 @@ const SCHEMA = (() => {
         name: '',
         gender: '',
         age: '',
+        birthDate: '',
         marital: '',
         // 籍贯（祖籍）与出生地在病历一般项目里是两栏，分开存
         nativePlace: '',
@@ -1447,7 +1448,9 @@ const SCHEMA = (() => {
         // 用户选了科室、住了几床，病历正文里完全不体现，属于静默丢信息。
         bedNo: '',
         admitDate: '',
-        recordDate: todayStr(),
+        admitTime: '',
+        recordDate: '',
+        recordTime: '',
         reliability: '',
         informant: '',
         chiefComplaint: '',
