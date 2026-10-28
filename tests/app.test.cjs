@@ -684,3 +684,138 @@ test('生成病历那一步不显示状态——它没有内容多少这回事',
   const outRow = rows.find(r => r.startsWith('output"'));
   assert.ok(outRow && !/nav-state/.test(outRow), '生成那行不该有状态角标');
 });
+
+/* ======================= 病历切换与保存失败回归 ======================= */
+
+function clickList(app, attribute, openId) {
+  app.run('APP._test.openList()');
+  const handler = app.document._listeners.get('<created:div>::click').at(-1);
+  const target = {
+    dataset: {},
+    hasAttribute: name => name === attribute,
+    closest: selector => selector === '[data-open]' && openId ? { dataset: { open: openId } } : null
+  };
+  handler({ target });
+}
+
+test('没有姓名主诉但已填现病史，新建前仍保存这份病历', () => {
+  const app = boot();
+  app.run('APP.getRecord().hpi.symptoms = "持续腹痛"');
+  clickList(app, 'data-new');
+  assert.equal(app.confirms.length, 1);
+  assert.equal(app.stored(KEYS.list)[0].data.hpi.symptoms, '持续腹痛');
+  assert.equal(app.run('APP.getRecord().hpi.symptoms'), '');
+});
+
+test('列表损坏时新建中止，当前编辑内容与原始存档都保留', () => {
+  const app = boot({ initial: { [KEYS.list]: 'invalid json' } });
+  app.run('APP.getRecord().basic.name = "张三"; APP.getRecord().hpi.symptoms = "持续腹痛"; APP._test.saveCurrent()');
+  clickList(app, 'data-new');
+  assert.equal(app.run('APP.getRecord().hpi.symptoms'), '持续腹痛');
+  assert.equal(app.stored(KEYS.current).hpi.symptoms, '持续腹痛');
+  assert.equal(app.memory.get(KEYS.list), 'invalid json');
+});
+
+test('当前病历写入失败时列表不发生半次保存', () => {
+  const app = boot();
+  const set = app.storage.setItem;
+  app.storage.setItem = (k, v) => { if (k === KEYS.current) throw new Error('quota'); set(k, v); };
+  app.run('APP.getRecord().basic.name = "张三"');
+  assert.equal(app.run('APP._test.saveToLibrary()'), false);
+  assert.equal(app.stored(KEYS.list), undefined);
+  assert.equal(app.run('APP._test.saveToLibrary()'), false);
+  assert.equal(app.stored(KEYS.list), undefined);
+});
+
+test('列表写入失败后重试仍使用同一 ID，刷新后也不会重复', () => {
+  const app = boot();
+  const set = app.storage.setItem;
+  app.storage.setItem = (k, v) => { if (k === KEYS.list) throw new Error('quota'); set(k, v); };
+  app.run('APP.getRecord().basic.name = "张三"');
+  assert.equal(app.run('APP._test.saveToLibrary()'), false);
+  const id = app.stored(KEYS.current).id;
+  assert.ok(id);
+  assert.equal(app.run('APP.getRecord().id'), id);
+  const restarted = boot({ initial: Object.fromEntries(app.memory) });
+  assert.equal(restarted.run('APP._test.saveToLibrary()'), true);
+  assert.equal(restarted.run('APP._test.saveToLibrary()'), true);
+  assert.equal(restarted.stored(KEYS.list).length, 1);
+  assert.equal(restarted.stored(KEYS.list)[0].id, id);
+});
+
+test('切换到新记录时当前槽写入失败，继续保留原记录', () => {
+  const app = boot();
+  app.run('APP.getRecord().basic.name = "张三"');
+  const set = app.storage.setItem;
+  let currentWrites = 0;
+  app.storage.setItem = (k, v) => {
+    if (k === KEYS.current && ++currentWrites === 2) throw new Error('quota');
+    set(k, v);
+  };
+  clickList(app, 'data-new');
+  assert.equal(app.run('APP.getRecord().basic.name'), '张三');
+  assert.equal(app.stored(KEYS.current).basic.name, '张三');
+  assert.equal(app.stored(KEYS.list)[0].data.basic.name, '张三');
+});
+
+test('打开当前记录自身时使用刚保存的最新内容', () => {
+  const app = boot();
+  app.run('APP.getRecord().basic.name = "张三"; APP._test.saveToLibrary(); APP.getRecord().hpi.symptoms = "新症状"');
+  const id = app.run('APP.getRecord().id');
+  clickList(app, null, id);
+  assert.equal(app.run('APP.getRecord().hpi.symptoms'), '新症状');
+  assert.equal(app.stored(KEYS.current).hpi.symptoms, '新症状');
+});
+
+test('保存失败时可以独立导出当前病历备份', () => {
+  const app = boot({ initial: { [KEYS.list]: 'invalid json' } });
+  let downloaded;
+  app.sandbox.URL.createObjectURL = blob => { downloaded = blob; return 'blob:x'; };
+  app.run('APP.getRecord().hpi.symptoms = "持续腹痛"');
+  clickList(app, 'data-backup-current');
+  const backup = JSON.parse(downloaded.parts.join('').replace(/^\ufeff/, ''));
+  assert.equal(backup.records[0].data.hpi.symptoms, '持续腹痛');
+  assert.equal(app.memory.get(KEYS.list), 'invalid json');
+});
+
+test('套用模板标记可跨刷新保留，并阻止混入另一种模板', () => {
+  const app = boot();
+  app.run('APP._test.applyTemplate("cap")');
+  assert.equal(app.run('APP.getRecord().__templateKey'), 'cap');
+  const restarted = boot({ initial: Object.fromEntries(app.memory) });
+  const before = restarted.run('JSON.stringify(APP.getRecord())');
+  restarted.run('APP._test.applyTemplate("asthma")');
+  assert.equal(restarted.run('JSON.stringify(APP.getRecord())'), before);
+  assert.ok(restarted.document.body.children.some(node => node.innerHTML.includes('不能混合模板')));
+});
+
+test('离线复制返回 false 时打开手动复制框，不误报成功', () => {
+  const app = boot();
+  app.document.execCommand = () => false;
+  const target = { dataset: { act: 'copyText' }, closest() { return this; } };
+  const handler = app.document._listeners.get('doc::click')[0];
+  handler({ target });
+  assert.ok(app.document.body.children.some(node => node.innerHTML.includes('请长按全选后复制')));
+  assert.notEqual(app.el('#toast').textContent, '已复制到剪贴板');
+});
+
+test('打开其他病历时保存失败，当前病历不会被替换', () => {
+  const app = boot();
+  app.run('APP.getRecord().basic.name = "旧病历"; APP._test.saveToLibrary()');
+  const oldId = app.run('APP.getRecord().id');
+  app.run('APP._test.setRecord(SCHEMA.emptyRecord()); APP.getRecord().hpi.symptoms = "正在编辑"');
+  const set = app.storage.setItem;
+  app.storage.setItem = (k, v) => { if (k === KEYS.list) throw new Error('quota'); set(k, v); };
+  clickList(app, null, oldId);
+  assert.equal(app.run('APP.getRecord().hpi.symptoms'), '正在编辑');
+  assert.equal(app.stored(KEYS.current).hpi.symptoms, '正在编辑');
+  assert.equal(app.stored(KEYS.list)[0].basic.name, '旧病历');
+});
+
+test('用户拒绝填入生命体征示例值时不写入数字', () => {
+  const app = boot({ confirm: false });
+  const target = { dataset: { act: 'fillVitalsNormal' }, closest() { return this; } };
+  app.document._listeners.get('doc::click')[0]({ target });
+  assert.match(app.confirms[0], /示例数值/);
+  assert.equal(app.run('Object.keys(APP.getRecord().pe.vitals).length'), 0);
+});
