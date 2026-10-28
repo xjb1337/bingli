@@ -213,7 +213,7 @@ async function main() {
     check('套用后给了提示（说明填了多少项、从哪来）',
       afterApply.toast.includes('已套用'), afterApply.toast.slice(0, 60));
 
-    // ---- ④ 已有内容再套另一个模板：原内容不许被覆盖 ----
+    // ---- ④ 再套不同模板：阻止混合，并保留用户填写的内容 ----
     await evaluate(`(() => { APP._test.gotoStep('basic'); return true; })()`);
     await sleep(300);
     const overwrite = await evaluate(`(() => {
@@ -237,14 +237,16 @@ async function main() {
         symptoms: r.hpi.symptoms,
         diag: (r.diagnosis.confirmed || []).slice(),
         toast: (document.getElementById('toast') || {}).textContent || '',
+        blocked: [...document.querySelectorAll('.modal-mask')].some(el => el.textContent.includes('不能混合模板')),
       };
     })()`);
-    check('再套第二个模板时，已写的内容一个字都没被改',
+    check('再套第二个模板时阻止混合，已写内容保持不变',
       afterSecond.name === '张三' &&
       afterSecond.chief === '我自己问的主诉' &&
       afterSecond.symptoms === '我自己写的症状' &&
-      afterSecond.diag.length === 1 && afterSecond.diag[0] === '我自己下的诊断',
+      afterSecond.diag.length === 1 && afterSecond.diag[0] === '我自己下的诊断' && afterSecond.blocked,
       `姓名=${afterSecond.name} 主诉=${afterSecond.chief} 诊断=${afterSecond.diag.join('/')}`);
+    await evaluate(`(() => { document.querySelector('.modal-mask [data-close]')?.click(); return true; })()`);
 
     // ---- ⑤ 外科肺结节院内范例：真实点击、来源说明和检查组保护 ----
     await evaluate(`(() => {

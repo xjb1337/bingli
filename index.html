@@ -25625,7 +25625,7 @@ const APP = (() => {
       <div class="hint">选一个病种，工具会填入一份<b>病历范例</b>已有的内容。院内范例按原资料保留缺项和诊断不确定性。
         <b>请按实际问诊、查体和报告逐条核对补充</b>——模板不代表当前患者。</div>
       <div class="tpl-list">${items}</div>
-      <div class="hint">套用只补空白项：你已经写过的内容一个字都不会被覆盖。</div>
+      <div class="hint">套用只补空白项；一份病历只能套用一个模板。要换模板，请先新建病历。</div>
     </details>`;
   }
 
@@ -26191,6 +26191,7 @@ const APP = (() => {
         <div class="btn-row" style="margin-top:10px">
           <button class="btn btn-ghost" data-act="fillVitalsNormal">填入正常值</button>
         </div>
+        <div class="hint">这是示例数值，不是实测结果；请按实际测量值逐项修改。</div>
         <div class="live-preview" id="bmiPreview"></div>
         <div class="ros-jump pe-jump">
           ${SCHEMA.PE_COMMON.map(g => `<button class="jump-btn" data-jump="pe-${g.key}">${esc(g.name)}</button>`).join('')}
@@ -26746,6 +26747,7 @@ const APP = (() => {
         <div class="card-title">生成结果
           <span class="tag-score">${esc(outputViewMeta())}</span>
         </div>
+        <div class="warn-item">复制或下载前，请逐项核对模板、默认查体和生命体征是否与患者实际情况一致。</div>
         <div class="view-tabs">${viewBtns}</div>
         ${OUT_VIEW === 'firstCourse' ? `
           <label class="field">
@@ -27139,11 +27141,16 @@ const APP = (() => {
     const t = TEMPLATES.get(tplKey);
     if (!t) return;
 
+    if (R.__templateKey && R.__templateKey !== tplKey) {
+      showModal('不能混合模板', '<div class="warn-item">这份病历已套用其他模板。为避免混入不同病例的内容，请先新建病历，再选择新模板。</div><div class="btn-row"><button class="btn" data-close>关闭</button></div>');
+      return;
+    }
+
     const ok = window.confirm(
       `套用模板：${t.name}\n\n` +
       (t.source ? `${t.source.label}：${t.source.note}\n\n` : '') +
       '这会把病历范例已有的内容填进**空白项**（现病史、既往史、查体、辅助检查、诊断等），' +
-      '你已经写过的内容不会被覆盖。\n\n' +
+      '你已经写过的内容不会被覆盖。已有内容若来自另一份旧模板，会与新模板混合，请先新建病历。\n\n' +
       '套用后请按实际问到的、查到的逐条核对补充；缺项保持待填，影像考虑不能替代病理诊断。\n\n' +
       '确定套用吗？'
     );
@@ -27152,6 +27159,7 @@ const APP = (() => {
     const before = R.basic.chiefComplaint || R.hpi.symptoms || '';
     const res = TEMPLATES.apply(R, tplKey);
     if (!res || !res.ok) { toast('套用失败，模板数据可能不完整'); return; }
+    R.__templateKey = tplKey;
 
     // 模板没写科室而当前是通用科时，apply 会把科室补上；此时要提示，
     // 否则学生不知道自己的科室被改了。
@@ -27825,6 +27833,7 @@ const APP = (() => {
         break;
       }
       case 'fillVitalsNormal': {
+        if (!confirm('这些是示例数值，不是患者的实测结果。填入后请逐项改为实际测量值。确定填入吗？')) return;
         const normal = { temperature: '36.5', pulse: '78', respiration: '18', sbp: '120', dbp: '80' };
         Object.keys(normal).forEach(k => { if (!R.pe.vitals[k]) R.pe.vitals[k] = normal[k]; });
         saveCurrent();
@@ -27971,8 +27980,9 @@ const APP = (() => {
         document.body.appendChild(ta);
         ta.select();
         ta.setSelectionRange(0, ta.value.length);
-        document.execCommand('copy');
+        const copied = document.execCommand('copy');
         document.body.removeChild(ta);
+        if (!copied) throw new Error('复制未成功');
       }
       toast('已复制到剪贴板');
     } catch (err) {
@@ -28042,6 +28052,31 @@ const APP = (() => {
 
   /* ========================= 病历列表 ========================= */
 
+  // 对比整个病历与空白记录，忽略自动生成的元数据及界面设置。
+  function hasRecordContent(record) {
+    const blank = SCHEMA.emptyRecord();
+    function differs(value, base, path) {
+      if (path === 'meta' || path === 'id' || path === 'updatedAt' || path.startsWith('__')) return false;
+      if (value && typeof value === 'object') {
+        return Object.keys(value).some(k => differs(value[k], base && base[k], path ? path + '.' + k : k));
+      }
+      if (base === undefined && (value === '' || value == null || value === false)) return false;
+      return value !== base;
+    }
+    return differs(record, blank, '');
+  }
+
+  function switchRecord(next) {
+    const previous = R;
+    R = next;
+    if (!saveCurrent()) {
+      R = previous;
+      return false;
+    }
+    step = 0;
+    return true;
+  }
+
   function openList() {
     loadList();
     const rows = CORE.sortByUpdated(LIST).map(item => {
@@ -28073,28 +28108,25 @@ const APP = (() => {
         <div class="btn-row">
           <button class="btn" data-new>新建病历</button>
           <button class="btn btn-ghost" data-backup>导出备份</button>
+          <button class="btn btn-ghost" data-backup-current>导出当前病历</button>
           <button class="btn btn-ghost" data-import-file>导入备份</button>
           <button class="btn btn-ghost" data-close>关闭</button>
         </div>
-        <div class="hint">数据只存在本机浏览器。换手机或清理浏览器数据前，务必先「导出备份」并保存到手机外（如微信收藏、电脑）。</div>
+        <div class="hint">病历和备份文件未加密，请妥善保管。数据只存在本机浏览器；换设备或清理数据前请先备份。</div>
       </div>`;
     document.body.appendChild(wrap);
 
     wrap.addEventListener('click', ev => {
       if (ev.target === wrap || ev.target.hasAttribute('data-close')) { wrap.remove(); return; }
       if (ev.target.hasAttribute('data-backup')) { exportBackup(); return; }
+      if (ev.target.hasAttribute('data-backup-current')) { exportCurrentBackup(); return; }
       if (ev.target.hasAttribute('data-import-file')) { wrap.remove(); importBackup(); return; }
       if (ev.target.hasAttribute('data-new')) {
-        if (!R.basic.name && !R.basic.chiefComplaint) {
-          // 空白病历不必确认
-          R = SCHEMA.emptyRecord();
-          step = 0; saveCurrent(); wrap.remove(); render(); return;
+        if (hasRecordContent(R)) {
+          if (!confirm('新建病历？当前病历会先保存。')) return;
+          if (!saveToLibrary()) { wrap.remove(); render(); return; }
         }
-        if (!confirm('新建病历？当前病历会先保存。')) return;
-        saveToLibrary();
-        R = SCHEMA.emptyRecord();
-        step = 0;
-        saveCurrent();
+        if (!switchRecord(SCHEMA.emptyRecord())) { wrap.remove(); render(); return; }
         wrap.remove();
         render();
         return;
@@ -28110,20 +28142,22 @@ const APP = (() => {
       }
       const openId = ev.target.closest('[data-open]') && ev.target.closest('[data-open]').dataset.open;
       if (openId) {
-        const found = CORE.findRecord(LIST, openId);
+        let found = CORE.findRecord(LIST, openId);
         if (!found) return;
         if (!confirm('打开这份病历？当前病历会先保存。')) return;
-        saveToLibrary();
+        if (hasRecordContent(R) && !saveToLibrary()) { wrap.remove(); render(); return; }
+        // 保存当前记录可能刚好更新了用户选择的那一条。
+        found = CORE.findRecord(LIST, openId) || found;
         // 用 core 规范化，兼容旧版本存档
+        let next;
         try {
-          R = CORE.normalizeRecord(JSON.parse(JSON.stringify(found.data)), SCHEMA.emptyRecord, deptKeys());
+          next = CORE.normalizeRecord(JSON.parse(JSON.stringify(found.data)), SCHEMA.emptyRecord, deptKeys());
         } catch (e) {
-          R = deepMerge(SCHEMA.emptyRecord(), JSON.parse(JSON.stringify(found.data || found)));
+          next = deepMerge(SCHEMA.emptyRecord(), JSON.parse(JSON.stringify(found.data || found)));
           storageAlert = '该病历结构较旧，已尽量补齐字段。';
         }
-        R.id = found.id;
-        step = 0;
-        saveCurrent();
+        next.id = found.id;
+        if (!switchRecord(next)) { wrap.remove(); render(); return; }
         wrap.remove();
         render();
       }
@@ -28133,10 +28167,7 @@ const APP = (() => {
   function saveToLibrary() {
     if (!R) return false;
     loadList();
-    // 列表读不出来、或当前病历读不出来，一律什么都不写。
-    // 否则会「列表写不进去、当前病历写进去了」（或反过来），用户看到的是
-    // 「保存失败」，实际上数据已经被改了一半——下次打开就分不清哪份是新的。
-    // 宁可什么都不动，也不留一个半截状态。
+    // 已知损坏时不写任何槽，避免覆盖原始数据。
     if (listSaveBlocked || currentSaveBlocked) {
       storageAlert = listSaveBlocked
         ? '病历列表读不出来，已停止写入以免覆盖原数据。这次保存没有写入任何内容，'
@@ -28147,15 +28178,17 @@ const APP = (() => {
     }
     const before = { id: R.id, updatedAt: R.updatedAt };
     const res = CORE.upsertRecord(LIST, R, new Date().toISOString());
-    LIST = res.list;
     R.id = res.id;
-    R.updatedAt = LIST.find(x => x.id === res.id).updatedAt;
-    const okList = saveList();
-    const okCur = saveCurrent();
-    if (!okList || !okCur) {
-      // 库没写成，内存里的 id 也退回去，免得下次保存把这份当成另一份
+    R.updatedAt = res.list.find(x => x.id === res.id).updatedAt;
+    // 先保存当前记录和稳定 ID；若列表写失败，重试会更新同一条记录。
+    if (!saveCurrent()) {
       R.id = before.id;
       R.updatedAt = before.updatedAt;
+      return false;
+    }
+    LIST = res.list;
+    if (!saveList()) {
+      storageAlert = '当前病历已保存在本机编辑槽，但未能写入病历列表。请先导出当前病历，再重试保存。';
       return false;
     }
     storageAlert = '';
@@ -28173,6 +28206,13 @@ const APP = (() => {
     const name = `大病历备份_${SCHEMA.todayStr()}.json`;
     downloadBlob(JSON.stringify(payload, null, 2), name, 'application/json');
     toast(`已导出 ${payload.records.length} 份病历`);
+  }
+
+  function exportCurrentBackup() {
+    const record = CORE.upsertRecord([], R, new Date().toISOString()).list;
+    const payload = CORE.buildExport(record, new Date().toISOString());
+    downloadBlob(JSON.stringify(payload, null, 2), `当前病历备份_${SCHEMA.todayStr()}.json`, 'application/json');
+    toast('已导出当前病历，请妥善保管未加密的备份');
   }
 
   function downloadBlob(text, filename, mime) {

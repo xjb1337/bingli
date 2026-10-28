@@ -68,8 +68,9 @@ function testOption(groupKey, item, option) {
     return;
   }
 
+  const normalVariant = (item.normalVariants || []).includes(option);
   const shouldBePositive = POSITIVE_DESPITE_NEG.has(option) || MIXED.has(option) ||
-    (!NOT_A_FINDING.has(option) && !NEG_START.test(option));
+    (!normalVariant && !NOT_A_FINDING.has(option) && !NEG_START.test(option));
 
   if (shouldBePositive) {
     expectPositive++;
