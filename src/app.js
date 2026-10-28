@@ -1500,6 +1500,7 @@ const APP = (() => {
 
       <div class="card">
         <div class="card-title">生成结果</div>
+        <div class="hint">复制或下载前，请逐项核对模板、默认查体和生命体征是否与患者实际情况一致。</div>
         <details class="optional-details output-options">
           <summary>输出选项</summary>
           ${seg('系统回顾详略', 'settings.rosMode', [
