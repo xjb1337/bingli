@@ -1417,10 +1417,52 @@ const SCHEMA = (() => {
   /* ---------------------------------------------------------------------
    * 七、默认空病历数据
    * ------------------------------------------------------------------- */
+  /** 生成段落的来源元数据：记录「由哪些资料、哪一版生成」 */
+  function emptyDocMeta() {
+    return {
+      origin: '',              // generated | manual | legacy
+      inputFingerprint: '',    // 生成/手改时上游资料的指纹
+      inputGroups: {},         // 分组指纹，用于说明「哪类资料变了」
+      generatedTextHash: '',   // 生成时的文字指纹
+      reviewedFingerprint: '', // 用户确认时的上游资料指纹
+      updatedAt: ''
+    };
+  }
+
   function emptyRecord() {
     return {
+      schemaVersion: 3,
       // 元数据
-      meta: { createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+      meta: {
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        revision: 0,
+        // 字段来源与核对状态：{ 'basic.marital': { source, reviewed, reviewedValueHash, sourceRef } }
+        fieldStates: {},
+        // 旧数据冲突（如 basic.marital 与 marriage.status 不一致），保留双值等用户选择
+        conflicts: {},
+        migratedFrom: null,
+        migrationNotes: [],
+        // 最近一次模板带入：{ key, name, at, fields:[{path, value}] }，用于「撤销本次带入」
+        lastTemplateFill: null
+      },
+      // 文书级元数据：摘要 / 首次病程录分段 / 出院记录
+      documentMeta: {
+        summary: emptyDocMeta(),
+        firstCourse: {
+          s: emptyDocMeta(),
+          oPe: emptyDocMeta(),
+          oAux: emptyDocMeta(),
+          basis: emptyDocMeta()
+        },
+        discharge: {
+          admitCondition: emptyDocMeta(),
+          diagnoses: {
+            origin: '', inputFingerprint: '', textHash: '',
+            confirmed: false, confirmedFingerprint: ''
+          }
+        }
+      },
       // 基本信息
       basic: {
         department: 'general',
@@ -1629,6 +1671,9 @@ const SCHEMA = (() => {
        *   P 诊疗计划     25 = 符合原则 10 + 与诊断对应 10 + 个体化 5
        * ----------------------------------------------------------------- */
       soap: {
+        // 首次病程录有独立的记录时间：大病历记录入院资料，首次病程录是另一份文书，
+        // 不能永久共用同一个不断变化的状态而没有时间说明。
+        recordTime: '',
         s: {
           summary: '',        // 病历特点：对现病史概括简练、重点突出（10）
           consistency: ''     // 与病史采集病案信息一致性的补充说明（5）
@@ -1659,7 +1704,8 @@ const SCHEMA = (() => {
         admitCondition: '',   // 入院情况：简洁明了、重点突出、入院诊断合理（2）
         course: '',           // 诊疗经过：病情变化、检查结果、治疗经过及效果（5）
         dischargeStatus: '',  // 出院情况：主要症状、体征、辅助检查结果（2）
-        diagnoses: [],        // 出院诊断：完整、规范（2）；留空则继承 diagnosis.confirmed
+        diagnoses: [],        // 出院诊断：完整、规范（2）；留空保持「待填写」，不再静默沿用初步诊断
+        diagnosesConfirmed: false, // 出院诊断是否由用户单独确认过
         advice: {             // 出院医嘱：全面、具体（2）
           drug: '',           // 药物
           nonDrug: '',        // 非药物治疗

@@ -14,7 +14,7 @@
 const RECORD_CORE = (() => {
   'use strict';
 
-  const SCHEMA_VERSION = 2;
+  const SCHEMA_VERSION = 3;
   /** 存储键：v1 起沿用，升级不改变键名 */
   const STORAGE_KEYS = {
     list: 'dabingli.records.v1',
@@ -129,6 +129,421 @@ const RECORD_CORE = (() => {
     return filled;
   }
 
+  /* ---------------------- 指纹 / 字段状态 / 文书元数据 ---------------------- */
+
+  /**
+   * 稳定序列化：对象键排序，保证同样的资料得到同样的指纹。
+   * 只用于判断「资料是否变化」，不是密码学哈希。
+   */
+  function stableStringify(value) {
+    if (value === undefined) return 'undefined';
+    if (value === null || typeof value !== 'object') return JSON.stringify(value);
+    if (Array.isArray(value)) return '[' + value.map(stableStringify).join(',') + ']';
+    const keys = Object.keys(value).sort();
+    return '{' + keys.map(k => JSON.stringify(k) + ':' + stableStringify(value[k])).join(',') + '}';
+  }
+
+  /** FNV-1a 32 位，输出 8 位十六进制 */
+  function hashText(text) {
+    const s = String(text == null ? '' : text);
+    let h = 0x811c9dc5;
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 0x01000193);
+    }
+    return ('00000000' + (h >>> 0).toString(16)).slice(-8);
+  }
+
+  function fingerprint(value) {
+    return hashText(stableStringify(value));
+  }
+
+  /** 取嵌套路径的值；路径不存在返回 undefined */
+  function getPath(obj, path) {
+    const parts = String(path || '').split('.').filter(Boolean);
+    let cur = obj;
+    for (const p of parts) {
+      if (cur === null || cur === undefined) return undefined;
+      if (DANGEROUS.includes(p)) return undefined;
+      cur = cur[p];
+    }
+    return cur;
+  }
+
+  /** 写嵌套路径；中间对象不存在则创建 */
+  function setPath(obj, path, value) {
+    const parts = String(path || '').split('.').filter(Boolean);
+    if (!parts.length || DANGEROUS.includes(parts[0])) return obj;
+    let cur = obj;
+    for (let i = 0; i < parts.length - 1; i++) {
+      const p = parts[i];
+      if (DANGEROUS.includes(p)) return obj;
+      if (!isObject(cur[p])) cur[p] = {};
+      cur = cur[p];
+    }
+    const last = parts[parts.length - 1];
+    if (!DANGEROUS.includes(last)) cur[last] = value;
+    return obj;
+  }
+
+  const FIELD_SOURCES = ['manual', 'template', 'default', 'example', 'generated', 'legacy', ''];
+
+  function defaultFieldState() {
+    return { source: '', reviewed: false, reviewedValueHash: '', sourceRef: '' };
+  }
+
+  function normalizeFieldState(raw) {
+    const s = isObject(raw) ? raw : {};
+    return {
+      source: FIELD_SOURCES.includes(s.source) ? s.source : '',
+      reviewed: s.reviewed === true,
+      reviewedValueHash: isText(s.reviewedValueHash) ? s.reviewedValueHash : '',
+      sourceRef: isText(s.sourceRef) ? s.sourceRef : ''
+    };
+  }
+
+  function fieldState(record, path) {
+    const states = (record && record.meta && record.meta.fieldStates) || {};
+    return normalizeFieldState(states[path]);
+  }
+
+  function setFieldState(record, path, patch) {
+    if (!record) return record;
+    if (!isObject(record.meta)) record.meta = {};
+    if (!isObject(record.meta.fieldStates)) record.meta.fieldStates = {};
+    const prev = normalizeFieldState(record.meta.fieldStates[path]);
+    record.meta.fieldStates[path] = { ...prev, ...(patch || {}) };
+    return record;
+  }
+
+  /** 用户手改某字段：来源改成 manual，旧核对状态立即失效 */
+  function markFieldManual(record, path, value) {
+    setFieldState(record, path, {
+      source: 'manual',
+      reviewed: false,
+      reviewedValueHash: '',
+      sourceRef: ''
+    });
+    return record;
+  }
+
+  /** 确认某字段当前内容；核对状态与当前值指纹绑定 */
+  function markFieldReviewed(record, path, source) {
+    const v = getPath(record, path);
+    const st = fieldState(record, path);
+    return setFieldState(record, path, {
+      source: source || st.source || 'manual',
+      reviewed: true,
+      reviewedValueHash: fingerprint(v)
+    });
+  }
+
+  /** 核对是否仍然有效：内容变过就失效 */
+  function fieldReviewValid(record, path, value) {
+    const st = fieldState(record, path);
+    // 默认查体的「实际输出文字」不在字段值里，核对状态要按生成时会写出的文字判断
+    const v = value === undefined ? getPath(record, path) : value;
+    return !!(st.reviewed && st.reviewedValueHash === fingerprint(v));
+  }
+
+  /** 把旧存档里所有有内容、但没有来源记录的字段标成 legacy */
+  function markLegacyFields(record) {
+    if (!record || !isObject(record.meta)) return record;
+    if (!isObject(record.meta.fieldStates)) record.meta.fieldStates = {};
+    const skip = new Set(['meta', 'documentMeta', 'schemaVersion', 'id']);
+    const walk = (obj, path) => {
+      Object.keys(obj).forEach(k => {
+        if (!path && skip.has(k)) return;
+        const p = path ? path + '.' + k : k;
+        const v = obj[k];
+        if (isObject(v)) { walk(v, p); return; }
+        if (isBlankValue(v)) return;
+        if (!record.meta.fieldStates[p]) {
+          record.meta.fieldStates[p] = {
+            source: 'legacy', reviewed: false, reviewedValueHash: '', sourceRef: ''
+          };
+        }
+      });
+    };
+    walk(record, '');
+    return record;
+  }
+
+  /* ---------------------- 生成段落的输入分组 ---------------------- */
+
+  const GROUP_LABELS = {
+    identity: '基本情况与主诉',
+    hpi: '现病史',
+    pe: '体格检查',
+    aux: '辅助检查',
+    diagnosis: '诊断'
+  };
+
+  function peValueGroups(record) {
+    const pe = (record && record.pe) || {};
+    const out = {};
+    Object.keys(pe).forEach(k => {
+      if (k === 'checked' || k === 'vitals') return;
+      out[k] = pe[k];
+    });
+    return out;
+  }
+
+  function identityGroup(record) {
+    const b = (record && record.basic) || {};
+    return {
+      department: b.department || '',
+      name: b.name || '',
+      gender: b.gender || '',
+      age: b.age || '',
+      birthDate: b.birthDate || '',
+      admitDate: b.admitDate || '',
+      marital: b.marital || '',
+      chiefComplaint: b.chiefComplaint || '',
+      chiefComplaintDuration: b.chiefComplaintDuration || '',
+      chiefComplaintDurationUnit: b.chiefComplaintDurationUnit || '',
+      admitDate: b.admitDate || '',
+      recordDate: b.recordDate || ''
+    };
+  }
+
+  function auxGroup(record) {
+    const items = (record && record.auxiliary && record.auxiliary.items) || [];
+    return items.map(it => ({
+      name: (it && it.name) || '',
+      result: (it && it.result) || '',
+      date: (it && it.date) || '',
+      hospital: (it && it.hospital) || '',
+      no: (it && it.no) || ''
+    }));
+  }
+
+  function summaryGroups(record) {
+    return {
+      identity: identityGroup(record),
+      hpi: (record && record.hpi) || {},
+      pe: {
+        vitals: (record && record.pe && record.pe.vitals) || {},
+        checked: (record && record.pe && record.pe.checked) || {},
+        values: peValueGroups(record)
+      },
+      aux: auxGroup(record)
+    };
+  }
+
+  function firstCourseGroups(record, section) {
+    if (section === 's') return { identity: identityGroup(record), hpi: (record && record.hpi) || {} };
+    if (section === 'oPe') return { pe: summaryGroups(record).pe };
+    if (section === 'oAux') return { aux: auxGroup(record) };
+    return {
+      diagnosis: (record && record.diagnosis && record.diagnosis.confirmed) || [],
+      hpi: (record && record.hpi) || {},
+      pe: summaryGroups(record).pe,
+      aux: auxGroup(record)
+    };
+  }
+
+  function dischargeGroups(record, part) {
+    if (part === 'diagnoses') return { diagnosis: (record && record.diagnosis && record.diagnosis.confirmed) || [] };
+    return {
+      identity: identityGroup(record),
+      hpi: (record && record.hpi) || {},
+      pe: summaryGroups(record).pe,
+      diagnosis: (record && record.diagnosis && record.diagnosis.confirmed) || []
+    };
+  }
+
+  /** 把分组数据折算成 {groups:{组:指纹}, fingerprint:总指纹} */
+  function groupFingerprints(groups) {
+    const out = {};
+    Object.keys(groups).forEach(k => { out[k] = fingerprint(groups[k]); });
+    return { groups: out, fingerprint: fingerprint(out) };
+  }
+
+  /** 对比保存时的分组指纹与当前分组，返回变化组标签 */
+  function changedGroups(savedGroups, currentGroups) {
+    const saved = isObject(savedGroups) ? savedGroups : {};
+    const labels = [];
+    Object.keys(currentGroups).forEach(k => {
+      if (saved[k] !== currentGroups[k]) labels.push(GROUP_LABELS[k] || k);
+    });
+    return labels;
+  }
+
+  function emptyDocMeta() {
+    return {
+      origin: '', inputFingerprint: '', inputGroups: {},
+      generatedTextHash: '', reviewedFingerprint: '', updatedAt: ''
+    };
+  }
+
+  function docMeta(record, kind, section) {
+    const dm = (record && record.documentMeta) || {};
+    if (kind === 'summary') return { ...emptyDocMeta(), ...(dm.summary || {}) };
+    if (kind === 'firstCourse') {
+      const fc = dm.firstCourse || {};
+      return { ...emptyDocMeta(), ...(fc[section || 's'] || {}) };
+    }
+    if (kind === 'discharge') {
+      const d = dm.discharge || {};
+      const key = section || 'admitCondition';
+      return { ...emptyDocMeta(), ...(d[key] || {}) };
+    }
+    return emptyDocMeta();
+  }
+
+  function ensureDocMeta(record, kind, section) {
+    if (!isObject(record.documentMeta)) record.documentMeta = {};
+    if (kind === 'summary') {
+      if (!isObject(record.documentMeta.summary)) record.documentMeta.summary = emptyDocMeta();
+      return record.documentMeta.summary;
+    }
+    if (kind === 'firstCourse') {
+      if (!isObject(record.documentMeta.firstCourse)) record.documentMeta.firstCourse = {};
+      const key = section || 's';
+      if (!isObject(record.documentMeta.firstCourse[key])) record.documentMeta.firstCourse[key] = emptyDocMeta();
+      return record.documentMeta.firstCourse[key];
+    }
+    if (kind === 'discharge') {
+      if (!isObject(record.documentMeta.discharge)) record.documentMeta.discharge = {};
+      const key = section || 'admitCondition';
+      if (!isObject(record.documentMeta.discharge[key])) {
+        record.documentMeta.discharge[key] = key === 'diagnoses'
+          ? { origin: '', inputFingerprint: '', textHash: '', confirmed: false, confirmedFingerprint: '' }
+          : emptyDocMeta();
+      }
+      return record.documentMeta.discharge[key];
+    }
+    return emptyDocMeta();
+  }
+
+  function docText(record, kind, section) {
+    if (kind === 'summary') return String((record && record.summary) || '');
+    if (kind === 'firstCourse') {
+      const s = (record && record.soap) || {};
+      if (section === 's') return String((s.s && s.s.summary) || '');
+      if (section === 'oPe') return String((s.o && s.o.pe) || '');
+      if (section === 'oAux') return String((s.o && s.o.aux) || '');
+      const basisText = String((s.a && s.a.basis) || '');
+      const detail = (s.a && s.a.basisDetail) || [];
+      return basisText + (detail.length ? '\n' + stableStringify(detail) : '');
+    }
+    if (kind === 'discharge') {
+      if (section === 'diagnoses') return stableStringify((record.discharge && record.discharge.diagnoses) || []);
+      return String((record.discharge && record.discharge.admitCondition) || '');
+    }
+    return '';
+  }
+
+  function docGroups(record, kind, section) {
+    if (kind === 'summary') return summaryGroups(record);
+    if (kind === 'firstCourse') return firstCourseGroups(record, section || 's');
+    if (kind === 'discharge') return dischargeGroups(record, section || 'admitCondition');
+    return {};
+  }
+
+  /**
+   * 生成段落状态：
+   *   empty | legacy | fresh | stale | manual | manual-stale | reviewed | reviewed-stale
+   */
+  function documentState(record, kind, section) {
+    const meta = docMeta(record, kind, section);
+    const text = docText(record, kind, section);
+    let hasText = text.trim() !== '';
+    if (kind === 'discharge' && section === 'diagnoses') {
+      try { hasText = JSON.parse(text || '[]').length > 0; } catch (e) { hasText = false; }
+    }
+    const cur = groupFingerprints(docGroups(record, kind, section));
+    const changed = changedGroups(meta.inputGroups, cur.groups);
+    const base = { meta, changed, current: cur, text };
+    if (!hasText) return { ...base, state: 'empty' };
+    if (!meta.origin) return { ...base, state: 'legacy' };
+    const textHash = hashText(text);
+    if (meta.origin === 'manual') {
+      return { ...base, state: changed.length ? 'manual-stale' : 'manual' };
+    }
+    // 标记为生成，但文字已经和生成时不同 → 实际是人工改过（旧版本可能没记状态）
+    if (meta.generatedTextHash && meta.generatedTextHash !== textHash) {
+      return { ...base, state: changed.length ? 'manual-stale' : 'manual' };
+    }
+    if (changed.length) {
+      return { ...base, state: meta.reviewedFingerprint ? 'reviewed-stale' : 'stale' };
+    }
+    if (meta.reviewedFingerprint && meta.reviewedFingerprint === cur.fingerprint) {
+      return { ...base, state: 'reviewed' };
+    }
+    return { ...base, state: 'fresh' };
+  }
+
+  function markDocumentGenerated(record, kind, section, text) {
+    const m = ensureDocMeta(record, kind, section);
+    const cur = groupFingerprints(docGroups(record, kind, section));
+    const body = text === undefined ? docText(record, kind, section) : String(text);
+    m.origin = 'generated';
+    m.inputGroups = cur.groups;
+    m.inputFingerprint = cur.fingerprint;
+    m.generatedTextHash = hashText(body);
+    m.reviewedFingerprint = '';
+    m.updatedAt = new Date().toISOString();
+    return m;
+  }
+
+  /** 用户手改：以当前资料为基线，之后资料再变才算「过期」 */
+  function markDocumentManual(record, kind, section) {
+    const m = ensureDocMeta(record, kind, section);
+    const cur = groupFingerprints(docGroups(record, kind, section));
+    m.origin = 'manual';
+    m.inputGroups = cur.groups;
+    m.inputFingerprint = cur.fingerprint;
+    m.generatedTextHash = hashText(docText(record, kind, section));
+    m.reviewedFingerprint = '';
+    m.updatedAt = new Date().toISOString();
+    return m;
+  }
+
+  function markDocumentReviewed(record, kind, section) {
+    const m = ensureDocMeta(record, kind, section);
+    const cur = groupFingerprints(docGroups(record, kind, section));
+    m.inputGroups = cur.groups;
+    m.inputFingerprint = cur.fingerprint;
+    m.reviewedFingerprint = cur.fingerprint;
+    m.updatedAt = new Date().toISOString();
+    return m;
+  }
+
+  /* ---------------------- 婚姻状态：唯一来源 ---------------------- */
+
+  function marriageValue(record) {
+    const b = (record && record.basic) || {};
+    const m = (record && record.marriage) || {};
+    return b.marital || m.status || '';
+  }
+
+  function marriageConflict(record) {
+    const c = record && record.meta && record.meta.conflicts && record.meta.conflicts.marriage;
+    if (!c || c.resolved) return null;
+    return c;
+  }
+
+  /** 用户选择后落定：basic.marital 是唯一来源，旧的 marriage.status 清空 */
+  function resolveMarriage(record, value) {
+    if (!record.basic) record.basic = {};
+    if (!record.marriage) record.marriage = {};
+    record.basic.marital = value || '';
+    record.marriage.status = '';
+    if (!record.meta) record.meta = {};
+    if (!isObject(record.meta.conflicts)) record.meta.conflicts = {};
+    record.meta.conflicts.marriage = {
+      basicValue: value || '',
+      marriageValue: '',
+      resolved: true,
+      chosen: value || '',
+      resolvedAt: new Date().toISOString()
+    };
+    markFieldManual(record, 'basic.marital');
+    return record;
+  }
+
   /* ---------------------- 科室键的迁移 ---------------------- */
 
   /**
@@ -238,6 +653,90 @@ const RECORD_CORE = (() => {
 
     filled.schemaVersion = SCHEMA_VERSION;
 
+    // ---- 元数据与迁移（v2 → v3）----
+    if (!isObject(filled.meta)) filled.meta = {};
+    if (!isObject(filled.meta.fieldStates)) filled.meta.fieldStates = {};
+    if (!isObject(filled.meta.conflicts)) filled.meta.conflicts = {};
+    if (!Array.isArray(filled.meta.migrationNotes)) filled.meta.migrationNotes = [];
+    const rev = Number(filled.meta.revision);
+    filled.meta.revision = Number.isFinite(rev) && rev >= 0 ? Math.floor(rev) : 0;
+    const rawVersion = Number(raw.schemaVersion);
+    if (Number.isFinite(rawVersion) && rawVersion < SCHEMA_VERSION) {
+      filled.meta.migratedFrom = rawVersion;
+      if (!filled.meta.migrationNotes.includes('已从 v' + rawVersion + ' 迁移到 v' + SCHEMA_VERSION)) {
+        filled.meta.migrationNotes.push('已从 v' + rawVersion + ' 迁移到 v' + SCHEMA_VERSION);
+      }
+    } else if (filled.meta.migratedFrom === undefined) {
+      filled.meta.migratedFrom = null;
+    }
+    if (!isObject(filled.documentMeta)) filled.documentMeta = {};
+
+    // 婚姻状态：basic.marital 是唯一来源。两处一致直接合并；
+    // 不一致保留两个原值，等用户选择，绝不静默舍弃。
+    const bMarital = isText(filled.basic.marital) ? filled.basic.marital.trim() : '';
+    const mStatus = filled.marriage && isText(filled.marriage.status) ? filled.marriage.status.trim() : '';
+    const existingConflict = filled.meta.conflicts.marriage;
+    if (bMarital && mStatus) {
+      if (bMarital === mStatus) {
+        filled.marriage.status = '';
+        if (!filled.meta.migrationNotes.includes('婚姻状态两处一致，已统一到基本情况')) {
+          filled.meta.migrationNotes.push('婚姻状态两处一致，已统一到基本情况');
+        }
+      } else if (!existingConflict || !existingConflict.resolved) {
+        filled.meta.conflicts.marriage = {
+          basicValue: bMarital,
+          marriageValue: mStatus,
+          resolved: false,
+          chosen: ''
+        };
+        if (!filled.meta.migrationNotes.includes('婚姻状态两处不一致，已保留两个原值待选择')) {
+          filled.meta.migrationNotes.push('婚姻状态两处不一致，已保留两个原值待选择');
+        }
+      }
+    } else if (!bMarital && mStatus) {
+      filled.basic.marital = mStatus;
+      filled.marriage.status = '';
+      if (!filled.meta.migrationNotes.includes('婚姻状态已从婚姻史迁移到基本情况')) {
+        filled.meta.migrationNotes.push('婚姻状态已从婚姻史迁移到基本情况');
+      }
+    } else if (bMarital && !mStatus) {
+      // 已经是唯一来源，无需处理
+    }
+
+    // 生成段落：旧存档里已有文字但没有来源 → legacy，保留原文、不判为已核对
+    const fc = isObject(filled.documentMeta.firstCourse) ? filled.documentMeta.firstCourse : {};
+    ['s', 'oPe', 'oAux', 'basis'].forEach(sec => {
+      if (!isObject(fc[sec])) fc[sec] = emptyDocMeta();
+      if (docText(filled, 'firstCourse', sec).trim() && !fc[sec].origin) fc[sec].origin = 'legacy';
+    });
+    filled.documentMeta.firstCourse = fc;
+    if (!isObject(filled.documentMeta.summary)) filled.documentMeta.summary = emptyDocMeta();
+    if (docText(filled, 'summary').trim() && !filled.documentMeta.summary.origin) {
+      filled.documentMeta.summary.origin = 'legacy';
+    }
+    if (!isObject(filled.documentMeta.discharge)) filled.documentMeta.discharge = {};
+    if (!isObject(filled.documentMeta.discharge.admitCondition)) {
+      filled.documentMeta.discharge.admitCondition = emptyDocMeta();
+    }
+    if (docText(filled, 'discharge', 'admitCondition').trim() && !filled.documentMeta.discharge.admitCondition.origin) {
+      filled.documentMeta.discharge.admitCondition.origin = 'legacy';
+    }
+    if (!isObject(filled.documentMeta.discharge.diagnoses)) {
+      filled.documentMeta.discharge.diagnoses = {
+        origin: '', inputFingerprint: '', textHash: '', confirmed: false, confirmedFingerprint: ''
+      };
+    }
+    if ((filled.discharge && filled.discharge.diagnoses || []).length &&
+        !filled.documentMeta.discharge.diagnoses.origin) {
+      filled.documentMeta.discharge.diagnoses.origin = 'legacy';
+    }
+
+    // 旧字段来源统一标 legacy（只补缺失的来源，不覆盖已有状态）
+    markLegacyFields(filled);
+    Object.keys(filled.meta.fieldStates).forEach(k => {
+      filled.meta.fieldStates[k] = normalizeFieldState(filled.meta.fieldStates[k]);
+    });
+
     // 科室键规范化
     if (validDeptKeys && validDeptKeys.length) {
       filled.basic.department = normalizeDeptKey(filled.basic.department, validDeptKeys);
@@ -272,6 +771,8 @@ const RECORD_CORE = (() => {
       name: b.name || '未命名',
       gender: b.gender || '',
       age: b.age || '',
+      birthDate: b.birthDate || '',
+      admitDate: b.admitDate || '',
       department: b.department || '',
       chiefComplaint: b.chiefComplaint || '',
       updatedAt: item.updatedAt || ''
@@ -322,19 +823,26 @@ const RECORD_CORE = (() => {
    * 导出格式：带包装的 JSON，含版本与时间，便于以后迁移
    * { schemaVersion, exportedAt, app, records:[...] }
    */
-  function buildExport(list, isoNow) {
-    const records = (Array.isArray(list) ? list : [])
+  function buildExport(list, isoNow, opts) {
+    const options = isObject(opts) ? opts : {};
+    let base = Array.isArray(list) ? list : [];
+    if (options.includeDraft && isObject(options.draft)) {
+      base = upsertRecord(base, options.draft, isoNow).list;
+    }
+    const records = base
       .filter(x => x && isObject(x.data))
       .map(x => {
         assertSafeKeys(x.data);
         return { id: x.id, updatedAt: x.updatedAt, data: x.data };
       });
-    return {
+    const out = {
       app: 'dabingli',
       schemaVersion: SCHEMA_VERSION,
       exportedAt: isoNow || new Date().toISOString(),
       records
     };
+    if (options.includeDraft && isObject(options.draft)) out.includesDraft = true;
+    return out;
   }
 
   /**
@@ -479,12 +987,39 @@ const RECORD_CORE = (() => {
   }
 
   /**
+   * 读取原始字符串：storage.getItem 本身也可能抛错（隐私模式、被禁用），
+   * 这里统一包住，调用方据此区分「没有存档」和「读不了存档」。
+   */
+  function readRaw(storage, key) {
+    try {
+      const raw = storage.getItem(key);
+      if (raw === null || raw === undefined) return { ok: true, raw: null, missing: true };
+      return { ok: true, raw: String(raw), missing: false };
+    } catch (e) {
+      return { ok: false, raw: '', missing: false, error: String((e && e.message) || e) };
+    }
+  }
+
+  function writeRaw(storage, key, value) {
+    try {
+      storage.setItem(key, value);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: String((e && e.message) || e) };
+    }
+  }
+
+  /**
    * 载入病历列表。损坏时**不覆盖原存档**，返回 ok:false 让界面提示用户。
    * 这是参考项目强调的行为：损坏数据不能静默丢弃。
    */
   function loadList(storage) {
-    const rawText = storage.getItem(STORAGE_KEYS.list);
-    if (rawText === null) return { ok: true, list: [], fresh: true };
+    const got = readRaw(storage, STORAGE_KEYS.list);
+    if (!got.ok) {
+      return { ok: false, list: [], error: true, reason: '无法读取浏览器存储：' + got.error, raw: '' };
+    }
+    if (got.missing) return { ok: true, list: [], fresh: true };
+    const rawText = got.raw;
     let parsed;
     try {
       parsed = JSON.parse(rawText);
@@ -512,8 +1047,12 @@ const RECORD_CORE = (() => {
    * 于是空白病历被当成正常的空存档保存，把损坏的原文整个覆盖掉。
    */
   function loadCurrent(storage, emptyRecord, validDeptKeys) {
-    const rawText = storage.getItem(STORAGE_KEYS.current);
-    if (rawText === null) return { ok: true, record: null, fresh: true };
+    const got = readRaw(storage, STORAGE_KEYS.current);
+    if (!got.ok) {
+      return { ok: false, record: null, error: true, raw: '', reason: '无法读取浏览器存储：' + got.error };
+    }
+    if (got.missing) return { ok: true, record: null, fresh: true };
+    const rawText = got.raw;
     let parsed;
     try {
       parsed = JSON.parse(rawText);
@@ -527,15 +1066,119 @@ const RECORD_CORE = (() => {
     }
   }
 
+  function loadSettings(storage) {
+    const got = readRaw(storage, STORAGE_KEYS.settings);
+    if (!got.ok || got.missing) return { ok: got.ok, settings: { ...SETTINGS_DEFAULTS }, raw: got.raw || '' };
+    try {
+      return { ok: true, settings: normalizeSettings(JSON.parse(got.raw)), raw: got.raw };
+    } catch (e) {
+      return { ok: false, settings: { ...SETTINGS_DEFAULTS }, corrupt: true, raw: got.raw };
+    }
+  }
+
+  /**
+   * 保存当前病历，带修订号检查。
+   * 其他标签页已经写入更新的修订号时返回 conflict，调用方不得覆盖。
+   */
+  function saveCurrent(storage, record, expectedRevision) {
+    if (!isObject(record)) return { ok: false, error: true, reason: '病历内容无效' };
+    const got = readRaw(storage, STORAGE_KEYS.current);
+    if (!got.ok) return { ok: false, error: true, reason: '无法读取当前存档：' + got.error };
+    let existing = null;
+    if (!got.missing) {
+      try {
+        existing = JSON.parse(got.raw);
+      } catch (e) {
+        return { ok: false, corrupt: true, raw: got.raw, reason: '现有存档无法解析，未覆盖' };
+      }
+    }
+    const remoteRev = Number(existing && existing.meta && existing.meta.revision) || 0;
+    const expect = expectedRevision === undefined || expectedRevision === null
+      ? null : Number(expectedRevision);
+    if (existing && expect !== null && existing.id && record.id && existing.id === record.id && remoteRev !== expect) {
+      return {
+        ok: false, conflict: true, remote: existing, remoteRevision: remoteRev,
+        reason: '其他页面已保存新版本'
+      };
+    }
+    const now = new Date().toISOString();
+    const next = cloneValue(record);
+    if (!isObject(next.meta)) next.meta = {};
+    next.schemaVersion = SCHEMA_VERSION;
+    next.meta.revision = Math.max(remoteRev, Number(next.meta.revision) || 0) + 1;
+    next.meta.updatedAt = now;
+    const wrote = writeRaw(storage, STORAGE_KEYS.current, JSON.stringify(next));
+    if (!wrote.ok) return { ok: false, error: true, reason: '保存失败：' + wrote.error };
+    return { ok: true, record: next, revision: next.meta.revision };
+  }
+
+  function saveList(storage, list) {
+    if (!Array.isArray(list)) return { ok: false, error: true, reason: '病历列表无效' };
+    const wrote = writeRaw(storage, STORAGE_KEYS.list, JSON.stringify(list));
+    if (!wrote.ok) return { ok: false, error: true, reason: '保存失败：' + wrote.error };
+    return { ok: true };
+  }
+
+  function saveSettings(storage, settings) {
+    const wrote = writeRaw(storage, STORAGE_KEYS.settings, JSON.stringify(normalizeSettings(settings)));
+    if (!wrote.ok) return { ok: false, error: true, reason: '设置保存失败：' + wrote.error };
+    return { ok: true };
+  }
+
+  /**
+   * 内存快照栈（按病历 id 绑定）。历史只在本机内存里，刷新即失效，
+   * 不能当作异地备份；这一点必须在界面上说清楚。
+   */
+  function createHistory(limit) {
+    const cap = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 20;
+    const stacks = new Map();
+    return {
+      push(record, label) {
+        if (!record || !record.id) return false;
+        let text;
+        try { text = JSON.stringify(record); } catch (e) { return false; }
+        if (text.length > 4 * 1024 * 1024) return false;
+        const arr = stacks.get(record.id) || [];
+        arr.push({ label: label || '编辑', at: new Date().toISOString(), snapshot: cloneValue(record) });
+        while (arr.length > cap) arr.shift();
+        stacks.set(record.id, arr);
+        return true;
+      },
+      pop(id) {
+        const arr = stacks.get(id) || [];
+        const item = arr.pop() || null;
+        return item;
+      },
+      peek(id) {
+        const arr = stacks.get(id) || [];
+        return arr[arr.length - 1] || null;
+      },
+      list(id) {
+        return (stacks.get(id) || []).map(x => ({ label: x.label, at: x.at }));
+      },
+      size(id) { return (stacks.get(id) || []).length; },
+      clear(id) { stacks.delete(id); }
+    };
+  }
+
   const api = {
     SCHEMA_VERSION, STORAGE_KEYS, SETTINGS_DEFAULTS,
     assertSafeKeys, deepMerge, normalizeDeptKey,
     isBlankValue, cloneValue, fillBlanks,
+    stableStringify, hashText, fingerprint, getPath, setPath,
+    fieldState, setFieldState, markFieldManual, markFieldReviewed, fieldReviewValid,
+    markLegacyFields, normalizeFieldState,
+    summaryGroups, firstCourseGroups, dischargeGroups, groupFingerprints, changedGroups,
+    docMeta, ensureDocMeta, docText, docGroups, documentState,
+    markDocumentGenerated, markDocumentManual, markDocumentReviewed,
+    marriageValue, marriageConflict, resolveMarriage,
     normalizeRecord, lookLikeRecord,
     uid, summarize, sortByUpdated, upsertRecord, removeRecord, findRecord,
     buildExport, parseImport, mergeImport, replaceImport,
     normalizeSettings,
-    memoryStorage, safeSet, safeGetJSON, loadList, loadCurrent
+    memoryStorage, safeSet, safeGetJSON,
+    readRaw, writeRaw, loadList, loadCurrent, loadSettings,
+    saveCurrent, saveList, saveSettings, createHistory
   };
 
   return api;
