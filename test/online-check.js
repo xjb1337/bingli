@@ -97,7 +97,8 @@ async function main() {
   // 2. 首屏渲染
   const cards = await ev('document.querySelectorAll(".card").length');
   const stepTitle = await ev('document.getElementById("stepTitle").textContent');
-  check('首屏渲染正常', cards >= 3 && stepTitle === '基本情况', `卡片=${cards} 步骤=${stepTitle}`);
+  const basicFields = await ev(`['basic.name','basic.age','basic.chiefComplaint','basic.department'].every(p => !!document.querySelector('[data-path="'+p+'"]'))`);
+  check('首屏渲染正常', cards > 0 && basicFields && stepTitle === '基本情况', `卡片=${cards} 字段齐全=${basicFields} 步骤=${stepTitle}`);
   await shot('online-01');
 
   // 3. 只请求了自身资源（无第三方追踪）
@@ -140,8 +141,17 @@ async function main() {
 
   // 7. 保存并刷新恢复
   await ev(`document.getElementById('btnSave').click()`);
-  await sleep(500);
-  const saved = await ev(`(localStorage.getItem('dabingli.current.v1')||'').includes('线上测试')`);
+  const saved = await ev(`(async () => {
+    for (let i = 0; i < 60; i++) {
+      const pointer = JSON.parse(localStorage.getItem('dabingli.current.v1') || 'null');
+      const draft = pointer && JSON.parse(localStorage.getItem('dabingli.draft.v1.' + pointer.id) || 'null');
+      const list = JSON.parse(localStorage.getItem('dabingli.records.v1') || '[]');
+      if (draft && draft.id === pointer.id && draft.basic.name === '线上测试' &&
+          list.some(item => item.id === pointer.id && item.data.basic.name === '线上测试')) return true;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    return false;
+  })()`);
   check('保存到浏览器存储', saved === true, String(saved));
 
   await send('Page.reload');
