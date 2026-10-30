@@ -37,6 +37,7 @@ async function main() {
       const r=SCHEMA.emptyRecord();r.id='ai-synthetic-'+Date.now();r.basic.name='合成姓名';r.basic.phone='13812345678';r.hpi.symptoms='旧症状';APP._test.setRecord(r);APP._test.render();AI_ASSIST.open();
       document.querySelector('#aiNotes').value='合成姓名电话13812345678。患者诉咳嗽3天，药名不详。';document.querySelector('#aiPrepare').click();`);
     check('preview redacts known identity', await ev(`const s=document.querySelector('#aiSources').textContent;return !s.includes('合成姓名')&&!s.includes('13812345678')&&s.includes('患者诉咳嗽3天');`));
+    check('closing unsaved notes can be canceled', await ev(`const confirm=window.confirm;window.confirm=()=>false;document.querySelector('#aiClose').click();window.confirm=confirm;return AI_ASSIST.isOpen()&&document.querySelector('#aiNotes').value.includes('咳嗽3天');`));
     await ev("document.querySelector('#aiSend').click();");
     check('explicit send consent required', await ev('return !window.__wire;'));
     await ev("document.querySelector('#aiConsent').checked=true;document.querySelector('#aiSend').click();");

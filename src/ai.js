@@ -8,7 +8,7 @@ const AI_ASSIST = (() => {
   const $ = id => panel.querySelector('#' + id);
   function status(text) { if (panel) { $('aiStatus').textContent = text; $('aiStatus').focus(); } }
   function close(force = false) {
-    if (!force && panel && (pending || $('aiNotes').value.trim()) && !window.confirm('关闭会取消请求并清除本窗口的原始笔记。已采纳到病历的内容会保留。确定关闭？')) return;
+    if (force !== true && panel && (pending || $('aiNotes').value.trim()) && !window.confirm('关闭会取消请求并清除本窗口的原始笔记。已采纳到病历的内容会保留。确定关闭？')) return;
     if (pending) bridge().aiCancel(pending);
     clearTimeout(timer); pending = null; request = null; result = null; busy = false;
     if (panel) { panel.remove(); panel = null; }
@@ -43,7 +43,7 @@ const AI_ASSIST = (() => {
       <button id="aiUndo" class="btn btn-ghost">撤销上一步可撤销操作</button>
     </section>`;
     document.body.appendChild(panel);
-    $('aiClose').onclick = close;
+    $('aiClose').onclick = () => close();
     $('aiSettings').onclick = () => bridge().aiSettings();
     const updateMode = () => {
       invalidate(); const op = $('aiOperation').value;
