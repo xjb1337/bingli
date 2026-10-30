@@ -7,7 +7,7 @@ const path = require('path');
 const os = require('os');
 
 const CHROME = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
-const HTML = path.resolve(__dirname, '..', 'dist', '大病历生成器.html');
+const HTML = path.resolve(__dirname, '..', 'android', 'app', 'src', 'main', 'assets', 'index.html');
 const SHOT = path.resolve(__dirname, '..', 'dist', 'probe');
 const PORT = 9231;
 const sleep = ms => new Promise(r => setTimeout(r, ms));

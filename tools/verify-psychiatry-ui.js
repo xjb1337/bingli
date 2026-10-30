@@ -15,7 +15,7 @@ const path = require('node:path');
 const os = require('node:os');
 
 const PORT = 9337;
-const FILE = path.resolve(__dirname, '..', 'dist', '大病历生成器.html');
+const FILE = path.resolve(__dirname, '..', 'android', 'app', 'src', 'main', 'assets', 'index.html');
 const SHOT_DIR = path.resolve(__dirname, '..', 'dist', 'shots');
 
 function findChrome() {

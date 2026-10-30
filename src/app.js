@@ -3878,31 +3878,6 @@ const APP = (() => {
 
   /* ========================= 初始化 ========================= */
 
-  /**
-   * 在线版离线缓存：只在 http(s) 下注册 Service Worker。
-   * 本地 HTML（file://）不依赖 SW 才能工作。
-   */
-  function registerOffline() {
-    if (window.BingliAndroid) return;
-    if (!('serviceWorker' in navigator)) return;
-    if (!/^https?:$/.test(location.protocol)) return;
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('sw.js').then(reg => {
-        if (reg.active) toast('已可离线使用');
-        reg.addEventListener('updatefound', () => {
-          const w = reg.installing;
-          if (!w) return;
-          w.addEventListener('statechange', () => {
-            if (w.state === 'installed' && navigator.serviceWorker.controller) {
-              // 不强制刷新：用户可能正在编辑，下次打开生效
-              toast('新版本已准备好，下次打开本页时生效');
-            }
-          });
-        });
-      }).catch(() => { /* 注册失败不影响正常使用 */ });
-    });
-  }
-
   function init() {
     loadSettings();
     if (!loadCurrent()) {
@@ -3944,7 +3919,6 @@ const APP = (() => {
       updateButton.hidden = false;
       updateButton.addEventListener('click', () => window.BingliAndroid.checkUpdates());
     }
-    registerOffline();
 
     // 自动保存
     setInterval(() => { saveCurrent(); }, 10000);

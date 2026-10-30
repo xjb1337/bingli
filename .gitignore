@@ -45,3 +45,7 @@ android/**/build/
 android/app/src/main/assets/index.html
 android/.signing/
 *.apk
+
+# Retired standalone web outputs
+/index.html
+/dist/*.html

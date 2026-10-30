@@ -29,10 +29,5 @@ android {
 }
 dependencies { implementation 'androidx.core:core:1.13.1'; testImplementation 'junit:junit:4.13.2' }
 tasks.register('buildWeb', Exec) { workingDir '../..'; commandLine 'node', 'build.js' }
-tasks.register('bundleWeb', Copy) {
-    dependsOn 'buildWeb'
-    from '../../index.html'
-    into 'src/main/assets'
-}
-tasks.named('preBuild').configure { dependsOn 'bundleWeb' }
-
+// Package the internal HTML asset; no standalone website is published.
+tasks.named('preBuild').configure { dependsOn 'buildWeb' }

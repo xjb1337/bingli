@@ -21,7 +21,7 @@ const crypto = require('node:crypto');
 
 const PORT = 9341;
 const ROOT = path.resolve(__dirname, '..');
-const FILE = path.join(ROOT, 'dist', '大病历生成器.html');
+const FILE = path.join(ROOT, 'android', 'app', 'src', 'main', 'assets', 'index.html');
 const SHOT_DIR = path.join(ROOT, 'dist', 'shots');
 const SLEEP = ms => new Promise(r => setTimeout(r, ms));
 
@@ -998,7 +998,7 @@ function partial(area, detail) { PASSED.push({ area, detail, tone: 'warn' }); }
 
   const report = {
     at: new Date().toISOString(),
-    artifact: 'dist/大病历生成器.html',
+    artifact: 'android/app/src/main/assets/index.html',
     artifactBefore: printBefore,
     artifactAfter: printAfter,
     artifactChanged,

@@ -16,7 +16,7 @@ const os = require('os');
 
 const CHROME = process.env.CHROME_PATH || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
 const ROOT = path.resolve(__dirname, '..');
-const HTML = path.join(ROOT, 'index.html');
+const HTML = path.join(ROOT, 'android', 'app', 'src', 'main', 'assets', 'index.html');
 const PORT = 9333;
 const HTTP_PORT = 8137;
 

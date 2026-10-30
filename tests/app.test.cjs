@@ -15,7 +15,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const DIST = path.join(__dirname, '..', 'dist', '大病历生成器.html');
+const DIST = path.join(__dirname, '..', 'android', 'app', 'src', 'main', 'assets', 'index.html');
 
 /* ---------------------- 最小 DOM 桩 ---------------------- */
 

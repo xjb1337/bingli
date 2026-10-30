@@ -17,7 +17,7 @@ const os = require('os');
 const { spawn } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
-const DIST = path.join(ROOT, 'dist', '大病历生成器.html');
+const DIST = path.join(ROOT, 'android', 'app', 'src', 'main', 'assets', 'index.html');
 const PORT = 9317;
 const PROFILE = path.join(os.tmpdir(), 'tpl-ui-profile-' + Date.now());
 

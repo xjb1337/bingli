@@ -12,7 +12,7 @@ const path = require('path');
 const os = require('os');
 const { spawn } = require('child_process');
 
-const FILE = path.join(__dirname, '..', 'dist', '大病历生成器.html');
+const FILE = path.join(__dirname, '..', 'android', 'app', 'src', 'main', 'assets', 'index.html');
 const SHOTS = path.join(__dirname, '..', 'dist', 'shots');
 const PORT = 9531;
 const SLEEP = ms => new Promise(r => setTimeout(r, ms));

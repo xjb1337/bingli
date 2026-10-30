@@ -13,8 +13,8 @@ const fs = require('fs');
 const path = require('path');
 
 const SRC = path.join(__dirname, 'src');
-const OUT_DIR = path.join(__dirname, 'dist');
-const OUT = path.join(OUT_DIR, '大病历生成器.html');
+const OUT_DIR = path.join(__dirname, 'android', 'app', 'src', 'main', 'assets');
+const OUT = path.join(OUT_DIR, 'index.html');
 
 function read(name) {
   return fs.readFileSync(path.join(SRC, name), 'utf8');
@@ -52,13 +52,9 @@ function main() {
 
   if (!fs.existsSync(OUT_DIR)) fs.mkdirSync(OUT_DIR, { recursive: true });
   fs.writeFileSync(OUT, out, 'utf8');
-  // 根目录 index.html 是线上部署副本，必须与 dist 产物逐字节一致。
-  const deploy = path.join(__dirname, 'index.html');
-  fs.writeFileSync(deploy, out, 'utf8');
 
   const kb = (Buffer.byteLength(out, 'utf8') / 1024).toFixed(1);
   console.log(`已生成：${OUT}`);
-  console.log(`部署副本：${deploy}`);
   console.log(`文件大小：${kb} KB`);
 }
 

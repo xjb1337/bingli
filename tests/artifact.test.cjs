@@ -15,7 +15,7 @@ const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..');
 const SRC = path.join(ROOT, 'src');
-const DIST = path.join(ROOT, 'dist', '大病历生成器.html');
+const DIST = path.join(ROOT, 'android', 'app', 'src', 'main', 'assets', 'index.html');
 
 const readSrc = name => fs.readFileSync(path.join(SRC, name), 'utf8');
 const distHtml = () => fs.readFileSync(DIST, 'utf8');
@@ -28,7 +28,7 @@ function stripModule(code) {
 /* ======================= 产物存在性 ======================= */
 
 test('发布产物存在', () => {
-  assert.ok(fs.existsSync(DIST), 'dist/大病历生成器.html 不存在，请先运行 node build.js');
+  assert.ok(fs.existsSync(DIST), 'android/app/src/main/assets/index.html 不存在，请先运行 node build.js');
 });
 
 /* ======================= 逐个源文件比对 ======================= */
@@ -145,8 +145,7 @@ test('产物声明 UTF-8 编码与移动端 viewport', () => {
 test('产物体积在合理范围（手机加载要快）', () => {
   const buf = fs.readFileSync(DIST);
   const rawKb = buf.length / 1024;
-  // 手机真正下载的是压缩后的字节。GitHub Pages 对 text/html 一律 gzip，
-  // 所以「学生要等多久」取决于这一行，而不是文件在磁盘上多大。
+  // App 资源随 APK 压缩打包；检查压缩体积，避免资源异常膨胀。
   const gzipKb = require('node:zlib').gzipSync(buf, { level: 9 }).length / 1024;
 
   // 原始体积：只兜住「模块被重复内联」这类失控增长。模板病例是纯中文长文本，
@@ -155,7 +154,18 @@ test('产物体积在合理范围（手机加载要快）', () => {
   assert.ok(rawKb < 1600, `产物原始体积 ${rawKb.toFixed(1)}KB 偏大，先检查是否模块被重复内联`);
   assert.ok(rawKb > 50, `产物 ${rawKb.toFixed(1)}KB 异常偏小，可能内容缺失`);
 
-  // 压缩体积：这才是手机上首屏要下载的量。留 400KB 余量，
+  // 压缩体积：限制 APK 内置资源体积。留 400KB 余量，
   // 够再加 20 份模板而不必回来改这个数字。
   assert.ok(gzipKb < 400, `产物 gzip 后 ${gzipKb.toFixed(1)}KB，手机上首次打开会明显变慢`);
+});
+
+// Product boundary: building an APK must not revive the retired website.
+test('仅交付 App：独立网页入口与部署脚本已移除', () => {
+  for (const name of ['index.html', 'sw.js', 'deploy.js', '.nojekyll', 'dist/大病历生成器.html', 'dist/dabingli.html']) {
+    assert.equal(fs.existsSync(path.join(ROOT, name)), false, name + ' 不应再生成');
+  }
+  const scripts = require('../package.json').scripts;
+  assert.equal(scripts.deploy, undefined);
+  assert.equal(scripts['e2e:online'], undefined);
+  assert.doesNotMatch(distHtml(), /serviceWorker\.register/);
 });

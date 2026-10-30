@@ -4,42 +4,18 @@
 
 [下载最新 Android 安装包](https://github.com/xjb1337/bingli/releases/latest/download/bingli.apk) · [查看版本与发布记录](https://github.com/xjb1337/bingli/releases/latest)
 
-支持 Android 8.0 及以上，安装后可离线填写。应用启动时每天检查更新，也可点顶部“检查更新”；下载校验后由系统安装器确认覆盖安装，保留本机病历。网页浏览器的资料需要先导出 JSON，再在 APK 中导入。
+支持 Android 8.0 及以上，安装后可离线填写。应用启动时每天检查更新，也可点底部“检查更新”；下载校验后由系统安装器确认覆盖安装，保留本机病历。网页浏览器的资料需要先导出 JSON，再在 APK 中导入。
 
 APK 由 GitHub Actions 自动构建并使用固定证书签名；密钥保存在仓库 Secrets，不进入公开源码。发布与雷电验收记录见 [Android 交付记录](docs/ANDROID_RELEASE_2026-10-30.md)。
 
 
-一个**离线、单文件**的网页工具，帮你在手机上把问诊和查体的内容整理成一份规范的大病历。
-不用联网、不用装 App、数据只存在你自己手机里。
+本项目仅交付 Android App，支持离线填写、保存、导入导出和病历生成。界面资源随 APK 内置，联网仅用于检查和下载安装更新。DeepSeek 尚未接入。
 
-**在线入口：<https://xjb1337.github.io/bingli/>**
+## 一、安装与迁移
 
-安卓 Chrome 打开后，菜单「添加到主屏幕」，用起来和 App 一样。详见 [使用说明](#一怎么放到手机上)。
-
----
-
-## 一、怎么放到手机上
-
-### 方法 1：直接打开在线地址（推荐）
-
-1. 手机 Chrome 打开 <https://xjb1337.github.io/bingli/>
-2. 点右上角「⋮」→「添加到主屏幕」→ 添加
-3. 以后从桌面图标进入
-
-> **首次打开需要联网**，之后浏览器会缓存页面，断网也能打开。
-> 如果哪天打不开，联网刷新一次即可。
-
-### 方法 2：离线文件（完全不联网也能用）
-
-把 `dist/大病历生成器.html` 通过微信文件传输助手发到手机，用 Chrome 打开，
-再「添加到主屏幕」。适合没网或想彻底断网的场合。
-
-### 方法 3：电脑上先用
-
-双击 `dist/大病历生成器.html` 即可在电脑浏览器使用。
-
-> **两种方式的数据不互通**！在线版和本地文件版是不同的网址，浏览器分开存数据。
-> 请固定用其中一种，需要迁移时用「病历 → 导出备份 / 导入备份」。
+1. 下载上方的最新 APK 并安装，支持 Android 8.0 及以上。
+2. 后续点击 App 底部“检查更新”，按系统提示覆盖安装；请勿卸载后重装，以免清除本机数据。
+3. 旧网页版已停止交付。旧浏览器数据与 App 不互通；若仍能打开旧页面或缓存，请先导出 JSON，再在 App 中导入。停用网站不会自动清除原浏览器存储。
 
 ---
 
@@ -208,8 +184,8 @@ APK 由 GitHub Actions 自动构建并使用固定证书签名；密钥保存在
 - 点 **病历 → 导出当前病历** → 即使当前病历尚未保存到列表，也可以单独导出 JSON 备份；
 - 点 **病历 → 导入备份** → 支持合并（保留现有、同 ID 取较新）或替换。
 
-> ⚠️ 数据保存在**当前浏览器**里。不要在浏览器设置里清"网站数据"，否则记录会丢。
-> 换手机、重装浏览器前，**必须先导出备份**并保存到手机外（微信收藏、电脑）。
+> ⚠️ 数据保存在 **App 私有存储**里。清除应用数据或卸载 App 会丢失本机记录。
+> 换手机、卸载 App 前，**必须先导出备份**并保存到手机外（微信收藏、电脑）。
 > 本机存储和导出的 JSON 备份均未加密。真实患者资料应避免使用他人或共用设备，并妥善保管备份、下载文件与剪贴板内容。
 >
 > 如果保存失败（存储空间满或隐私模式），页面顶部会显示红色告警，**不会假装保存成功**。
@@ -293,8 +269,8 @@ APK 由 GitHub Actions 自动构建并使用固定证书签名；密钥保存在
 
 ## 六、几个常见问题
 
-**Q：换手机 / 换浏览器，数据还在吗？**
-不在。数据存在打开它的那个浏览器里。换设备请用"下载 .txt"迁移。
+**Q：换手机 / 重装 App，数据还在吗？**
+不会自动同步。换设备前请导出 JSON 备份，在新设备的 App 中导入；TXT 文书不能替代可恢复的 JSON 备份。
 
 **Q：能填好几个病人吗？**
 可以。点右上角"病历"→"新建病历"。
@@ -306,7 +282,7 @@ APK 由 GitHub Actions 自动构建并使用固定证书签名；密钥保存在
 每个查体项都是可编辑文本框，直接改；主诉、现病史也一样。你写的优先，工具只做拼接。
 
 **Q：会不会把数据传出去？**
-不会。整个工具是单个 HTML 文件，不联网、不发请求，没有服务器。
+病历填写与生成在 App 本机完成，当前版本不向服务器上传病历。检查及下载更新会联网访问 GitHub；DeepSeek 尚未接入。
 
 ---
 
@@ -343,14 +319,14 @@ E:\bingli\
 │  ├─ app.js         界面交互（只负责 DOM，存储一律走 core）
 │  ├─ style.css      样式
 │  └─ index.html     模板
-├─ build.js          打包：内联成单文件 HTML
+├─ build.js          打包：生成 App 内置 HTML 资源
 ├─ tools\
 │  ├─ tpl-parts\     模板病例源文件（一个病种一个 .cjs）
 │  ├─ gen-templates.js   把 tpl-parts 生成 src/template-data.js
 │  ├─ check-templates.js 模板自检：查体值必须逐字取自选项表
 │  └─ …              其余是一次性核对脚本（对齐教材、扫重复、真机验收）
 ├─ dist\
-│  └─ 大病历生成器.html   ← 最终产物，发给手机的就是这个
+│  └─ bingli-*.apk       ← Android 安装包
 ├─ tests\            单元测试（node:test）
 ├─ test\             浏览器 E2E 与示例生成
 ├─ samples\          三份示例病历（呼吸/产科/儿科）
@@ -392,7 +368,6 @@ npm run coverage                   # 只看核心逻辑的覆盖率
 ```powershell
 node test/browser-check.js    # 真实点击填表（含生成页深度自查与三视图），15 项
 node test/file-scenario.js    # 模拟手机 file:// 打开，10 项
-node test/online-check.js     # 验收线上 GitHub Pages 地址，7 项
 node tools/verify-pe-ui.js    # 查体勾选制的真机验收（412×915），10 项
 node tools/verify-templates-ui.js  # 模板套用的真机验收，15 项
 node tools/verify-depth-ui.js      # 问诊深度自查卡片的真机验收，9 项
@@ -424,7 +399,7 @@ node tools/diag-top1.js <key>...  # 某份模板的提示为什么排成这样�
 > 病历列表的删除这些**只有填了内容才渲染**的按钮它量不到。
 > `verify-touch-data.js` 专门补这一轮，两个都跑才算真的查过触摸区。
 
-> **写测试时注意**：`tests/app.test.cjs` 与 `tests/artifact.test.cjs` 都从 `dist/` 读产物，
+> **写测试时注意**：`tests/app.test.cjs` 与 `tests/artifact.test.cjs` 都从 `android/app/src/main/assets/index.html` 读取 App 内置界面，
 > 所以流程必须是「改 src → `node build.js` → 跑测试」。
 > 跳过构建会看到测试基于旧产物通过，给出虚假的安全感。
 
@@ -439,48 +414,17 @@ node tools/diag-top1.js <key>...  # 某份模板的提示为什么排成这样�
 
 本次改动就靠这个方法发现了 2 个测试盲区（详见 `docs/评分表对齐说明.md`）。
 
-### 发布到 GitHub Pages
-
-线上地址从仓库根目录的 `index.html` 提供（`dist/` 里的同名文件是离线分发用的，两者内容一致）。
+### 构建与发布 Android App
 
 ```powershell
-node build.js     # 1. 构建产物
-node deploy.js    # 2. 复制 dist/ 成品为根目录 index.html
-git add -A
-git commit -m "更新"
-git push          # 3. 推送后 GitHub Pages 会自动重新构建（约 1 分钟）
+npm run verify
+$env:JAVA_HOME='C:\Program Files\Java\jdk-17'
+.\tools\build-android.ps1 -VersionName '3.0.0.5' -VersionCode 300005
 ```
 
-推送后可以这样确认已经生效：
+`node build.js` 直接生成 `android/app/src/main/assets/index.html`，供 APK 打包及内部界面回归使用；它是忽略提交的 App 资源，不再生成根目录网页或独立 HTML 分发文件。`src/` 是 App 内置界面与病历逻辑，仍需保留。
 
-```powershell
-node test/online-check.js    # 直接验收线上地址
-```
-
-> ⚠️ **改完必须重新 `push`**，手机打开的还是旧版本。
-> 如果改了源码只跑了 `build.js` 没 `push`，线上不会变。
-> `tests/artifact.test.cjs` 只能保证 `dist/` 与源码一致，**发布这一步要靠 `deploy.js`**。
-
-### 几个关键约束（改代码时请守住）
-
-1. **改任一 `src/` 文件后必须 `node build.js`**，否则手机拿到的是旧代码。
-   `tests/artifact.test.cjs` 会逐行比对产物与源码，忘记构建会直接测试失败。
-2. **存储与数据校验只能写在 `core.js`**，不要写进 `app.js`。
-   这样边界行为（存档损坏、存储写满、导入恶意 JSON）才能被单测覆盖。
-3. **保存失败绝不能提示"已保存"**。写完后要检查返回值，失败时显示顶部告警。
-4. **损坏的存档不得静默覆盖**。读取失败时原数据必须原样保留。
-5. 新增科室：改 `schema.js` 的 `PE_SPECIAL` 和 `DEPARTMENTS`，再跑 `npm run verify`。
-6. 新增诊断提示：改 `hints.js` 的 `RULES`，`must` 是必须命中的条件，能有效减少误报。
-   新加规则后跑 `node tools/verify-review-cases.js` 看 48 条真实写法用例是否仍全部判对。
-7. **新增模板病例**：在 `tools/tpl-parts/` 放一个 `.cjs`，照 `CONTRACT.md` 写，
-   然后 `node tools/check-templates.js tools/tpl-parts/*.cjs`（0 问题）→
-   `node tools/gen-templates.js` → `node build.js` → 跑 `tests/templates.test.cjs`。
-   查体值必须**逐字**取自 `tools/pe-options.txt`，自己改词会被自检报错——
-   因为学生在界面里看到的是那张选项表，改过的词在快捷选项里根本点不到。
-
-### 文件命名约定
-
-`src/` 是源码，`dist/` 是产物，**不要手改 `dist/`**——它每次都会被打包覆盖。
+推送 main 后由 `.github/workflows/release.yml` 检查、签名并发布 APK 和 `update.json`。继续使用原包名、签名和存储源，覆盖升级保留 App 本机病历。无需 GitHub Pages 或 Service Worker。
 
 ### 生成的病历结构
 

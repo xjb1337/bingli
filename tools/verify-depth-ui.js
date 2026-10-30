@@ -15,7 +15,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
-const DIST = path.join(ROOT, 'dist', '大病历生成器.html');
+const DIST = path.join(ROOT, 'android', 'app', 'src', 'main', 'assets', 'index.html');
 const PORT = 9319;
 const PROFILE = path.join(require('os').tmpdir(), 'depth-ui-profile-' + Date.now());
 

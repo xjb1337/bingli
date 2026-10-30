@@ -11,7 +11,7 @@
  *    同一份数据两种显示。
  *
  * 跑法：node tools/verify-pe-ui.js
- * 依赖 Chrome 可被 launch，用 CDP 驱动 dist/大病历生成器.html。
+ * 依赖 Chrome 可被 launch，用 CDP 驱动 android/app/src/main/assets/index.html。
  */
 'use strict';
 
@@ -20,7 +20,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
-const DIST = path.join(ROOT, 'dist', '大病历生成器.html');
+const DIST = path.join(ROOT, 'android', 'app', 'src', 'main', 'assets', 'index.html');
 const PORT = 9311;
 const PROFILE = path.join(require('os').tmpdir(), 'pe-ui-profile-' + Date.now());
 
