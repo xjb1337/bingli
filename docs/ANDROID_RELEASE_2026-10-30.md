@@ -1,6 +1,6 @@
 # Android APK 与更新交付（2026-10-30）
 
-## 当前产物
+## 首轮本地基线（历史记录）
 
 - APK：`dist/bingli-3.0.0.apk`（忽略目录，不提交二进制）。
 - 包名：`com.xjb.bingli`；版本：`3.0.0` / `300000`；minSdk 26，targetSdk 35。
@@ -48,3 +48,26 @@ $env:GRADLE_USER_HOME='C:\Users\liu\.gradle'
 - JSON 文件导入、系统文件保存选择器和手机剪贴板已接入，但尚未完成逐项实测。
 - 物理 Android 手机、其他 Android/WebView 版本、中文输入法和软键盘完整回归。
 - 现有浏览器数据不会自动进入 APK。需在原浏览器导出 JSON，在 APK 导入；以后同包名同签名覆盖升级保留应用数据。
+
+
+## 公共发布与应用内升级验收（最终）
+
+- 最新正式版：[v3.0.0.3](https://github.com/xjb1337/bingli/releases/tag/v3.0.0.3)。
+- 自动发布：[run 41058198838](https://github.com/xjb1337/bingli/actions/runs/41058198838)，Verify source 和 Build signed release and publish 全部成功。
+- APK：[bingli.apk](https://github.com/xjb1337/bingli/releases/download/v3.0.0.3/bingli.apk)。本地核验副本 `dist/bingli-3.0.0.3.apk`。
+- 清单：[update.json](https://github.com/xjb1337/bingli/releases/download/v3.0.0.3/update.json)。
+- 版本 `3.0.0.3` / `300003`，包名 `com.xjb.bingli`，minSdk 26，targetSdk 35。
+- APK 大小 1835004 字节；SHA-256 `5cc7fdecb7a27e492e33103330772380694268344ad8e237bad37d37085654a3`。
+- 签名证书 SHA-256 `075942a992312f98cbb7c4c3072729d22d9c3846979757c27fe0d3be06e7cdae`，与首轮本地签名一致。
+- 对应源提交 `ce0741d46f5e9c5bf52e35af1ba4d7e9e15e41bd`。
+- 公共产物验收使用不带凭据的 HTTPS 下载，独立核对 manifest、文件大小、哈希及 apksigner/aapt 输出，不以本机构建代替公共发布。
+
+实际流程：雷电 Android 9 / WebView 91，3.0.0 应用内发现和下载 3.0.0.2，校验后通过系统安装器升级；随后 3.0.0.2 应用内发现并下载 3.0.0.3，再经系统安装器升级到 versionCode 300003。两次均非 adb install 替代应用内安装。无卸载、无清除数据。
+
+升级后保留此前合成中文现病史。Android 系统文件保存器导出 JSON，实际拉取核对姓名 APK-UPGRADE-TEST、中文病史和 schemaVersion 3，均一致。
+
+测试：网页 `npm run verify` 625/625；Android 更新校验 9/9；Android lint 无错误；GitHub Pages `online-check` 7/7。旧线上测试对卡片数量和 current 整份 JSON 的断言已改为验证真实输入字段、草稿指针、分键草稿及病历列表内容，保留刷新恢复验收。
+
+现场发现并修复：部分 Android 9 的归档解析器不返回 SigningInfo，改为同时请求现代与旧签名字段，并在缺失 SigningInfo 时读取旧签名；仍要求唯一证书且与已安装版本相同。首版 v3.0.0.1 已标注被替代预发布，不再推荐。应用名称编码已移入 UTF-8 字符串资源，并有回归测试。
+
+仍未覆盖：物理手机、其他 Android/WebView 版本、完整中文输入法/软键盘回归；原生 JSON 导入和剪贴板尚未逐项验收。上述已完成流程不能代表所有手机兼容性。

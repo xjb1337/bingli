@@ -1,5 +1,14 @@
 # 大病历生成器
 
+## Android APK
+
+[下载最新 Android 安装包](https://github.com/xjb1337/bingli/releases/latest/download/bingli.apk) · [查看版本与发布记录](https://github.com/xjb1337/bingli/releases/latest)
+
+支持 Android 8.0 及以上，安装后可离线填写。应用启动时每天检查更新，也可点顶部“检查更新”；下载校验后由系统安装器确认覆盖安装，保留本机病历。网页浏览器的资料需要先导出 JSON，再在 APK 中导入。
+
+APK 由 GitHub Actions 自动构建并使用固定证书签名；密钥保存在仓库 Secrets，不进入公开源码。发布与雷电验收记录见 [Android 交付记录](docs/ANDROID_RELEASE_2026-10-30.md)。
+
+
 一个**离线、单文件**的网页工具，帮你在手机上把问诊和查体的内容整理成一份规范的大病历。
 不用联网、不用装 App、数据只存在你自己手机里。
 
