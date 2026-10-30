@@ -1,0 +1,38 @@
+plugins { id 'com.android.application' }
+android {
+    namespace 'com.xjb.bingli'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'com.xjb.bingli'
+        minSdk 26
+        targetSdk 35
+        versionCode = (project.findProperty('versionCode') ?: '300000').toInteger()
+        versionName = (project.findProperty('versionName') ?: '3.0.0')
+        buildConfigField 'String', 'UPDATE_REPOSITORY', '"xjb1337/bingli"'
+    }
+    signingConfigs {
+        release {
+            if (System.getenv('ANDROID_KEYSTORE_FILE')) {
+                storeFile file(System.getenv('ANDROID_KEYSTORE_FILE'))
+                storePassword System.getenv('ANDROID_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('ANDROID_KEY_ALIAS')
+                keyPassword System.getenv('ANDROID_KEY_PASSWORD')
+            }
+        }
+    }
+    buildTypes {
+        debug { if (System.getenv('BINGLI_SIGNED_TEST') == '1') signingConfig signingConfigs.release }
+        release { signingConfig signingConfigs.release; minifyEnabled false }
+    }
+    buildFeatures { buildConfig true }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+}
+dependencies { implementation 'androidx.core:core:1.13.1'; testImplementation 'junit:junit:4.13.2' }
+tasks.register('buildWeb', Exec) { workingDir '../..'; commandLine 'node', 'build.js' }
+tasks.register('bundleWeb', Copy) {
+    dependsOn 'buildWeb'
+    from '../../index.html'
+    into 'src/main/assets'
+}
+tasks.named('preBuild').configure { dependsOn 'bundleWeb' }
+

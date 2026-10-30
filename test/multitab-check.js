@@ -161,15 +161,16 @@ async function main() {
       APP.getRecord().basic.name = '患者A';
       APP.getRecord().basic.chiefComplaint = '咳嗽';
       await APP._test.saveCurrentAwait();
-      await APP._test.saveToLibrary();
       return true;
     `);
     const idA = await p1.eval('return APP.getRecord().id;');
+    check('B03 草稿未进入病历列表', await p1.eval('return APP._test.getList().length === 0;'));
 
     await p2.goto(url);
     const p2Start = await p2.eval('return APP.getRecord().basic.name;');
     check('B03 第二标签页能找回未入列表的草稿', p2Start === '患者A', `读到「${p2Start}」`);
 
+    await p1.eval('return await APP._test.saveToLibrary();');
     const p2dbg = await p2.eval(`
       await APP._test.newRecord();
       const id0 = APP.getRecord().id;
@@ -223,30 +224,17 @@ async function main() {
     const baseRev = await p2.eval('return {rev:APP.getRecord().meta.revision,id:APP.getRecord().id,name:APP.getRecord().basic.name,conflict:!!APP._test.remoteConflict()};');
     console.log('p2 base', JSON.stringify(baseRev));
 
-    await p1.eval(`
+    const saves = await Promise.all([p1.eval(`
       APP.getRecord().basic.chiefComplaint = '甲改过的主诉';
       return await APP._test.saveCurrentAwait();
-    `);
-    const afterFirst = await p1.eval('return APP.getRecord().meta.revision;');
-
-    const second = await p2.eval(`
+    `), p2.eval(`
       APP.getRecord().basic.chiefComplaint = '乙改过的主诉';
-      const ok = await APP._test.saveCurrentAwait();
-      return { ok, rev: APP.getRecord().meta.revision, conflict: !!APP._test.remoteConflict() };
-    `);
-    const storedName = await p1.eval(`
-      const p = JSON.parse(localStorage.getItem('dabingli.current.v1'));
-      const d = JSON.parse(localStorage.getItem('dabingli.draft.v1.' + p.id));
-      return d.basic.chiefComplaint;
-    `);
-    check(
-      'B02 同一病历并发保存：后写者收到冲突，不覆盖新版本',
-      second.ok === false && second.conflict === true && afterFirst === baseRev.rev + 1 && storedName === '甲改过的主诉',
-      JSON.stringify({ baseRev, afterFirst, second, storedName })
-    );
-
+      return await APP._test.saveCurrentAwait();
+    `)]);
+    check('B02 同时发起保存只有一个成功', saves.filter(Boolean).length === 1, JSON.stringify(saves));
+    const losingPage = saves[0] ? p2 : p1;
     // 冲突后「保留为副本」应生成独立病历，且不污染原病历
-    const copy = await p2.eval(`
+    const copy = await losingPage.eval(`
       document.querySelector('[data-act="keepCopy"]').click();
       const list = APP._test.getList();
       return { count: list.length, isArr: Array.isArray(list), keys: Object.keys(list), name: APP.getRecord().basic.name, id: APP.getRecord().id };

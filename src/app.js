@@ -1434,7 +1434,7 @@ const APP = (() => {
     s: r => GENERATOR.draftCaseSummary(r),
     oPe: r => GENERATOR.draftObjectivePE(r),
     oAux: r => GENERATOR.draftObjectiveAux(r),
-    basis: r => GENERATOR.buildBasisSection(r)
+    basis: r => GENERATOR.buildBasisSection(r, { fresh: true })
   };
 
   /** 单个 SOAP 段落的状态条：只提示本段，更新也只动本段 */
@@ -2816,7 +2816,7 @@ const APP = (() => {
       }
 
       // segmented 单选
-      if (ds.seg !== undefined) {
+      if (ds.seg !== undefined && ds.act === undefined) {
         setPath(R, ds.seg, ds.val);
         saveCurrent();
         const needsRerender =
@@ -3304,9 +3304,14 @@ const APP = (() => {
         const seg = String(el.dataset.seg || '');
         if (!SOAP_SEG_DRAFT[seg]) return;
         const soap = ensureSoap();
-        const key = { s: 'summary', oPe: 'pe', oAux: 'aux', basis: 'basis' }[seg];
         snapshot('更新 SOAP ' + seg);
-        soap[key] = SOAP_SEG_DRAFT[seg](R) || '';
+        if (seg === 'basis') {
+          soap.a.basisDetail = GENERATOR.draftBasisDetail(R, { fresh: true });
+          soap.a.basis = '';
+        } else {
+          const path = { s: 'soap.s.summary', oPe: 'soap.o.pe', oAux: 'soap.o.aux' }[seg];
+          CORE.setPath(R, path, SOAP_SEG_DRAFT[seg](R) || '');
+        }
         CORE.markDocumentGenerated(R, 'firstCourse', seg);
         saveCurrent();
         render();
@@ -3459,6 +3464,7 @@ const APP = (() => {
 
   async function copyToClipboard(text) {
     try {
+      if (window.BingliAndroid) { window.BingliAndroid.copy(text); toast("已复制到剪贴板"); return; }
       if (navigator.clipboard && window.isSecureContext) {
         await navigator.clipboard.writeText(text);
       } else {
@@ -3528,6 +3534,7 @@ const APP = (() => {
   function downloadText(text, label) {
     const name = (R.basic.name || '患者') + '_' + (label || '大病历') + '_' +
       (R.basic.recordDate || SCHEMA.todayStr()) + '.txt';
+    if (window.BingliAndroid) { window.BingliAndroid.export(text, name, 'text/plain'); return; }
     const blob = new Blob(['\ufeff' + text], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -3734,6 +3741,7 @@ const APP = (() => {
   }
 
   function downloadBlob(text, filename, mime) {
+    if (window.BingliAndroid) { window.BingliAndroid.export(text, filename, mime || "text/plain"); return; }
     const blob = new Blob(['\ufeff' + text], { type: (mime || 'text/plain') + ';charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -3875,6 +3883,7 @@ const APP = (() => {
    * 本地 HTML（file://）不依赖 SW 才能工作。
    */
   function registerOffline() {
+    if (window.BingliAndroid) return;
     if (!('serviceWorker' in navigator)) return;
     if (!/^https?:$/.test(location.protocol)) return;
     window.addEventListener('load', () => {

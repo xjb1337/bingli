@@ -1,0 +1,115 @@
+package com.xjb.bingli;
+
+import android.app.*;
+import android.os.*;
+import android.content.*;
+import android.net.Uri;
+import android.webkit.*;
+import android.view.*;
+import android.widget.*;
+import java.io.*;
+
+public class MainActivity extends Activity {
+    private static final String ORIGIN = "https://appassets.androidplatform.net";
+    private WebView web;
+    private ValueCallback<Uri[]> chooser;
+    private String exportText;
+    private UpdateManager updater;
+
+    @Override public void onCreate(Bundle state) {
+        super.onCreate(state);
+        LinearLayout root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL);
+        root.setOnApplyWindowInsetsListener((v, insets) -> {
+            v.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
+                insets.getSystemWindowInsetRight(), insets.getSystemWindowInsetBottom());
+            return insets;
+        });
+        Button update = new Button(this);
+        update.setText("大病历 " + BuildConfig.VERSION_NAME + " · 检查更新");
+        root.addView(update, new LinearLayout.LayoutParams(-1, Math.round(56 * getResources().getDisplayMetrics().density)));
+        web = new WebView(this); root.addView(web, new LinearLayout.LayoutParams(-1, 0, 1)); setContentView(root);
+        WebSettings settings = web.getSettings();
+        settings.setJavaScriptEnabled(true); settings.setDomStorageEnabled(true);
+        settings.setAllowFileAccess(false); settings.setAllowContentAccess(true);
+        settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+        WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG);
+        web.addJavascriptInterface(new Bridge(), "BingliAndroid");
+        web.setWebViewClient(new WebViewClient() {
+            @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                Uri uri = request.getUrl();
+                if (ORIGIN.equals(uri.getScheme() + "://" + uri.getAuthority()) && "/assets/index.html".equals(uri.getPath())) {
+                    try { return new WebResourceResponse("text/html", "UTF-8", getAssets().open("index.html")); }
+                    catch (IOException e) { return new WebResourceResponse("text/plain", "UTF-8", 500, "Error", null, new ByteArrayInputStream(new byte[0])); }
+                }
+                return new WebResourceResponse("text/plain", "UTF-8", 403, "Blocked", null, new ByteArrayInputStream(new byte[0]));
+            }
+            @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                return !request.getUrl().toString().equals(ORIGIN + "/assets/index.html");
+            }
+        });
+        web.setWebChromeClient(new WebChromeClient() {
+            @Override public boolean onJsConfirm(WebView view, String url, String message, JsResult result) {
+                new AlertDialog.Builder(MainActivity.this).setMessage(message)
+                    .setPositiveButton("确定", (d,w) -> result.confirm()).setNegativeButton("取消", (d,w)->result.cancel())
+                    .setOnCancelListener(d -> result.cancel()).show(); return true;
+            }
+            @Override public boolean onJsAlert(WebView view, String url, String message, JsResult result) {
+                new AlertDialog.Builder(MainActivity.this).setMessage(message).setPositiveButton("确定",(d,w)->result.confirm())
+                    .setOnCancelListener(d->result.confirm()).show(); return true;
+            }
+            @Override public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
+                if (chooser != null) chooser.onReceiveValue(null);
+                chooser = callback;
+                Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("application/json").addCategory(Intent.CATEGORY_OPENABLE);
+                try { startActivityForResult(intent, 41); } catch (ActivityNotFoundException e) { chooser.onReceiveValue(null); chooser=null; }
+                return true;
+            }
+        });
+        updater = new UpdateManager(this);
+        update.setOnClickListener(v -> updater.check(true));
+        web.loadUrl(ORIGIN + "/assets/index.html");
+        updater.check(false);
+    }
+
+    public final class Bridge {
+        @JavascriptInterface public void copy(String text) {
+            runOnUiThread(() -> ((ClipboardManager)getSystemService(CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("病历", text)));
+        }
+        @JavascriptInterface public void export(String text, String filename, String mime) {
+            if (text.length() > 8 * 1024 * 1024) return;
+            runOnUiThread(() -> {
+                if (exportText != null) { Toast.makeText(MainActivity.this,"请先完成当前导出",Toast.LENGTH_SHORT).show(); return; }
+                exportText = text;
+                Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
+                    .setType(mime.equals("application/json") ? mime : "text/plain")
+                    .putExtra(Intent.EXTRA_TITLE, new File(filename).getName());
+                try { startActivityForResult(intent, 42); } catch (ActivityNotFoundException e) { exportText=null; }
+            });
+        }
+    }
+    @Override protected void onActivityResult(int request, int result, Intent data) {
+        super.onActivityResult(request,result,data);
+        if (request == 41 && chooser != null) {
+            chooser.onReceiveValue(result == RESULT_OK && data != null ? new Uri[]{data.getData()} : null); chooser=null;
+        }
+        if (request == 42) {
+            String content = exportText; exportText=null;
+            if (result == RESULT_OK && data != null && content != null) {
+                try (OutputStream out = getContentResolver().openOutputStream(data.getData())) {
+                    if(out == null) throw new IOException("无法打开文件");
+                    out.write(content.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    Toast.makeText(this,"文件已保存",Toast.LENGTH_SHORT).show();
+                } catch (IOException e) { Toast.makeText(this,"保存失败："+e.getMessage(),Toast.LENGTH_LONG).show(); }
+            }
+        }
+    }
+    @Override protected void onPause() {
+        web.evaluateJavascript("if(typeof APP!=='undefined') APP._test.saveCurrentAwait()",null);
+        super.onPause();
+    }
+    @Override public void onBackPressed() {
+        web.evaluateJavascript("if(typeof APP!=='undefined') APP._test.saveCurrentAwait()",null);
+        new AlertDialog.Builder(this).setMessage("退出大病历？请确认页面没有保存失败提示。")
+            .setPositiveButton("退出",(d,w)->finish()).setNegativeButton("继续填写",null).show();
+    }
+}

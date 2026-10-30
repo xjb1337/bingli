@@ -967,3 +967,35 @@ test('A10 旧存档婚姻冲突保留两个原值，选择后统一', () => {
   assert.equal(app.run('APP.getRecord().marriage.status'), '');
   assert.equal(app.run('RECORD_CORE.marriageConflict(APP.getRecord())'), null);
 });
+
+
+test('SOAP update buttons replace persisted nested fields and final output, with undo', () => {
+  const app = boot();
+  app.run(`const r = APP.getRecord(); r.hpi.symptoms = '旧症状';
+    r.soap.s.summary = '旧摘要'; r.soap.o.pe = '旧查体'; r.soap.o.aux = '旧检查';
+    r.soap.p.principle = '保留人工计划'; r.pe.vitals.temperature = '39.1';
+    r.auxiliary.items = [{name:'血常规', result:'新检查结果'}];
+    APP._test.gotoStep('summary');`);
+  for (const seg of ['s', 'oPe', 'oAux']) clickAct(app, 'updateSoapSeg', { seg });
+  const text = app.run('GENERATOR.buildFirstCourseRecord(APP.getRecord())');
+  assert.doesNotMatch(text, /旧摘要|旧查体|旧检查/);
+  assert.match(text, /39\.1/);
+  assert.match(text, /新检查结果/);
+  assert.match(text, /保留人工计划/);
+  assert.equal(app.run('APP.getRecord().soap.summary'), undefined);
+  clickAct(app, 'undoDoc');
+  assert.equal(app.run('APP.getRecord().soap.o.aux'), '旧检查');
+});
+
+test('SOAP basis refresh uses current facts instead of saved basis details', () => {
+  const app = boot();
+  app.run(`const r = APP.getRecord(); r.diagnosis.confirmed = ['新诊断'];
+    r.hpi.symptoms = '新病史'; r.soap.a.basis = '旧概述';
+    r.soap.a.basisDetail = [{diagnosis:'旧诊断',history:'旧依据'}];
+    APP._test.gotoStep('summary');`);
+  clickAct(app, 'updateSoapSeg', { seg: 'basis' });
+  const text = app.run('GENERATOR.buildFirstCourseRecord(APP.getRecord())');
+  assert.match(text, /新诊断/);
+  assert.match(text, /新病史/);
+  assert.doesNotMatch(text, /旧诊断|旧依据|旧概述/);
+});

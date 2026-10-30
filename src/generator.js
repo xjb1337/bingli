@@ -1998,9 +1998,9 @@ const GENERATOR = (() => {
    * 正是评分表「诊断依据堆砌、内容空洞」要扣分的写法。其余诊断明确留空，
    * 提示用户各自补，宁可空着也不复制粘贴。
    */
-  function draftBasisDetail(r) {
+  function draftBasisDetail(r, opts = {}) {
     const items = ((r.soap || {}).a || {}).basisDetail;
-    if (Array.isArray(items) && items.length) {
+    if (!opts.fresh && Array.isArray(items) && items.length) {
       return items.filter(x => x && stripTail(x.diagnosis));
     }
     const dx = diagnosisList(r);
@@ -2337,8 +2337,8 @@ const GENERATOR = (() => {
    * 诊断依据：把每条诊断的病史/体检/辅助检查三方面依据逐条列出。
    * 这是模板里的独立一节（位于摘要之后、初步诊断之前）。
    */
-  function buildBasisSection(r) {
-    const items = draftBasisDetail(r);
+  function buildBasisSection(r, opts = {}) {
+    const items = draftBasisDetail(r, opts);
     if (!items.length) return '待补充：先填写初步诊断，再逐条列出诊断依据。';
     const lines = [];
     items.forEach((it, i) => {

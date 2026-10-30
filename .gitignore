@@ -37,3 +37,11 @@ tmp-review/
 
 # Graphify 本地分析产物，不入库
 graphify-out/
+
+# Android local builds and signing material
+android/.gradle/
+android/local.properties
+android/**/build/
+android/app/src/main/assets/index.html
+android/.signing/
+*.apk
