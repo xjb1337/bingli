@@ -1752,3 +1752,59 @@ footer .btn:disabled {
   color: var(--score-warn);
   background: var(--score-warn-bg);
 }
+
+/* ===================== 文书状态 / 核对 / 差异（v3） ===================== */
+.doc-state {
+  margin: 8px 0 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--bg-soft, #f8f9fb);
+  font-size: calc(13px * var(--fs-scale));
+}
+.doc-state-title { font-weight: 600; line-height: 1.5; }
+.doc-state-stale { border-color: #f0c36d; background: #fff8e6; }
+.doc-state-ok { border-color: #b7dfc2; background: #f1faf3; }
+.doc-state-manual { border-color: #b9d4f5; background: #f2f7fe; }
+.doc-state-muted { color: var(--text-soft, #666); }
+.doc-state-btns { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.doc-diff { margin-top: 6px; }
+.doc-diff-label { font-size: calc(12px * var(--fs-scale)); color: var(--text-soft, #666); margin-top: 4px; }
+.doc-pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 2px 0 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: #fff;
+  border: 1px solid var(--line);
+  font-family: inherit;
+  font-size: calc(13px * var(--fs-scale));
+  max-height: 220px;
+  overflow: auto;
+}
+.tag-review, .tag-review-btn { margin-left: 4px; }
+.tag-review-btn { cursor: pointer; }
+.warn-error { border-left-color: var(--red); }
+.outline-list { margin: 4px 0 10px 18px; padding: 0; }
+.outline-list li { margin: 2px 0; line-height: 1.5; }
+.tpl-item-group {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  background: #fff;
+}
+.app-ver {
+  display: block;
+  width: 100%;
+  text-align: center;
+  font-size: calc(11px * var(--fs-scale));
+  color: var(--text-soft, #888);
+  margin-top: 6px;
+}
+@media (max-width: 480px) {
+  .doc-state-btns .btn { flex: 1 1 auto; }
+  .doc-pre { max-height: 40vh; }
+  .outline-list { margin-left: 14px; }
+}
