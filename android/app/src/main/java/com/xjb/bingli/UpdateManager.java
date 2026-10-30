@@ -21,6 +21,7 @@ final class UpdateManager {
     private File ready;
     private ProgressDialog progress;
     UpdateManager(Activity activity) { this.activity=activity; }
+    void close() { worker.shutdownNow(); if (progress != null) progress.dismiss(); }
     private void ui(Runnable task) { activity.runOnUiThread(() -> { if(!activity.isFinishing() && !activity.isDestroyed()) task.run(); }); }
     private void message(String text) { ui(() -> new AlertDialog.Builder(activity).setTitle("应用更新").setMessage(text).setPositiveButton("确定",null).show()); }
 

@@ -24,9 +24,6 @@ public class MainActivity extends Activity {
                 insets.getSystemWindowInsetRight(), insets.getSystemWindowInsetBottom());
             return insets;
         });
-        Button update = new Button(this);
-        update.setText("大病历 " + BuildConfig.VERSION_NAME + " · 检查更新");
-        root.addView(update, new LinearLayout.LayoutParams(-1, Math.round(56 * getResources().getDisplayMetrics().density)));
         web = new WebView(this); root.addView(web, new LinearLayout.LayoutParams(-1, 0, 1)); setContentView(root);
         WebSettings settings = web.getSettings();
         settings.setJavaScriptEnabled(true); settings.setDomStorageEnabled(true);
@@ -66,12 +63,13 @@ public class MainActivity extends Activity {
             }
         });
         updater = new UpdateManager(this);
-        update.setOnClickListener(v -> updater.check(true));
         web.loadUrl(ORIGIN + "/assets/index.html");
         updater.check(false);
     }
 
     public final class Bridge {
+        @JavascriptInterface public String versionName() { return BuildConfig.VERSION_NAME; }
+        @JavascriptInterface public void checkUpdates() { runOnUiThread(() -> updater.check(true)); }
         @JavascriptInterface public void copy(String text) {
             runOnUiThread(() -> ((ClipboardManager)getSystemService(CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("病历", text)));
         }
@@ -106,6 +104,20 @@ public class MainActivity extends Activity {
     @Override protected void onPause() {
         web.evaluateJavascript("if(typeof APP!=='undefined') APP._test.saveCurrentAwait()",null);
         super.onPause();
+    }
+    @Override protected void onDestroy() {
+        if (updater != null) updater.close();
+        if (chooser != null) { chooser.onReceiveValue(null); chooser = null; }
+        if (web != null) {
+            if (web.getParent() instanceof android.view.ViewGroup) {
+                ((android.view.ViewGroup) web.getParent()).removeView(web);
+            }
+            web.removeJavascriptInterface("BingliAndroid");
+            web.stopLoading();
+            web.destroy();
+            web = null;
+        }
+        super.onDestroy();
     }
     @Override public void onBackPressed() {
         web.evaluateJavascript("if(typeof APP!=='undefined') APP._test.saveCurrentAwait()",null);

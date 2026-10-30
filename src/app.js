@@ -3937,7 +3937,13 @@ const APP = (() => {
 
     // 版本号：手机端要能判断自己是不是还在用旧版
     const ver = document.getElementById('appVer');
-    if (ver) ver.textContent = 'v' + APP_VERSION;
+    if (ver) ver.textContent = 'v' + (window.BingliAndroid && window.BingliAndroid.versionName
+      ? window.BingliAndroid.versionName() : APP_VERSION);
+    const updateButton = document.getElementById('btnUpdate');
+    if (updateButton && window.BingliAndroid && window.BingliAndroid.checkUpdates) {
+      updateButton.hidden = false;
+      updateButton.addEventListener('click', () => window.BingliAndroid.checkUpdates());
+    }
     registerOffline();
 
     // 自动保存

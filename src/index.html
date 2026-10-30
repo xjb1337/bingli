@@ -3,9 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<meta name="theme-color" content="#1a73e8">
+<meta name="theme-color" content="#125e55">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%20108%20108%22%20fill%3D%22none%22%3E%3Cdefs%3E%3CclipPath%20id%3D%22brandClip%22%3E%3Crect%20width%3D%22108%22%20height%3D%22108%22%20rx%3D%2225%22/%3E%3C/clipPath%3E%3C/defs%3E%3Cg%20clip-path%3D%22url%28%23brandClip%29%22%3E%3Crect%20width%3D%22108%22%20height%3D%22108%22%20rx%3D%2225%22%20fill%3D%22%23125E55%22/%3E%3Ccircle%20cx%3D%2294%22%20cy%3D%2212%22%20r%3D%2248%22%20fill%3D%22%2323796B%22/%3E%3Cpath%20d%3D%22M37%2028h27l13%2013v38a6%206%200%200%201-6%206H37a6%206%200%200%201-6-6V34a6%206%200%200%201%206-6Z%22%20fill%3D%22%23F8F9ED%22/%3E%3Cpath%20d%3D%22M64%2028v13h13%22%20fill%3D%22%23BBD9CA%22/%3E%3Crect%20x%3D%2243%22%20y%3D%2223%22%20width%3D%2222%22%20height%3D%2211%22%20rx%3D%225%22%20fill%3D%22%23D5E7BA%22/%3E%3Cpath%20d%3D%22M46%2045v12m-6-6h12M41%2066h23M41%2074h16%22%20stroke%3D%22%2324695F%22%20stroke-width%3D%223.5%22%20stroke-linecap%3D%22round%22/%3E%3Ccircle%20cx%3D%2277%22%20cy%3D%2277%22%20r%3D%2214%22%20fill%3D%22%23D5E7BA%22/%3E%3Cpath%20d%3D%22m70%2077%205%205%209-11%22%20stroke%3D%22%23125E55%22%20stroke-width%3D%223.5%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22/%3E%3C/g%3E%3C/svg%3E">
 <title>大病历生成器</title>
 <style>
 /*__CSS__*/
@@ -15,10 +16,11 @@
 
 <header>
   <div class="topbar">
-    <h1>大病历生成器</h1>
-    <button class="btn-icon" id="btnSave">保存</button>
-    <button class="btn-icon" id="btnList">病历</button>
-    <button class="btn-icon" id="btnExport">导出</button>
+    <div class="brand-mark" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" fill="none"><defs><clipPath id="brandClip"><rect width="108" height="108" rx="25"/></clipPath></defs><g clip-path="url(#brandClip)"><rect width="108" height="108" rx="25" fill="#125E55"/><circle cx="94" cy="12" r="48" fill="#23796B"/><path d="M37 28h27l13 13v38a6 6 0 0 1-6 6H37a6 6 0 0 1-6-6V34a6 6 0 0 1 6-6Z" fill="#F8F9ED"/><path d="M64 28v13h13" fill="#BBD9CA"/><rect x="43" y="23" width="22" height="11" rx="5" fill="#D5E7BA"/><path d="M46 45v12m-6-6h12M41 66h23M41 74h16" stroke="#24695F" stroke-width="3.5" stroke-linecap="round"/><circle cx="77" cy="77" r="14" fill="#D5E7BA"/><path d="m70 77 5 5 9-11" stroke="#125E55" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/></g></svg></div>
+    <div class="brand-copy"><h1>大病历生成器</h1><span class="brand-caption">问诊 · 查体 · 文书</span></div>
+    <button class="btn-icon" id="btnSave"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2ZM7 3v6h10V4M7 21v-8h10v8"/></svg><span>保存</span></button>
+    <button class="btn-icon" id="btnList"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7ZM3 10h18"/></svg><span>病历</span></button>
+    <button class="btn-icon" id="btnExport"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 16v5h14v-5"/></svg><span>导出</span></button>
   </div>
   <div class="stepbar" id="stepBar" role="button" tabindex="0" aria-label="打开步骤导航">
     <span class="title" id="stepTitle">基本情况</span>
@@ -33,7 +35,7 @@
 <footer>
   <button class="btn btn-ghost" id="btnPrev">上一步</button>
   <button class="btn" id="btnNext">下一步</button>
-  <span class="app-ver" id="appVer"></span>
+  <div class="footer-meta"><span class="workspace-label"><i></i>本机病历工作台</span><span class="app-ver" id="appVer"></span><button id="btnUpdate" class="update-link" hidden>检查更新</button></div>
 </footer>
 
 <script>
