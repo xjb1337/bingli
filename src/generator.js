@@ -158,14 +158,28 @@ const GENERATOR = (() => {
     return t;
   }
 
+  /** 传入的是整份病历（带 basic）还是只有 basic，两种调用方式都兼容 */
+  function asRecord(input) {
+    return input && typeof input === 'object' && input.basic && typeof input.basic === 'object' ? input : null;
+  }
+
   /**
    * 年龄文本：已经带单位就原样返回，否则补「岁」。
    *
    * 儿科病历写「7月」「3天」，成人写「58」。以前统一拼「岁」，
    * 儿科会输出「7月岁」这种不存在的写法。
+   *
+   * 传入整份病历时走 AGE 统一口径：有出生日期 + 入院日期就按日期算，
+   * 并且 <30 天写「日龄」、<12 月写「月龄」，不再让各处自己拼单位。
    */
-  function ageWithUnit(basic) {
-    const raw = stripTail((basic || {}).age);
+  function ageWithUnit(input) {
+    const rec = asRecord(input);
+    const basic = rec ? rec.basic : (input || {});
+    if (rec && typeof AGE !== 'undefined') {
+      const resolved = AGE.resolveAge(rec);
+      if (resolved.text) return resolved.text;
+    }
+    const raw = stripTail(basic.age);
     if (!raw) return '';
     // 「日龄」必须单独认：14日龄 只匹配到「日」也可，但「日龄岁」这种输出
     // 是把 14日龄 当成 14 岁又补了一个单位。日、天、周、月、时都算已有单位。
@@ -194,8 +208,14 @@ const GENERATOR = (() => {
    * @param {object} basic record.basic
    * @returns {number} 周岁；无法判断时为 NaN
    */
-  function ageYears(basic) {
-    const raw = stripTail((basic || {}).age);
+  function ageYears(input) {
+    const rec = asRecord(input);
+    const basic = rec ? rec.basic : (input || {});
+    if (rec && typeof AGE !== 'undefined') {
+      const y = AGE.years(rec);
+      if (Number.isFinite(y)) return y;
+    }
+    const raw = stripTail(basic.age);
     if (!raw) return NaN;
     if (!/岁/.test(raw) && /[天日周月时]/.test(raw)) return 0;
     const ar = raw.match(/[0-9０-９]+(?:\.[0-9]+)?/);
@@ -253,7 +273,7 @@ const GENERATOR = (() => {
   function buildBasicInfo(r) {
     const b = r.basic || {};
     const lines = [];
-    const age = ageWithUnit(b);
+    const age = ageWithUnit(r);
 
     // 科别：从 DEPARTMENTS 查中文名，绝不把内部 key（digestive）写进病历。
     const dept = SCHEMA.DEPARTMENTS.find(d => d.key === b.department);
@@ -425,7 +445,7 @@ const GENERATOR = (() => {
     // 开头不写主语时补上；已含"患者/孕妇/患儿"等主语则不再重复。
     // 主语按年龄判（见 subjectOf）：旧实现按科室判，70 岁挂儿科会写成「患儿，男，70岁」。
     if (!/^(患者|患儿|产妇|孕妇|本人|家属|该)/.test(text)) {
-      text = subjectOf(r.basic || {}) + text;
+      text = subjectOf(r) + text;
     }
     return text;
   }
@@ -1705,10 +1725,10 @@ const GENERATOR = (() => {
     const seg = [];
 
     // 1) 患者身份 + 主诉（直接复用主诉生成逻辑，避免时长重复追加）
-    const who = [b.gender, ageWithUnit(b)].filter(Boolean).join('，');
+    const who = [b.gender, ageWithUnit(r)].filter(Boolean).join('，');
     const ccFull = stripTail(buildChiefComplaint(r));  // 已含时长和句号
     // 主语按年龄判（subjectOf）：旧实现按科室判，儿科收 70 岁病人会写成「患儿，男，70岁」
-    const subj = subjectOf(b);
+    const subj = subjectOf(r);
     // 只有「患者」两个字的开头没有信息量，会生成「患者。」这种残句——干脆不写，
     // 让别人看得出这一段还是空的，比读到一个半截句子强。
     if (who || ccFull) {
@@ -1910,10 +1930,10 @@ const GENERATOR = (() => {
     const b = r.basic || {};
     const h = r.hpi || {};
     const seg = [];
-    const who = [b.gender, ageWithUnit(b)].filter(Boolean).join('，');
+    const who = [b.gender, ageWithUnit(r)].filter(Boolean).join('，');
     // 主语按年龄判（subjectOf）：与 draftSummary 保持一致，
     // 旧实现两处都按科室判，儿科 70 岁病人会写成「患儿，男，70岁」（已复现）。
-    const subj = subjectOf(b);
+    const subj = subjectOf(r);
     let head = who ? `${subj}，${who}` : subj;
     const cc = stripTail(buildChiefComplaint(r));
     if (cc) head += `，因“${cc}”入院`;
@@ -2091,7 +2111,7 @@ const GENERATOR = (() => {
     const p = soap.p || {};
 
     const lines = [];
-    const stamp = stripTail(opts.date);
+    const stamp = stripTail(opts.date) || stripTail((((r || {}).soap || {}).recordTime) || '');
     lines.push(stamp ? `【首次病程录】${stamp}` : '【首次病程录】');
 
     /* ---------- 一、病历特点（S） ---------- */
@@ -2234,6 +2254,19 @@ const GENERATOR = (() => {
    * @param {object} r record
    * @returns {string} 含六项小标题的纯文本
    */
+  /** 入院情况草稿：只写入院当时的主诉、体征与入院诊断 */
+  function draftAdmitCondition(r) {
+    const rec = asRecord(r);
+    const seg = [];
+    const cc = stripTail(buildChiefComplaint(rec));
+    if (cc) seg.push(`因“${cc}”入院`);
+    const abn = abnormalPE(rec);
+    if (abn.length) seg.push(`入院查体${abn.slice(0, 3).map(a => a.text).join('，')}`);
+    const dx = diagnosisList(rec);
+    if (dx.length) seg.push(`入院诊断：${dx.join('、')}`);
+    return seg.length ? joinSentences(seg) : '';
+  }
+
   function buildDischargeRecord(r) {
     const rec = r || {};
     const b = rec.basic || {};
@@ -2246,7 +2279,7 @@ const GENERATOR = (() => {
     const general = [];
     if (stripTail(b.name)) general.push(`姓名：${stripTail(b.name)}`);
     if (stripTail(b.gender)) general.push(`性别：${stripTail(b.gender)}`);
-    if (ageWithUnit(b)) general.push(`年龄：${ageWithUnit(b)}`);
+    if (ageWithUnit(rec)) general.push(`年龄：${ageWithUnit(rec)}`);
     if (stripTail(b.recordNo)) general.push(`病历号：${stripTail(b.recordNo)}`);
     if (stripTail(b.admitDate)) general.push(`入院日期：${stripTail(b.admitDate)}`);
     const disDate = stripTail(d.dischargeDate);
@@ -2258,17 +2291,7 @@ const GENERATOR = (() => {
 
     /* ---------- 入院情况 ---------- */
     lines.push('二、入院情况');
-    const admit = stripTail(d.admitCondition) || (() => {
-      // 自动草稿：主诉 + 主要阳性体征 + 入院诊断（只写入院当时的状态）
-      const seg = [];
-      const cc = stripTail(buildChiefComplaint(rec));
-      if (cc) seg.push(`因“${cc}”入院`);
-      const abn = abnormalPE(rec);
-      if (abn.length) seg.push(`入院查体${abn.slice(0, 3).map(a => a.text).join('，')}`);
-      const dx = diagnosisList(rec);
-      if (dx.length) seg.push(`入院诊断：${dx.join('、')}`);
-      return seg.length ? joinSentences(seg) : '';
-    })();
+    const admit = stripTail(d.admitCondition) || draftAdmitCondition(rec);
     lines.push(admit ? ensureSentence(admit) : '（待补充：入院时主要症状、体征与入院诊断）');
 
     /* ---------- 诊疗经过 ---------- */
@@ -2281,12 +2304,14 @@ const GENERATOR = (() => {
 
     /* ---------- 出院诊断 ---------- */
     lines.push('五、出院诊断');
+    // 出院诊断必须单独确认：留空时保留待填状态，不再静默沿用初步诊断。
+    // 回退看起来"省事"，实际会把尚未复核的「肺炎？」写成出院诊断，
+    // 而两者含义并不相同（出院诊断是最终结论）。
     const outDx = (Array.isArray(d.diagnoses) ? d.diagnoses : [])
       .map(s => stripTail(s)).filter(Boolean);
-    const dxList = outDx.length ? outDx : diagnosisList(rec);
-    lines.push(dxList.length
-      ? dxList.map((s, i) => `${i + 1}. ${s}`).join('\n')
-      : '（待补充出院诊断）');
+    lines.push(outDx.length
+      ? outDx.map((s, i) => `${i + 1}. ${s}`).join('\n')
+      : '（待补充：出院诊断未填写；如与初步诊断一致，请使用「从初步诊断带入」后核对确认）');
 
     /* ---------- 出院医嘱 ---------- */
     lines.push('六、出院医嘱');
@@ -2327,6 +2352,58 @@ const GENERATOR = (() => {
     return lines.join('\n');
   }
 
+  /* ---------------------- 病史跨栏去重（安全边界） ---------------------- */
+
+  const HISTORY_SECTION_KEYS = ['现病史', '既往史', '系统回顾', '个人史'];
+
+  /** 句子切分：只按句末标点切，保留标点；不拆逗号，避免把「起病时发热，今日无发热」拆散 */
+  function splitSentences(text) {
+    const s = String(text == null ? '' : text);
+    if (!s) return [];
+    const out = s.match(/[^。；;！？!?]+[。；;！？!?]?/g) || [s];
+    return out.map(x => x.trim()).filter(Boolean);
+  }
+
+  function sentenceKey(sentence) {
+    return String(sentence || '').replace(/\s+/g, '').replace(/[。；;！？!?]+$/, '');
+  }
+
+  /**
+   * 跨病史栏目去掉**完全重复**的句子。
+   *
+   * 边界（与任务书 5.3 对应）：
+   *   - 只有整句一字不差才去重；近似重复只提示，不合并；
+   *   - 同一栏内部重复不在这里删（只由 validate 提示，用户自己决定）；
+   *   - 否定/肯定、左右侧、时间进展本来就不是同一句，不会命中；
+   *   - 只处理病史类栏目，不动体格检查，避免把整句拆成缺主语残句。
+   */
+  function dedupeHistorySections(sections) {
+    const seenAcross = new Set();
+    HISTORY_SECTION_KEYS.forEach(key => {
+      const body = sections[key];
+      if (!body || body === PH) return;
+      const seenHere = new Set();
+      const kept = [];
+      String(body).split('\n').forEach(line => {
+        const sentences = splitSentences(line);
+        if (!sentences.length) { kept.push(line); return; }
+        const out = [];
+        sentences.forEach(sentence => {
+          const k = sentenceKey(sentence);
+          if (!k) { out.push(sentence); return; }
+          if (seenHere.has(k)) { out.push(sentence); return; } // 同栏重复：保留，交给提示
+          if (seenAcross.has(k)) return;                       // 跨栏重复：安全去重
+          seenHere.add(k);
+          seenAcross.add(k);
+          out.push(sentence);
+        });
+        if (out.length) kept.push(out.join(''));
+      });
+      sections[key] = kept.join('\n') || PH;
+    });
+    return sections;
+  }
+
   /**
    * 生成大病历全文
    *
@@ -2345,23 +2422,78 @@ const GENERATOR = (() => {
    * @param {object} r record
    * @param {object} opts { rosMode: 'detail'|'brief' }
    */
+  /** 病史类字段的固定遍历顺序：先出现的保留，后出现的跨字段重复去掉 */
+  const HISTORY_FIELD_PATHS = [
+    'hpi.onset', 'hpi.cause', 'hpi.symptoms', 'hpi.relief', 'hpi.evolution',
+    'hpi.accompanying', 'hpi.negativeDiscriminating', 'hpi.treatment',
+    'hpi.generalCondition', 'hpi.extra',
+    'pmh.health', 'pmh.diseaseDetail', 'pmh.longTermMeds', 'pmh.infection',
+    'pmh.surgery', 'pmh.trauma', 'pmh.transfusion', 'pmh.poisoning',
+    'pmh.vaccine', 'pmh.allergy', 'pmh.allergenOther', 'pmh.allergyReaction',
+    'pmh.relatedHistory', 'pmh.otherTreatDiseases', 'pmh.special',
+    'personal.maternal', 'personal.birth', 'personal.feeding', 'personal.growth',
+    'personal.residence', 'personal.travel', 'personal.smoking', 'personal.drinking',
+    'personal.drugs', 'personal.environment', 'personal.habits', 'personal.sexualHistory',
+    'personal.occupationEnv', 'personal.premorbidPersonality', 'personal.stressEvent'
+  ];
+
+  /**
+   * 跨字段去重：同一句完整的话填进多个病史字段时，只保留第一次出现。
+   * - 只处理「整句完全相同」，不做近似合并；
+   * - 同一字段内的重复原样保留（由 validate 提示，用户自己决定）；
+   * - 返回克隆后的病历，绝不修改传入的 record（生成器保持纯函数）。
+   */
+  function dedupeRecordFields(record) {
+    const out = (RECORD_CORE && RECORD_CORE.cloneValue)
+      ? RECORD_CORE.cloneValue(record)
+      : JSON.parse(JSON.stringify(record || {}));
+    const owner = new Map();
+    HISTORY_FIELD_PATHS.forEach(path => {
+      const v = (RECORD_CORE && RECORD_CORE.getPath) ? RECORD_CORE.getPath(out, path) : undefined;
+      if (typeof v !== 'string' || !v.trim()) return;
+      const kept = [];
+      v.split('\n').forEach(line => {
+        const sentences = splitSentences(line);
+        if (!sentences.length) { kept.push(line); return; }
+        const parts = [];
+        sentences.forEach(s => {
+          const k = sentenceKey(s);
+          if (!k) { parts.push(s); return; }
+          const prev = owner.get(k);
+          if (prev && prev !== path) return; // 跨字段重复：去掉
+          if (!prev) owner.set(k, path);
+          parts.push(s);
+        });
+        if (parts.length) kept.push(parts.join(''));
+      });
+      const next = kept.join('\n');
+      if (next !== v && RECORD_CORE && RECORD_CORE.setPath) RECORD_CORE.setPath(out, path, next);
+    });
+    return out;
+  }
+
   function generate(r, opts = {}) {
     const rosMode = opts.rosMode || 'detail';
+    // 生成用克隆：跨字段整句去重，原记录一个字都不改
+    const rec = dedupeRecordFields(r);
     const sections = {};
-    sections['一般项目'] = buildBasicInfo(r);
-    sections['主诉'] = buildChiefComplaint(r);
-    sections['现病史'] = buildHPI(r);
-    sections['既往史'] = buildPMH(r);
-    sections['系统回顾'] = buildROS(r, rosMode);
-    sections['个人史'] = buildPersonal(r);
-    sections['婚姻史'] = buildMarriageHistory(r);
-    sections['月经与生育史'] = buildMenstruationChildbirth(r);
-    sections['家庭史'] = buildFamily(r);
-    sections['体格检查'] = buildPE(r);
-    sections['辅助检查'] = buildAuxiliary(r);
-    sections['摘要'] = buildSummary(r);
-    sections['诊断依据'] = buildBasisSection(r);
-    sections['初步诊断'] = buildDiagnosis(r);
+    sections['一般项目'] = buildBasicInfo(rec);
+    sections['主诉'] = buildChiefComplaint(rec);
+    sections['现病史'] = buildHPI(rec);
+    sections['既往史'] = buildPMH(rec);
+    sections['系统回顾'] = buildROS(rec, rosMode);
+    sections['个人史'] = buildPersonal(rec);
+    sections['婚姻史'] = buildMarriageHistory(rec);
+    sections['月经与生育史'] = buildMenstruationChildbirth(rec);
+    sections['家庭史'] = buildFamily(rec);
+    sections['体格检查'] = buildPE(rec);
+    sections['辅助检查'] = buildAuxiliary(rec);
+    sections['摘要'] = buildSummary(rec);
+    sections['诊断依据'] = buildBasisSection(rec);
+    sections['初步诊断'] = buildDiagnosis(rec);
+
+    // 同一句话填进两个病史栏目时只输出一次；同栏内重复保留并提示。
+    dedupeHistorySections(sections);
 
     const lines = [];
     SECTION_ORDER.forEach(name => {
@@ -2656,16 +2788,27 @@ const GENERATOR = (() => {
   /** 科室与年龄是否对得上：儿科接成人、成人科接 14 岁以下都值得问一句 */
   function checkDeptAge(r, w) {
     const b = r.basic || {};
-    const m = String(b.age === undefined ? '' : b.age).match(/\d+/);
-    if (!m) return;
-    const age = Number(m[0]);
-    if (!Number.isFinite(age) || age <= 0) return;
+    let age = NaN;
+    let ageLabel = '';
+    if (typeof AGE !== 'undefined') {
+      const info = AGE.resolveAge(r);
+      if (!info.ok) return;
+      // 月龄/日龄按 0 岁判断科室，但提示里必须写「7月龄」而不是「0 岁」
+      age = info.kind === 'days' || info.kind === 'months' ? 0 : info.years;
+      ageLabel = info.kind === 'years' ? `${info.text.replace(/岁$/, '')} 岁` : info.text;
+    } else {
+      const m = String(b.age === undefined ? '' : b.age).match(/\d+/);
+      if (!m) return;
+      age = Number(m[0]);
+      ageLabel = `${age} 岁`;
+    }
+    if (!Number.isFinite(age) || age < 0 || !ageLabel) return;
     const dept = b.department;
     const name = (SCHEMA.DEPARTMENTS.find(d => d.key === dept) || {}).name || '';
     if (dept === 'pediatrics' && age >= 14) {
-      w.push(`【一般项目】科室是${name}，但年龄 ${age} 岁，请确认是否选错科室（儿科一般指 14 岁以下）。`);
+      w.push(`【一般项目】科室是${name}，但年龄 ${ageLabel}，请确认是否选错科室（儿科一般指 14 岁以下）。`);
     } else if (dept && dept !== 'pediatrics' && dept !== 'emergency' && age < 14) {
-      w.push(`【一般项目】年龄 ${age} 岁，科室却是${name}；14 岁以下建议选儿科。`);
+      w.push(`【一般项目】年龄 ${ageLabel}，科室却是${name}；14 岁以下建议选儿科。`);
     }
   }
 
@@ -2740,6 +2883,110 @@ const GENERATOR = (() => {
     });
   }
 
+  /**
+   * 本轮新增的一致性检查：年龄/出生日期、婚姻两处旧值、过敏与烟酒、
+   * 出院诊断确认、辅助检查日期、病史重复。全部只提示，不改数据。
+   */
+  function checkNewConsistency(r, w) {
+    // 1) 年龄与出生日期：只有能按入院/记录日期算出年龄时才比较
+    if (typeof AGE !== 'undefined') {
+      const info = AGE.resolveAge(r);
+      if (info.ok && info.mismatch) {
+        w.push(`【一般项目】年龄写「${info.manual.text}」，按出生日期 ${info.birthDate} 和参考日期 ${info.refDate} 算出「${info.text}」，两者明显不一致，请核对。`);
+      }
+    }
+
+    // 2) 婚姻：旧存档两处不一致且用户还没选择
+    const mc = r.meta && r.meta.conflicts && r.meta.conflicts.marriage;
+    if (mc && !mc.resolved && stripTail(mc.basicValue) && stripTail(mc.marriageValue) &&
+      stripTail(mc.basicValue) !== stripTail(mc.marriageValue)) {
+      w.push(`【婚姻史】基本信息写「${stripTail(mc.basicValue)}」，婚姻史写「${stripTail(mc.marriageValue)}」，两处不一致，请选择以哪个为准。`);
+    }
+
+    // 3) 过敏：写了「无过敏」又勾了过敏原/填了过敏反应
+    const pmh = r.pmh || {};
+    const allergyText = stripTail(pmh.allergy);
+    const allergenPicked = Object.keys(pmh.allergenChecks || {}).some(k => pmh.allergenChecks[k]) ||
+      stripTail(pmh.allergenOther);
+    if (allergyText && /^(无|否认|没有|未见|未发现)/.test(allergyText) && allergenPicked) {
+      w.push('【既往史】过敏史写的是「无/否认」，但又勾选或填写了具体过敏原，请核对。');
+    }
+
+    // 4) 烟酒：状态说没有，数量却填了数字
+    const per = r.personal || {};
+    const smoke = stripTail(per.smoking);
+    const smokeAmount = stripTail(per.smokingAmount);
+    if (smoke && /^(无|不|否|从未|已戒)/.test(smoke) && /\d/.test(smokeAmount)) {
+      w.push(`【个人史】吸烟写「${smoke}」，数量却填了「${smokeAmount}」，请核对。`);
+    }
+    const drink = stripTail(per.drinking);
+    const drinkAmount = stripTail(per.drinkingAmount);
+    if (drink && /^(无|不|否|从未|已戒)/.test(drink) && /\d/.test(drinkAmount)) {
+      w.push(`【个人史】饮酒写「${drink}」，数量却填了「${drinkAmount}」，请核对。`);
+    }
+
+    // 5) 出院诊断：填了要确认；没填就保持待填（不再静默沿用初步诊断）
+    const d = r.discharge || {};
+    const outDx = (Array.isArray(d.diagnoses) ? d.diagnoses : []).map(s => stripTail(s)).filter(Boolean);
+    if (!outDx.length) {
+      w.push('【出院记录】出院诊断未填写；如与初步诊断一致，请使用「从初步诊断带入」后核对确认。');
+    } else if (d.diagnosesConfirmed !== true) {
+      w.push('【出院记录】出院诊断已填写但尚未确认，请核对后再定稿。');
+    }
+
+    // 6) 辅助检查日期：格式不认识、或顺序与录入顺序相反
+    const dated = auxItems(r).filter(it => stripTail(it.date));
+    const parsed = [];
+    dated.forEach(it => {
+      const p = typeof AGE !== 'undefined' ? AGE.parseDate(it.date) : null;
+      if (!p) w.push(`【辅助检查】「${stripTail(it.name) || '未命名检查'}」的日期「${stripTail(it.date)}」无法识别，请按 YYYY-MM-DD 填写。`);
+      else parsed.push(p.ms);
+    });
+    for (let i = 1; i < parsed.length; i++) {
+      if (parsed[i] < parsed[i - 1]) {
+        w.push('【辅助检查】检查日期不是按时间先后排列，请核对每条结果对应的日期。');
+        break;
+      }
+    }
+
+    // 7) 病史重复：同栏重复只提示；跨栏完全重复生成时已去重，也提示来源
+    const fields = ['onset', 'cause', 'symptoms', 'relief', 'evolution', 'accompanying',
+      'negativeDiscriminating', 'treatment', 'generalCondition', 'extra'];
+    const seenAcross = new Map();
+    fields.forEach(key => {
+      const text = stripTail((r.hpi || {})[key]);
+      if (!text) return;
+      const local = new Map();
+      splitSentences(text).forEach(sentence => {
+        const k = sentenceKey(sentence);
+        if (!k) return;
+        local.set(k, (local.get(k) || 0) + 1);
+        if (!seenAcross.has(k)) seenAcross.set(k, key);
+      });
+      local.forEach((count, k) => {
+        if (count > 1) w.push(`【现病史】「${k}」在同一栏里重复了 ${count} 次，请删除多余的一句。`);
+      });
+    });
+    if (seenAcross.size) {
+      const counts = new Map();
+      fields.forEach(key => {
+        const text = stripTail((r.hpi || {})[key]);
+        if (!text) return;
+        splitSentences(text).forEach(sentence => {
+          const k = sentenceKey(sentence);
+          if (!k) return;
+          if (!counts.has(k)) counts.set(k, new Set());
+          counts.get(k).add(key);
+        });
+      });
+      counts.forEach((set, k) => {
+        if (set.size > 1) {
+          w.push(`【现病史】「${k}」同时写在 ${[...set].length} 个栏目里，生成时只保留一次，请核对是否需要合并。`);
+        }
+      });
+    }
+  }
+
   function validate(r) {
     const w = [];
     const b = r.basic || {};
@@ -2806,6 +3053,7 @@ const GENERATOR = (() => {
     checkDates(r, w);
     checkDeptAge(r, w);
     checkRecordConsistency(r, w);
+    checkNewConsistency(r, w);
     if (!((r.diagnosis || {}).confirmed || []).length) w.push('【初步诊断】未填写，可参考"诊断提示"。');
     else warnDiagnosisOrder(r, w);
     if (!stripTail(r.summary || '')) {
@@ -2845,8 +3093,111 @@ const GENERATOR = (() => {
     return w;
   }
 
+  /* ---------------------- 结构化校验提示 ---------------------- */
+
+  /**
+   * 把现有字符串提醒映射成可定位的结构化条目。
+   *
+   * 兼容策略：validate() 仍返回字符串数组（现有调用与 579 条测试不动），
+   * validateStructured() 在其上补充 code / severity / document / paths / action。
+   * 以后新增检查只要往 validate 里加一句，再在下面的规则表里补一条即可。
+   */
+  const WARNING_RULES = [
+    [/缺少姓名/, 'NAME_MISSING', 'record', ['basic.name'], 'error', '填写姓名'],
+    [/缺少性别/, 'GENDER_MISSING', 'record', ['basic.gender'], 'error', '选择性别'],
+    [/缺少年龄/, 'AGE_MISSING', 'record', ['basic.age', 'basic.birthDate'], 'error', '填写年龄或出生日期'],
+    [/年龄写「.*」.*出生日期.*不一致/, 'AGE_BIRTHDATE_MISMATCH', 'record', ['basic.age', 'basic.birthDate', 'basic.admitDate'], 'warning', '核对年龄与出生日期'],
+    [/【主诉】未填写/, 'CHIEF_COMPLAINT_MISSING', 'record', ['basic.chiefComplaint'], 'error', '填写主诉'],
+    [/【主诉】文字偏长/, 'CHIEF_COMPLAINT_TOO_LONG', 'record', ['basic.chiefComplaint'], 'warning', '压缩到 20 字以内'],
+    [/【主诉】疑似包含诊断性词语/, 'CHIEF_COMPLAINT_DIAGNOSIS_WORD', 'record', ['basic.chiefComplaint'], 'warning', '改成症状描述'],
+    [/【主诉】缺少持续时间/, 'CHIEF_COMPLAINT_DURATION_MISSING', 'record', ['basic.chiefComplaint', 'basic.chiefComplaintDuration'], 'warning', '补持续时间'],
+    [/【现病史】未填写/, 'HPI_MISSING', 'record', ['hpi'], 'error', '填写现病史'],
+    [/【系统回顾】尚未问诊/, 'ROS_UNTOUCHED', 'record', ['ros'], 'info', '逐系统问诊'],
+    [/【婚姻史】未填写/, 'MARITAL_MISSING', 'record', ['basic.marital', 'marriage.status'], 'warning', '填写婚姻状态'],
+    [/【婚姻史】.*两处不一致/, 'MARITAL_CONFLICT', 'record', ['basic.marital', 'marriage.status'], 'warning', '选择以哪个为准'],
+    [/【个人史】未填写/, 'PERSONAL_MISSING', 'record', ['personal'], 'warning', '补个人史'],
+    [/【既往史】过敏史.*具体过敏原/, 'ALLERGY_CONFLICT', 'record', ['pmh.allergy', 'pmh.allergenChecks'], 'warning', '核对过敏史'],
+    [/【个人史】吸烟/, 'SMOKING_CONFLICT', 'record', ['personal.smoking', 'personal.smokingAmount'], 'warning', '核对吸烟状态与数量'],
+    [/【个人史】饮酒/, 'DRINKING_CONFLICT', 'record', ['personal.drinking', 'personal.drinkingAmount'], 'warning', '核对饮酒状态与数量'],
+    [/【体格检查】未录入异常或生命体征/, 'PE_MISSING', 'record', ['pe'], 'warning', '录入查体'],
+    [/【体格检查】.*(不一致|冲突|未写入)/, 'PE_CONFLICT', 'record', ['pe'], 'warning', '核对查体描述'],
+    [/【生命体征】/, 'VITAL_RANGE', 'record', ['pe.vitals'], 'warning', '核对生命体征'],
+    [/【日期】/, 'DATE_INVALID', 'record', ['basic.admitDate', 'discharge.dischargeDate'], 'warning', '核对日期'],
+    [/【一般项目】科室是.*年龄/, 'DEPT_AGE_MISMATCH', 'record', ['basic.department', 'basic.age'], 'warning', '核对科室与年龄'],
+    [/【一般项目】年龄.*科室却是/, 'DEPT_AGE_MISMATCH', 'record', ['basic.department', 'basic.age'], 'warning', '核对科室与年龄'],
+    [/【现病史】左右侧肢体无力/, 'HISTORY_LATERALITY', 'record', ['hpi'], 'warning', '核对患侧与时间'],
+    [/【现病史】「.*」同时出现有和无/, 'HISTORY_POLARITY_CONFLICT', 'record', ['hpi'], 'warning', '核对是否对应不同时间'],
+    [/【现病史】起病描述写无明显诱因/, 'HISTORY_CAUSE_CONFLICT', 'record', ['hpi.onset', 'hpi.cause'], 'warning', '核对诱因'],
+    [/【现病史】同时写了症状同前/, 'HISTORY_PROGRESS_CONFLICT', 'record', ['hpi.evolution'], 'warning', '核对时间'],
+    [/【现病史】请按起病、就诊/, 'HISTORY_DURATION_CHECK', 'record', ['hpi'], 'warning', '核对时长'],
+    [/【现病史】「.*」在同一栏里重复/, 'HISTORY_DUPLICATE', 'record', ['hpi'], 'warning', '删除多余的一句'],
+    [/【现病史】「.*」同时写在 .* 个栏目/, 'HISTORY_DUPLICATE_ACROSS', 'record', ['hpi'], 'warning', '合并重复病史'],
+    [/【辅助检查】现病史提到了检查/, 'AUX_MISSING', 'record', ['auxiliary.items'], 'warning', '补检查结果'],
+    [/【辅助检查】.*日期.*无法识别/, 'AUX_DATE_INVALID', 'record', ['auxiliary.items'], 'warning', '改成 YYYY-MM-DD'],
+    [/【辅助检查】检查日期不是按时间先后/, 'AUX_DATE_ORDER', 'record', ['auxiliary.items'], 'warning', '按时间排序'],
+    [/【初步诊断】未填写/, 'DIAGNOSIS_MISSING', 'record', ['diagnosis.confirmed'], 'error', '填写初步诊断'],
+    [/【摘要】目前为自动生成的初稿/, 'SUMMARY_DRAFT', 'record', ['summary'], 'info', '核对并定稿'],
+    [/【首次病程录】鉴别诊断未填写/, 'SOAP_DIFF_MISSING', 'firstCourse', ['soap.a.diff'], 'warning', '补鉴别诊断'],
+    [/【首次病程录】诊疗计划/, 'SOAP_PLAN_MISSING', 'firstCourse', ['soap.p.perDiagnosis'], 'warning', '按诊断列计划'],
+    [/【首次病程录】.*关联不明确/, 'SOAP_DIFF_UNRELATED', 'firstCourse', ['soap.a.diff'], 'warning', '核对鉴别诊断'],
+    [/【出院记录】出院情况未填写/, 'DISCHARGE_STATUS_MISSING', 'discharge', ['discharge.dischargeStatus'], 'warning', '填写出院情况'],
+    [/【出院记录】出院日期未填写/, 'DISCHARGE_DATE_MISSING', 'discharge', ['discharge.dischargeDate'], 'warning', '填写出院日期'],
+    [/【出院记录】出院医嘱未填写/, 'DISCHARGE_ADVICE_MISSING', 'discharge', ['discharge.advice'], 'warning', '填写出院医嘱'],
+    [/【出院记录】出院医嘱缺/, 'DISCHARGE_ADVICE_MISSING', 'discharge', ['discharge.advice'], 'warning', '补出院医嘱'],
+    [/【出院记录】出院诊断未填写/, 'DISCHARGE_DX_MISSING', 'discharge', ['discharge.diagnoses'], 'warning', '从初步诊断带入并确认'],
+    [/【出院记录】出院诊断已填写但尚未确认/, 'DISCHARGE_DX_UNCONFIRMED', 'discharge', ['discharge.diagnoses', 'discharge.diagnosesConfirmed'], 'warning', '确认出院诊断']
+  ];
+
+  function warningMeta(message) {
+    for (const [re, code, document, paths, severity, action] of WARNING_RULES) {
+      if (re.test(message)) return { code, severity, document, paths, action };
+    }
+    return { code: 'GENERAL', severity: 'info', document: 'record', paths: [], action: '' };
+  }
+
+  /** 文书过期属于「资料变了、文字没跟上」，不在 validate 的缺项里重复刷屏 */
+  function staleDocumentWarnings(r) {
+    const out = [];
+    if (typeof RECORD_CORE === 'undefined' || !RECORD_CORE.documentState) return out;
+    const summaryState = RECORD_CORE.documentState(r, 'summary');
+    if (summaryState && /(^|-)stale$/.test(summaryState.state)) {
+      out.push({
+        code: 'DOC_STALE_SUMMARY', severity: 'warning', document: 'record', paths: ['summary'],
+        message: `【摘要】原始资料已变化（${(summaryState.changed || []).join('、') || '资料'}），当前摘要可能过期，请比较后更新。`,
+        action: '查看摘要更新'
+      });
+    }
+    ['s', 'oPe', 'oAux', 'basis'].forEach(seg => {
+      const st = RECORD_CORE.documentState(r, 'firstCourse', seg);
+      if (st && /(^|-)stale$/.test(st.state)) {
+        out.push({
+          code: 'DOC_STALE_SOAP', severity: 'warning', document: 'firstCourse', paths: [`soap.${seg === 's' ? 's.summary' : seg === 'oPe' ? 'o.pe' : seg === 'oAux' ? 'o.aux' : 'a.basis'}`],
+          message: `【首次病程录】${seg === 's' ? 'S 段' : seg === 'oPe' ? 'O 段体检' : seg === 'oAux' ? 'O 段辅助检查' : '诊断依据'}的原始资料已变化，当前文字可能过期。`,
+          action: '查看该段更新'
+        });
+      }
+    });
+    const dState = RECORD_CORE.documentState(r, 'discharge', 'admitCondition');
+    if (dState && /(^|-)stale$/.test(dState.state)) {
+      out.push({
+        code: 'DOC_STALE_DISCHARGE', severity: 'warning', document: 'discharge', paths: ['discharge.admitCondition'],
+        message: '【出院记录】入院情况是按较早的资料生成的，之后资料有变化；当前文字保留不改，请核对是否需要更新。',
+        action: '核对入院情况'
+      });
+    }
+    return out;
+  }
+
+  function validateStructured(r) {
+    const list = validate(r).map(message => {
+      const meta = warningMeta(message);
+      return { ...meta, message };
+    });
+    return list.concat(staleDocumentWarnings(r));
+  }
+
   return {
-    generate, generatePlain, validate,
+    generate, generatePlain, validate, validateStructured,
     buildBasicInfo, buildChiefComplaint, buildHPI, buildROS, buildPMH,
     buildPersonal, buildMarriage, buildMenstruation, buildChildbirth,
     buildMarriageChildbirth,
@@ -2856,7 +3207,7 @@ const GENERATOR = (() => {
     peEntries, buildFocusPE,
     // 首次病程录（SOAP）与出院记录
     buildFirstCourseRecord, buildDischargeRecord,
-    draftCaseSummary, draftObjectivePE, draftObjectiveAux, draftBasisDetail,
+    draftCaseSummary, draftObjectivePE, draftObjectiveAux, draftBasisDetail, draftAdmitCondition,
     diffRelatedToDiagnosis, diagnosisList, auxItems, hospitalDays,
     mergeIntoHistory,
     joinSentences, stripTail, SECTION_ORDER,

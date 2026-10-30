@@ -314,11 +314,22 @@ test('出院记录：出院医嘱四子项分别出现', () => {
   assert.match(out, /复诊时间：2周后门诊复诊/);
 });
 
-test('出院记录：出院诊断留空时继承初步诊断', () => {
+test('出院记录：出院诊断留空时保持待填，不再静默继承初步诊断', () => {
   const r = makeRecord('respiratory');
   r.diagnosis.confirmed = ['社区获得性肺炎', '慢性胃炎'];
   const out = GENERATOR.buildDischargeRecord(r);
-  assert.match(out, /1\. 社区获得性肺炎/);
+  assert.doesNotMatch(out, /1\. 社区获得性肺炎/, '未确认的初步诊断不能直接变成出院诊断');
+  assert.match(out, /待补充：出院诊断未填写/);
+  assert.match(out, /从初步诊断带入/);
+});
+
+test('出院记录：明确带入并确认的出院诊断照常输出，且保留「？」', () => {
+  const r = makeRecord('respiratory');
+  r.diagnosis.confirmed = ['社区获得性肺炎？'];
+  r.discharge.diagnoses = ['社区获得性肺炎？', '慢性胃炎'];
+  r.discharge.diagnosesConfirmed = true;
+  const out = GENERATOR.buildDischargeRecord(r);
+  assert.match(out, /1\. 社区获得性肺炎？/);
   assert.match(out, /2\. 慢性胃炎/);
 });
 
