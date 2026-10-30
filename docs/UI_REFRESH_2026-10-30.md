@@ -12,4 +12,10 @@
 
 本地验证：npm run verify 625/625；Android 更新校验 9/9；assembleRelease 与 lintRelease 通过。雷电 Android 9 / WebView 91 录入数据保留，基本情况、查体、摘要、生成页均无横向溢出；320、412、980 CSS 宽度导航按钮高 48px，横竖屏切换 PID 不变且冲突状态为 false。测试截图和测量日志在本地 tmp-review/，不提交。
 
-发布、公共包与最终模拟器升级结果在完成后补充。
+最终正式版：[v3.0.0.4](https://github.com/xjb1337/bingli/releases/tag/v3.0.0.4)，版本号 300004。自动发布运行 [41063126054](https://github.com/xjb1337/bingli/actions/runs/41063126054) 全部成功，对应源提交 d59ada51c526270bbd423ef7a3ac2d1461668aa6。
+
+公开 APK 大小 1840628 字节，SHA-256 `76afa6c653c6ddd5002cf308d92d04c37609bda4cb6e847dcf11c58c3eabf55c`；签名证书 `075942a992312f98cbb7c4c3072729d22d9c3846979757c27fe0d3be06e7cdae` 与前版一致。使用不带凭据的公开 HTTPS 下载独立核对清单和 APK，再用 apksigner 验证实际证书。
+
+补充回归：真实浏览器 15/15，本地文件 10/10，GitHub Pages 7/7。雷电从同签名 UI 预览基线（300003）经底部检查更新、下载、校验、系统安装器覆盖到公开 release 300004，pkgFlags 无 DEBUGGABLE；最终原生截图显示 v3.0.0.4、横排导航、新标识及升级前合成病例姓名。新图标也已在真实雷电桌面截图中确认。
+
+本轮 CSS 320/412/980 宽度测试在 Android WebView 的视口覆盖下进行；原生竖屏截图使用临时 720×1280 模拟器尺寸，完成后恢复原始 1920×1080。没有执行物理手机与全量输入法回归。
