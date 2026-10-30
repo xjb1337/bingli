@@ -1,6 +1,6 @@
 {
   "name": "dabingli",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "private": true,
   "description": "大病历生成器 —— 离线单页工具，把问诊与查体整理成规范大病历",
   "scripts": {

@@ -2,7 +2,8 @@
  * 内联成单独的 HTML 文件。
  *
  * 内联顺序即运行期依赖顺序，不可随意调整：
- *   SCHEMA → CORE → TEMPLATE_DATA → TEMPLATES → DEPTH → GENERATOR → HINTS → APP
+ *   AGE → SCHEMA → CORE → TEMPLATE_DATA → TEMPLATES → DEPTH → GENERATOR → HINTS → APP
+ * AGE（年龄解析）零依赖，放在最前面，供 schema/core/generator/hints/app 共用。
  * TEMPLATE_DATA 是纯数据，必须在 TEMPLATES（读它的逻辑）之前。
  * DEPTH（问诊深度自查）只读记录、不依赖别的模块，位置宽松。
  *
@@ -25,6 +26,7 @@ function stripModule(code) {
 }
 
 function main() {
+  const age = stripModule(read('age.js'));
   const schema = stripModule(read('schema.js'));
   const core = stripModule(read('core.js'));
   const tplData = stripModule(read('template-data.js'));
@@ -38,6 +40,7 @@ function main() {
 
   const out = html
     .replace('/*__CSS__*/', () => css)
+    .replace('/*__AGE__*/', () => age)
     .replace('/*__SCHEMA__*/', () => schema)
     .replace('/*__CORE__*/', () => core)
     .replace('/*__TPL_DATA__*/', () => tplData)
@@ -49,9 +52,13 @@ function main() {
 
   if (!fs.existsSync(OUT_DIR)) fs.mkdirSync(OUT_DIR, { recursive: true });
   fs.writeFileSync(OUT, out, 'utf8');
+  // 根目录 index.html 是线上部署副本，必须与 dist 产物逐字节一致。
+  const deploy = path.join(__dirname, 'index.html');
+  fs.writeFileSync(deploy, out, 'utf8');
 
   const kb = (Buffer.byteLength(out, 'utf8') / 1024).toFixed(1);
   console.log(`已生成：${OUT}`);
+  console.log(`部署副本：${deploy}`);
   console.log(`文件大小：${kb} KB`);
 }
 

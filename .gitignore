@@ -34,3 +34,6 @@ tools/docx-dump.txt
 .idea/
 # 评审/排查用的一次性脚本目录，不入库
 tmp-review/
+
+# Graphify 本地分析产物，不入库
+graphify-out/

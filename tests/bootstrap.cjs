@@ -2,12 +2,14 @@
  * 在 Node 环境中显式搭好，保证被测代码与线上一致。
  *
  * 线上 index.html 的脚本顺序：
- *   SCHEMA → CORE → TEMPLATE_DATA → TEMPLATES → DEPTH → GENERATOR → HINTS → APP
+ *   AGE → SCHEMA → CORE → TEMPLATE_DATA → TEMPLATES → DEPTH → GENERATOR → HINTS → APP
  * 这里照搬同样的顺序与全局名。
  */
 const path = require('node:path');
 
 function bootGlobals() {
+  // 年龄解析是公共基础设施，界面/生成器/提示规则都读同一个结果
+  globalThis.AGE = require(path.join(__dirname, '..', 'src', 'age.js'));
   // generator.js / hints.js 直接引用全局 SCHEMA、GENERATOR
   globalThis.SCHEMA = require(path.join(__dirname, '..', 'src', 'schema.js'));
   globalThis.RECORD_CORE = require(path.join(__dirname, '..', 'src', 'core.js'));
@@ -19,6 +21,7 @@ function bootGlobals() {
   globalThis.GENERATOR = require(path.join(__dirname, '..', 'src', 'generator.js'));
   globalThis.HINTS = require(path.join(__dirname, '..', 'src', 'hints.js'));
   return {
+    AGE: globalThis.AGE,
     SCHEMA: globalThis.SCHEMA,
     CORE: globalThis.RECORD_CORE,
     TEMPLATES: globalThis.TEMPLATES,
