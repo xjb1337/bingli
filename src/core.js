@@ -193,7 +193,7 @@ const RECORD_CORE = (() => {
     return obj;
   }
 
-  const FIELD_SOURCES = ['manual', 'template', 'default', 'example', 'generated', 'legacy', ''];
+  const FIELD_SOURCES = ['manual', 'template', 'default', 'example', 'generated', 'legacy', 'ai', ''];
 
   function defaultFieldState() {
     return { source: '', reviewed: false, reviewedValueHash: '', sourceRef: '' };

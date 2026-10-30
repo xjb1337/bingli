@@ -1869,6 +1869,8 @@ const APP = (() => {
       && !R.discharge.diagnosesConfirmed;
 
     const items = [];
+    const aiPending = Object.keys(fs).filter(p => CORE.fieldState(R, p).source === 'ai' && !CORE.fieldReviewValid(R, p));
+    if (aiPending.length) items.push({text: `有 ${aiPending.length} 个字段来自 AI，尚未逐项核对；可在 AI 助手中查看并确认`, path: aiPending[0]});
     if (tpl) items.push({ text: `有 ${tpl} 个字段来自教学模板，尚未核对`, path: Object.keys(fs).find(p => CORE.fieldState(R, p).source === 'template' && !CORE.fieldReviewValid(R, p)) });
     if (peDefault) items.push({ text: `有 ${peDefault} 项查体使用系统默认描述，尚未确认：` + pePending.slice(0, 3).map(x => `${x.label}「${x.text}」`).join('；'), path: pePending[0].path });
     stale.forEach(s => items.push({ text: `${s.label}已过期：原始资料变过，当前文字未更新`, path: s.path }));
@@ -3963,6 +3965,22 @@ const APP = (() => {
 
   return {
     init, getRecord: () => R, STEPS,
+    async applyAI(request, result, selected, allowReplace, model) {
+      if (currentSaveBlocked || listSaveBlocked || remoteConflict) throw Error('请先处理页面上的保存异常或修订冲突');
+      const next = AI_CORE.apply(R, request, result, selected, allowReplace, model);
+      snapshot('采纳 AI 建议');
+      R = next;
+      const saved = await saveCurrentAwait();
+      render();
+      return {saved, count: selected.length};
+    },
+    reviewAI(path) {
+      if (!Object.prototype.hasOwnProperty.call(AI_CORE.fields, path) || CORE.fieldState(R, path).source !== 'ai') return false;
+      CORE.markFieldReviewed(R, path, 'ai');
+      if (path === 'summary') CORE.markDocumentReviewed(R, 'summary');
+      saveCurrent(); render(); return true;
+    },
+    undoAI: undoLast,
     // 供测试使用
     _test: {
       saveToLibrary,

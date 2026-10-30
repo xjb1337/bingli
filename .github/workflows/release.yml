@@ -29,7 +29,7 @@ jobs:
           node-version: '22'
       - run: npm run verify
       - run: chmod +x android/gradlew
-      - run: cd android && ./gradlew testDebugUnitTest lintDebug assembleDebug --stacktrace
+      - run: cd android && ./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest --stacktrace
 
   release:
     name: Build signed release and publish

@@ -35,6 +35,8 @@ function main() {
   const generator = stripModule(read('generator.js'));
   const hints = stripModule(read('hints.js'));
   const app = read('app.js');
+  const aiCore = stripModule(read('ai-core.js'));
+  const ai = read('ai.js');
   const css = read('style.css');
   const html = read('index.html');
 
@@ -48,7 +50,9 @@ function main() {
     .replace('/*__DEPTH__*/', () => depth)
     .replace('/*__GENERATOR__*/', () => generator)
     .replace('/*__HINTS__*/', () => hints)
-    .replace('/*__APP__*/', () => app);
+    .replace('/*__APP__*/', () => app)
+    .replace('/*__AI_CORE__*/', () => aiCore)
+    .replace('/*__AI__*/', () => ai);
 
   if (!fs.existsSync(OUT_DIR)) fs.mkdirSync(OUT_DIR, { recursive: true });
   fs.writeFileSync(OUT, out, 'utf8');

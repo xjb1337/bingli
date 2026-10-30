@@ -39,7 +39,9 @@ const MODULES = [
   ['templates.js', 'TEMPLATES'],
   ['depth.js', 'DEPTH'],
   ['generator.js', 'GENERATOR'],
-  ['hints.js', 'HINTS']
+  ['hints.js', 'HINTS'],
+  ['ai-core.js', 'AI_CORE'],
+  ['ai.js', 'AI_ASSIST']
 ];
 
 for (const [file, globalName] of MODULES) {

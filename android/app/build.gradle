@@ -1,11 +1,14 @@
 plugins { id 'com.android.application' }
 android {
+    useLibrary 'android.test.runner'
+    useLibrary 'android.test.base'
     namespace 'com.xjb.bingli'
     compileSdk 35
     defaultConfig {
         applicationId 'com.xjb.bingli'
         minSdk 26
         targetSdk 35
+        testInstrumentationRunner 'android.test.InstrumentationTestRunner'
         versionCode = (project.findProperty('versionCode') ?: '300000').toInteger()
         versionName = (project.findProperty('versionName') ?: '3.0.0')
         buildConfigField 'String', 'UPDATE_REPOSITORY', '"xjb1337/bingli"'

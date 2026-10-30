@@ -2015,3 +2015,29 @@ footer .btn:disabled { opacity: .6; }
   .pe-group > summary, .ros-group > summary { background: var(--surface-soft); }
   .stepbar { background: var(--surface); }
 }
+
+/* DeepSeek assistant: constrained sheet, native key settings, readable comparisons. */
+.footer-meta { flex-wrap: wrap; gap: 4px 8px; }
+.ai-mask { position: fixed; inset: 0; z-index: 3000; background: rgba(15,38,31,.5); display: flex; align-items: flex-end; justify-content: center; }
+.ai-sheet { box-sizing: border-box; width: min(100%, 760px); max-height: 92dvh; max-height: 92vh; overflow-y: auto; overscroll-behavior: contain; padding: 22px 20px max(24px, env(safe-area-inset-bottom)); border-radius: 24px 24px 0 0; color: var(--gray-6); background: var(--surface, #fff); box-shadow: 0 -8px 40px #102f2420; }
+.ai-heading, .ai-settings-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ai-heading { position: sticky; top: -22px; z-index: 2; background: var(--surface, #fff); padding: 10px 0; }
+.ai-heading h2 { margin: 3px 0 10px; font-size: 22px; }
+.ai-eyebrow { color: var(--blue); font-size: 10px; letter-spacing: 1px; }
+.ai-note { padding: 12px; background: var(--blue-bg, #edf5ed); border-radius: 12px; line-height: 1.65; }
+.ai-settings-row { margin: 12px 0 18px; flex-wrap: wrap; font-size: 12px; }
+.ai-sheet label { display: block; margin: 12px 0 7px; }
+.ai-sheet select, .ai-sheet textarea { box-sizing: border-box; width: 100%; min-height: 44px; background: var(--surface, #fff); color: inherit; border: 1px solid var(--line); border-radius: 10px; padding: 11px; font: inherit; }
+.ai-sheet textarea { min-height: 120px; resize: vertical; }
+.ai-sheet .ai-check { display: flex; align-items: flex-start; gap: 9px; line-height: 1.6; padding: 6px 0; }
+.ai-check input { width: 20px; height: 20px; flex: 0 0 20px; margin: 2px 0; accent-color: var(--blue); }
+.ai-source, .ai-suggestion, .ai-review { border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin: 12px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ai-source { max-height: 260px; overflow-y: auto; font: inherit; font-size: 13px; }
+.ai-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.ai-compare p, .ai-review p { line-height: 1.7; white-space: pre-wrap; }
+.ai-compare small { color: var(--text-soft); }
+.ai-suggestion blockquote { margin: 10px 0; border-left: 3px solid var(--blue); padding-left: 12px; font-size: 13px; }
+.ai-sheet button { min-height: 44px; }
+.ai-sheet [hidden] { display: none !important; }
+#aiStatus { line-height: 1.65; overflow-wrap: anywhere; }
+@media (max-width: 480px) { .ai-compare { grid-template-columns: 1fr; } .ai-sheet { padding-left: 16px; padding-right: 16px; } .footer-meta .workspace-label { font-size: 9px; } }

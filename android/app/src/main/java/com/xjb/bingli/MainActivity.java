@@ -15,9 +15,13 @@ public class MainActivity extends Activity {
     private ValueCallback<Uri[]> chooser;
     private String exportText;
     private UpdateManager updater;
+    private AIKeyStore aiKeys;
+    private DeepSeekClient aiClient;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        aiKeys = new AIKeyStore(this);
+        aiClient = new DeepSeekClient();
         LinearLayout root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL);
         root.setOnApplyWindowInsetsListener((v, insets) -> {
             v.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
@@ -68,6 +72,22 @@ public class MainActivity extends Activity {
     }
 
     public final class Bridge {
+        @JavascriptInterface public String aiStatus() {
+            try { return new org.json.JSONObject().put("configured", aiKeys.hasKey()).put("model", aiKeys.model()).toString(); }
+            catch (Exception e) { return "{\"configured\":false}"; }
+        }
+        @JavascriptInterface public void aiSettings() { runOnUiThread(() -> AISettings.show(MainActivity.this, aiKeys, aiClient)); }
+        @JavascriptInterface public void aiCancel(String id) { aiClient.cancel(id); }
+        @JavascriptInterface public void aiRequest(String id, String payload) {
+            try {
+                if (payload == null || payload.length() > 65000) throw new IllegalArgumentException();
+                org.json.JSONObject p = new org.json.JSONObject(payload);
+                boolean accepted = aiClient.request(id, aiKeys.read(), aiKeys.model(), p.getString("system"), p.getString("user"), MainActivity.this::aiResult);
+                if (!accepted) aiResult(id, new org.json.JSONObject().put("ok", false).put("error", "已有请求进行中或参数无效，请稍后重试"));
+            } catch (Exception e) {
+                try { aiResult(id, new org.json.JSONObject().put("ok", false).put("error", "无法读取 AI 设置，请重新保存密钥")); } catch (Exception ignored) { }
+            }
+        }
         @JavascriptInterface public String versionName() { return BuildConfig.VERSION_NAME; }
         @JavascriptInterface public void checkUpdates() { runOnUiThread(() -> updater.check(true)); }
         @JavascriptInterface public void copy(String text) {
@@ -84,6 +104,12 @@ public class MainActivity extends Activity {
                 try { startActivityForResult(intent, 42); } catch (ActivityNotFoundException e) { exportText=null; }
             });
         }
+    }
+    private void aiResult(String id, org.json.JSONObject result) {
+        runOnUiThread(() -> {
+            if (web == null || isFinishing() || isDestroyed()) return;
+            web.evaluateJavascript("if(typeof AI_ASSIST!=='undefined') AI_ASSIST.receive(" + org.json.JSONObject.quote(id) + "," + result.toString() + ")", null);
+        });
     }
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request,result,data);
@@ -106,6 +132,7 @@ public class MainActivity extends Activity {
         super.onPause();
     }
     @Override protected void onDestroy() {
+        if (aiClient != null) aiClient.close();
         if (updater != null) updater.close();
         if (chooser != null) { chooser.onReceiveValue(null); chooser = null; }
         if (web != null) {
@@ -120,8 +147,10 @@ public class MainActivity extends Activity {
         super.onDestroy();
     }
     @Override public void onBackPressed() {
-        web.evaluateJavascript("if(typeof APP!=='undefined') APP._test.saveCurrentAwait()",null);
-        new AlertDialog.Builder(this).setMessage("退出大病历？请确认页面没有保存失败提示。")
-            .setPositiveButton("退出",(d,w)->finish()).setNegativeButton("继续填写",null).show();
+        web.evaluateJavascript("(()=>{if(typeof AI_ASSIST!=='undefined'&&AI_ASSIST.isOpen()){AI_ASSIST.close();return true;}if(typeof APP!=='undefined')APP._test.saveCurrentAwait();return false;})()", value -> {
+            if ("true".equals(value) || isFinishing() || isDestroyed()) return;
+            new AlertDialog.Builder(this).setMessage("退出大病历？请确认页面没有保存失败提示。")
+                .setPositiveButton("退出",(d,w)->finish()).setNegativeButton("继续填写",null).show();
+        });
     }
 }
