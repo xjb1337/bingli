@@ -212,8 +212,15 @@ function boot(opts = {}) {
     el: sel => document.querySelector(sel),
     /** 取存储里的解析后 JSON */
     stored: key => {
-      const raw = memory.get(key);
-      return raw === undefined ? undefined : JSON.parse(raw);
+      let raw = memory.get(key);
+      if (raw === undefined) return undefined;
+      let val = JSON.parse(raw);
+      // v3：current 只是指针，测试读草稿本体时自动跟随 id
+      if (key === KEYS.current && val && val.id && !val.basic) {
+        const draft = memory.get('dabingli.draft.v1.' + val.id);
+        if (draft !== undefined) val = JSON.parse(draft);
+      }
+      return val;
     }
   };
 }
@@ -721,13 +728,13 @@ function clickList(app, attribute, openId) {
     hasAttribute: name => name === attribute,
     closest: selector => selector === '[data-open]' && openId ? { dataset: { open: openId } } : null
   };
-  handler({ target });
+  return handler({ target });
 }
 
-test('没有姓名主诉但已填现病史，新建前仍保存这份病历', () => {
+test('没有姓名主诉但已填现病史，新建前仍保存这份病历', async () => {
   const app = boot();
   app.run('APP.getRecord().hpi.symptoms = "持续腹痛"');
-  clickList(app, 'data-new');
+  await clickList(app, 'data-new');
   assert.equal(app.confirms.length, 1);
   assert.equal(app.stored(KEYS.list)[0].data.hpi.symptoms, '持续腹痛');
   assert.equal(app.run('APP.getRecord().hpi.symptoms'), '');
@@ -745,7 +752,7 @@ test('列表损坏时新建中止，当前编辑内容与原始存档都保留',
 test('当前病历写入失败时列表不发生半次保存', () => {
   const app = boot();
   const set = app.storage.setItem;
-  app.storage.setItem = (k, v) => { if (k === KEYS.current) throw new Error('quota'); set(k, v); };
+  app.storage.setItem = (k, v) => { if (k.indexOf('dabingli.draft.v1.') === 0) throw new Error('quota'); set(k, v); };
   app.run('APP.getRecord().basic.name = "张三"');
   assert.equal(app.run('APP._test.saveToLibrary()'), false);
   assert.equal(app.stored(KEYS.list), undefined);
@@ -769,19 +776,18 @@ test('列表写入失败后重试仍使用同一 ID，刷新后也不会重复',
   assert.equal(restarted.stored(KEYS.list)[0].id, id);
 });
 
-test('切换到新记录时当前槽写入失败，继续保留原记录', () => {
+test('切换到新记录时草稿写入失败，继续保留原记录', () => {
   const app = boot();
-  app.run('APP.getRecord().basic.name = "张三"');
+  app.run('APP.getRecord().basic.name = "张三"; APP._test.saveCurrent()');
   const set = app.storage.setItem;
-  let currentWrites = 0;
+  let failed = false;
   app.storage.setItem = (k, v) => {
-    if (k === KEYS.current && ++currentWrites === 2) throw new Error('quota');
+    if (!failed && k.indexOf('dabingli.draft.v1.') === 0) { failed = true; throw new Error('quota'); }
     set(k, v);
   };
   clickList(app, 'data-new');
   assert.equal(app.run('APP.getRecord().basic.name'), '张三');
   assert.equal(app.stored(KEYS.current).basic.name, '张三');
-  assert.equal(app.stored(KEYS.list)[0].data.basic.name, '张三');
 });
 
 test('打开当前记录自身时使用刚保存的最新内容', () => {

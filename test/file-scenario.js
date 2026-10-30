@@ -143,9 +143,11 @@ async function main() {
   const longText = '发热'.repeat(200);
   const ok = await ev(`(() => {
     try {
-      const store = JSON.parse(localStorage.getItem('dabingli.current.v1'));
+      const cur = JSON.parse(localStorage.getItem('dabingli.current.v1'));
+      const key = cur && cur.id ? 'dabingli.draft.v1.' + cur.id : 'dabingli.current.v1';
+      const store = cur && cur.id ? JSON.parse(localStorage.getItem(key)) : cur;
       store.basic.chiefComplaint = ${JSON.stringify(longText)};
-      localStorage.setItem('dabingli.current.v1', JSON.stringify(store));
+      localStorage.setItem(key, JSON.stringify(store));
       return 'set';
     } catch(e) { return 'ERR:' + e.message; }
   })()`);
