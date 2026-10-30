@@ -111,11 +111,14 @@ final class UpdateManager {
         activity.startActivity(new Intent(Intent.ACTION_VIEW).setDataAndType(uri,"application/vnd.android.package-archive").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION));
     }
     @SuppressWarnings("deprecation") private PackageInfo info(String path) throws Exception {
-        PackageManager pm=activity.getPackageManager(); int flags=Build.VERSION.SDK_INT>=28?PackageManager.GET_SIGNING_CERTIFICATES:PackageManager.GET_SIGNATURES;
+        PackageManager pm=activity.getPackageManager(); int flags=PackageManager.GET_SIGNATURES | (Build.VERSION.SDK_INT>=28?PackageManager.GET_SIGNING_CERTIFICATES:0);
         return path==null?pm.getPackageInfo(BuildConfig.APPLICATION_ID,flags):pm.getPackageArchiveInfo(path,flags);
     }
     @SuppressWarnings("deprecation") private String cert(PackageInfo p) throws Exception {
-        android.content.pm.Signature[] signatures=Build.VERSION.SDK_INT>=28?p.signingInfo.getApkContentsSigners():p.signatures;
+        // Some Android 9 archive parsers omit SigningInfo but expose the legacy signer.
+        if(p==null) throw new IOException("无法读取 APK 签名信息");
+        android.content.pm.Signature[] signatures=Build.VERSION.SDK_INT>=28 && p.signingInfo!=null
+            ?p.signingInfo.getApkContentsSigners():p.signatures;
         if(signatures==null || signatures.length!=1) throw new IOException("无法确认唯一签名证书");
         return hex(MessageDigest.getInstance("SHA-256").digest(signatures[0].toByteArray()));
     }
