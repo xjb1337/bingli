@@ -18,9 +18,16 @@ const RECORD_CORE = (() => {
   /** 存储键：v1 起沿用，升级不改变键名 */
   const STORAGE_KEYS = {
     list: 'dabingli.records.v1',
+    // current 只存「上次打开的病历 id」指针；草稿本体按 id 分开存，
+    // 这样两个标签页编辑不同病历时不会互相覆盖同一个槽位。
     current: 'dabingli.current.v1',
+    draftPrefix: 'dabingli.draft.v1.',
     settings: 'dabingli.settings.v1'
   };
+
+  function draftKey(id) {
+    return STORAGE_KEYS.draftPrefix + String(id || '');
+  }
 
   const fail = msg => { throw new Error(msg); };
   const isObject = x => !!x && typeof x === 'object' && !Array.isArray(x);
@@ -809,6 +816,26 @@ const RECORD_CORE = (() => {
     return { list: out, id };
   }
 
+  /**
+   * 列表写入前合并：以 id 为键，修订号大者优先，其次 updatedAt 较新者。
+   * 两个标签页编辑不同病历同时保存时，不会把对方刚写入的记录挤掉。
+   */
+  function mergeListForWrite(stored, local) {
+    const map = new Map();
+    const put = item => {
+      if (!item || !item.id) return;
+      const prev = map.get(item.id);
+      if (!prev) { map.set(item.id, item); return; }
+      const pr = Number(prev.data && prev.data.meta && prev.data.meta.revision) || 0;
+      const nr = Number(item.data && item.data.meta && item.data.meta.revision) || 0;
+      if (nr > pr) { map.set(item.id, item); return; }
+      if (nr === pr && String(item.updatedAt || '') > String(prev.updatedAt || '')) map.set(item.id, item);
+    };
+    (Array.isArray(stored) ? stored : []).forEach(put);
+    (Array.isArray(local) ? local : []).forEach(put);
+    return Array.from(map.values()).sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
+  }
+
   function removeRecord(list, id) {
     return (Array.isArray(list) ? list : []).filter(x => x && x.id !== id);
   }
@@ -1046,25 +1073,54 @@ const RECORD_CORE = (() => {
    * 早先只用 ok 一个布尔值，调用方分不清「没有存档」和「存档坏了」，
    * 于是空白病历被当成正常的空存档保存，把损坏的原文整个覆盖掉。
    */
-  function loadCurrent(storage, emptyRecord, validDeptKeys) {
+  function loadCurrent(storage, emptyRecord, validDeptKeys, preferredId) {
     const got = readRaw(storage, STORAGE_KEYS.current);
     if (!got.ok) {
-      return { ok: false, record: null, error: true, raw: '', reason: '无法读取浏览器存储：' + got.error };
+      return { ok: false, record: null, error: true, reason: '无法读取浏览器存储：' + got.error };
     }
-    if (got.missing) return { ok: true, record: null, fresh: true };
-    const rawText = got.raw;
-    let parsed;
-    try {
-      parsed = JSON.parse(rawText);
-    } catch (e) {
-      return { ok: false, record: null, corrupt: true, raw: rawText, reason: '正在编辑的病历存档已损坏' };
+    let pointer = null;
+    if (!got.missing) {
+      try {
+        pointer = JSON.parse(got.raw);
+      } catch (e) {
+        return { ok: false, record: null, corrupt: true, raw: got.raw, reason: '正在编辑的病历存档已损坏' };
+      }
     }
+
+    // 旧版 current 槽直接存整份病历：迁移到按 id 的草稿键，再按新格式读。
+    if (isObject(pointer) && isObject(pointer.basic)) {
+      const legacyRaw = got.raw;
+      let migrated;
+      try {
+        migrated = normalizeRecord(pointer, emptyRecord, validDeptKeys);
+      } catch (e) {
+        return { ok: false, record: null, corrupt: true, raw: legacyRaw, reason: e.message };
+      }
+      if (!migrated.id) migrated.id = uid();
+      if (!isObject(migrated.meta)) migrated.meta = {};
+      if (!Number.isFinite(Number(migrated.meta.revision))) migrated.meta.revision = 0;
+      const draft = saveCurrent(storage, migrated, migrated.meta.revision);
+      if (!draft.ok) {
+        return { ok: false, record: null, corrupt: true, raw: legacyRaw, reason: '旧存档迁移失败：' + (draft.reason || '无法写入') };
+      }
+      return { ok: true, record: draft.record, migrated: true };
+    }
+
+    const id = String(preferredId || (isObject(pointer) ? pointer.id : pointer) || '').trim();
+    if (!id) return { ok: true, record: null, fresh: true };
+
+    const dgot = readRaw(storage, draftKey(id));
+    if (!dgot.ok) {
+      return { ok: false, record: null, error: true, reason: '无法读取浏览器存储：' + dgot.error };
+    }
+    if (dgot.missing) return { ok: true, record: null, fresh: true, missingDraft: true };
     try {
-      return { ok: true, record: normalizeRecord(parsed, emptyRecord, validDeptKeys) };
+      return { ok: true, record: normalizeRecord(JSON.parse(dgot.raw), emptyRecord, validDeptKeys) };
     } catch (e) {
-      return { ok: false, record: null, corrupt: true, raw: rawText, reason: e.message };
+      return { ok: false, record: null, corrupt: true, raw: dgot.raw, reason: e.message };
     }
   }
+
 
   function loadSettings(storage) {
     const got = readRaw(storage, STORAGE_KEYS.settings);
@@ -1077,12 +1133,18 @@ const RECORD_CORE = (() => {
   }
 
   /**
-   * 保存当前病历，带修订号检查。
-   * 其他标签页已经写入更新的修订号时返回 conflict，调用方不得覆盖。
+   * 保存当前病历草稿，带修订号检查。
+   *
+   * 每份病历写入自己的 `dabingli.draft.v1.<id>`，不同病历互不覆盖；
+   * `dabingli.current.v1` 只是「上次打开哪一份」的指针。
+   * 同一份病历的并发写入由调用方的跨标签页锁（app.js）串行化，
+   * 锁内仍用这里的修订号做第二道检查。
    */
   function saveCurrent(storage, record, expectedRevision) {
     if (!isObject(record)) return { ok: false, error: true, reason: '病历内容无效' };
-    const got = readRaw(storage, STORAGE_KEYS.current);
+    if (!record.id) record.id = uid();
+    const key = draftKey(record.id);
+    const got = readRaw(storage, key);
     if (!got.ok) return { ok: false, error: true, reason: '无法读取当前存档：' + got.error };
     let existing = null;
     if (!got.missing) {
@@ -1095,7 +1157,7 @@ const RECORD_CORE = (() => {
     const remoteRev = Number(existing && existing.meta && existing.meta.revision) || 0;
     const expect = expectedRevision === undefined || expectedRevision === null
       ? null : Number(expectedRevision);
-    if (existing && expect !== null && existing.id && record.id && existing.id === record.id && remoteRev !== expect) {
+    if (existing && expect !== null && remoteRev !== expect) {
       return {
         ok: false, conflict: true, remote: existing, remoteRevision: remoteRev,
         reason: '其他页面已保存新版本'
@@ -1107,9 +1169,25 @@ const RECORD_CORE = (() => {
     next.schemaVersion = SCHEMA_VERSION;
     next.meta.revision = Math.max(remoteRev, Number(next.meta.revision) || 0) + 1;
     next.meta.updatedAt = now;
-    const wrote = writeRaw(storage, STORAGE_KEYS.current, JSON.stringify(next));
+    const wrote = writeRaw(storage, key, JSON.stringify(next));
     if (!wrote.ok) return { ok: false, error: true, reason: '保存失败：' + wrote.error };
+    // 指针写失败不影响草稿本身；下次仍可按 sessionStorage 里的 id 找回。
+    writeRaw(storage, STORAGE_KEYS.current, JSON.stringify({ id: next.id, at: now }));
     return { ok: true, record: next, revision: next.meta.revision };
+  }
+
+  /** 当前内存记录与已落盘草稿内容是否一致（忽略修订号/时间戳） */
+  function draftMatches(storage, record) {
+    if (!isObject(record) || !record.id) return false;
+    const got = readRaw(storage, draftKey(record.id));
+    if (!got.ok || got.missing) return false;
+    try {
+      const existing = JSON.parse(got.raw);
+      const strip = r => { const c = cloneValue(r); delete c.meta; return c; };
+      return stableStringify(strip(existing)) === stableStringify(strip(record));
+    } catch (e) {
+      return false;
+    }
   }
 
   function saveList(storage, list) {
@@ -1173,11 +1251,11 @@ const RECORD_CORE = (() => {
     markDocumentGenerated, markDocumentManual, markDocumentReviewed,
     marriageValue, marriageConflict, resolveMarriage,
     normalizeRecord, lookLikeRecord,
-    uid, summarize, sortByUpdated, upsertRecord, removeRecord, findRecord,
+    uid, summarize, sortByUpdated, upsertRecord, removeRecord, findRecord, mergeListForWrite,
     buildExport, parseImport, mergeImport, replaceImport,
     normalizeSettings,
     memoryStorage, safeSet, safeGetJSON,
-    readRaw, writeRaw, loadList, loadCurrent, loadSettings,
+    readRaw, writeRaw, loadList, loadCurrent, loadSettings, draftKey, draftMatches,
     saveCurrent, saveList, saveSettings, createHistory
   };
 
