@@ -845,3 +845,119 @@ test('用户拒绝填入生命体征示例值时不写入数字', () => {
   assert.match(app.confirms[0], /示例数值/);
   assert.equal(app.run('Object.keys(APP.getRecord().pe.vitals).length'), 0);
 });
+
+/* ======================= v3 文书状态与核对流程 ======================= */
+
+function clickAct(app, act, extra = {}) {
+  const target = { dataset: Object.assign({ act }, extra), closest() { return this; } };
+  app.document._listeners.get('doc::click')[0]({ target });
+}
+
+test('生成摘要后改现病史，界面显示需更新并给出最新草稿', () => {
+  const app = boot();
+  app.run('const r = APP.getRecord(); r.basic.name = "张三"; r.basic.gender = "男"; r.basic.age = "58"; r.hpi.symptoms = "咳嗽3天"; APP._test.gotoStep("summary")');
+  clickAct(app, 'draftSummary');
+  const before = app.run('APP.getRecord().summary');
+  assert.ok(before.includes('咳嗽3天'));
+  app.run('APP.getRecord().hpi.symptoms = "咳嗽5天，伴发热"; APP._test.gotoStep("summary")');
+  const html = app.document.querySelector('#content').innerHTML;
+  assert.match(html, /需更新/);
+  assert.match(html, /咳嗽5天/);
+  assert.match(html, /现病史/);
+});
+
+test('采用新草稿后可撤销，恢复更新前的摘要', () => {
+  const app = boot();
+  app.run('const r = APP.getRecord(); r.basic.name = "张三"; r.basic.gender = "男"; r.basic.age = "58"; r.hpi.symptoms = "咳嗽3天"; APP._test.gotoStep("summary")');
+  clickAct(app, 'draftSummary');
+  const oldText = app.run('APP.getRecord().summary');
+  app.run('APP.getRecord().hpi.symptoms = "咳嗽5天"; APP._test.gotoStep("summary")');
+  clickAct(app, 'updateSummary');
+  assert.ok(app.run('APP.getRecord().summary').includes('咳嗽5天'));
+  clickAct(app, 'undoDoc');
+  assert.equal(app.run('APP.getRecord().summary'), oldText);
+});
+
+test('人工核对摘要后改资料，核对状态失效', () => {
+  const app = boot();
+  app.run('const r = APP.getRecord(); r.basic.name = "张三"; r.basic.gender = "男"; r.basic.age = "58"; r.hpi.symptoms = "咳嗽3天"; APP._test.gotoStep("summary")');
+  clickAct(app, 'draftSummary');
+  clickAct(app, 'keepSummary');
+  assert.equal(app.run('RECORD_CORE.documentState(APP.getRecord(),"summary").state'), 'reviewed');
+  app.run('APP.getRecord().hpi.symptoms = "咳嗽5天"');
+  assert.equal(app.run('RECORD_CORE.documentState(APP.getRecord(),"summary").state'), 'reviewed-stale');
+});
+
+test('出院诊断留空时不自动采用初步诊断', () => {
+  const app = boot();
+  app.run('const r = APP.getRecord(); r.basic.name = "张三"; r.diagnosis.confirmed = ["肺炎？"]; APP._test.gotoStep("summary")');
+  const html = app.document.querySelector('#content').innerHTML;
+  assert.match(html, /尚未填写出院诊断/);
+  assert.match(html, /不会自动沿用初步诊断/);
+  assert.equal(app.run('APP.getRecord().discharge.diagnoses.length'), 0);
+});
+
+test('从初步诊断带入出院诊断保留不确定性且需单独确认', () => {
+  const app = boot();
+  app.run('const r = APP.getRecord(); r.basic.name = "张三"; r.diagnosis.confirmed = ["肺炎？"]; APP._test.gotoStep("summary")');
+  clickAct(app, 'importDischargeDx');
+  assert.equal(app.run('JSON.stringify(APP.getRecord().discharge.diagnoses)'), '["肺炎？"]');
+  assert.equal(app.run('APP.getRecord().discharge.diagnosesConfirmed'), false);
+  assert.match(app.confirms[0], /肺炎？/);
+});
+
+test('勾选未填写的查体项可确认实际输出文字，改字后失效', () => {
+  const app = boot();
+  app.run('const r = APP.getRecord(); r.pe.checked["general"] = r.pe.checked["general"] || {}; r.pe.checked["general"].face = true; APP._test.gotoStep("pe")');
+  const path = 'pe.general.face';
+  clickAct(app, 'confirmPe', { path });
+  assert.equal(app.run('RECORD_CORE.fieldState(APP.getRecord(),"pe.general.face").reviewed'), true);
+  assert.equal(app.run('RECORD_CORE.fieldReviewValid(APP.getRecord(),"pe.general.face","面容自然")'), true);
+  app.run('APP.getRecord().pe.general.face = "面容苍白"');
+  assert.equal(app.run('RECORD_CORE.fieldReviewValid(APP.getRecord(),"pe.general.face","面容苍白")'), false);
+});
+
+test('教学模板的患者录入模式不写入任何患者事实', () => {
+  const app = boot();
+  const before = app.run('JSON.stringify(APP.getRecord())');
+  app.run('APP._test.applyTemplate("cap", "patient")');
+  assert.equal(app.run('JSON.stringify(APP.getRecord())'), before);
+  assert.ok(app.document.body.children.some(node => node.innerHTML.includes('没有写入任何患者事实')));
+});
+
+test('病历列表用统一年龄显示，不出现「日龄岁」', () => {
+  const app = boot();
+  app.run('const r = APP.getRecord(); r.basic.name = "新生儿"; r.basic.age = "14日龄"; APP._test.saveToLibrary(); APP._test.openList()');
+  const html = app.document.body.children.map(n => n.innerHTML).join('');
+  assert.doesNotMatch(html, /日龄岁/);
+  assert.match(html, /14日龄/);
+});
+
+test('输出前核对列出未确认的默认查体文字', () => {
+  const app = boot();
+  app.run('const r = APP.getRecord(); r.pe.checked["general"] = r.pe.checked["general"] || {}; r.pe.checked["general"].face = true; APP._test.gotoStep("output")');
+  const html = app.document.querySelector('#content').innerHTML;
+  assert.match(html, /尚未确认/);
+  assert.match(html, /面容自然/);
+});
+
+test('A10 婚姻状态两个入口读写同一个字段', () => {
+  const app = boot();
+  app.run('APP.getRecord().basic.marital = "已婚"; APP._test.gotoStep("marriage")');
+  const html = app.document.querySelector('#content').innerHTML;
+  assert.match(html, /data-seg="basic\.marital"/);
+  assert.doesNotMatch(html, /data-seg="marriage\.status"/);
+});
+
+test('A10 旧存档婚姻冲突保留两个原值，选择后统一', () => {
+  const app = boot();
+  app.run('const r = APP.getRecord(); r.basic.marital = "已婚"; r.marriage.status = "离异"; r.meta.conflicts.marriage = { basicValue: "已婚", marriageValue: "离异", resolved: false, chosen: "" }; APP._test.gotoStep("marriage")');
+  const html = app.document.querySelector('#content').innerHTML;
+  assert.match(html, /两处不同的值/);
+  assert.match(html, /已婚/);
+  assert.match(html, /离异/);
+  clickAct(app, 'resolveMarriage', { value: '离异' });
+  assert.equal(app.run('APP.getRecord().basic.marital'), '离异');
+  assert.equal(app.run('APP.getRecord().marriage.status'), '');
+  assert.equal(app.run('RECORD_CORE.marriageConflict(APP.getRecord())'), null);
+});

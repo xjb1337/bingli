@@ -1763,6 +1763,62 @@ footer .btn:disabled {
   background: var(--score-warn-bg);
 }
 
+/* ===================== 文书状态 / 核对 / 差异（v3） ===================== */
+.doc-state {
+  margin: 8px 0 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--bg-soft, #f8f9fb);
+  font-size: calc(13px * var(--fs-scale));
+}
+.doc-state-title { font-weight: 600; line-height: 1.5; }
+.doc-state-stale { border-color: #f0c36d; background: #fff8e6; }
+.doc-state-ok { border-color: #b7dfc2; background: #f1faf3; }
+.doc-state-manual { border-color: #b9d4f5; background: #f2f7fe; }
+.doc-state-muted { color: var(--text-soft, #666); }
+.doc-state-btns { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.doc-diff { margin-top: 6px; }
+.doc-diff-label { font-size: calc(12px * var(--fs-scale)); color: var(--text-soft, #666); margin-top: 4px; }
+.doc-pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 2px 0 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: #fff;
+  border: 1px solid var(--line);
+  font-family: inherit;
+  font-size: calc(13px * var(--fs-scale));
+  max-height: 220px;
+  overflow: auto;
+}
+.tag-review, .tag-review-btn { margin-left: 4px; }
+.tag-review-btn { cursor: pointer; }
+.warn-error { border-left-color: var(--red); }
+.outline-list { margin: 4px 0 10px 18px; padding: 0; }
+.outline-list li { margin: 2px 0; line-height: 1.5; }
+.tpl-item-group {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  background: #fff;
+}
+.app-ver {
+  display: block;
+  width: 100%;
+  text-align: center;
+  font-size: calc(11px * var(--fs-scale));
+  color: var(--text-soft, #888);
+  margin-top: 6px;
+}
+@media (max-width: 480px) {
+  .doc-state-btns .btn { flex: 1 1 auto; }
+  .doc-pre { max-height: 40vh; }
+  .outline-list { margin-left: 14px; }
+}
+
 </style>
 </head>
 <body>
@@ -1787,8 +1843,348 @@ footer .btn:disabled {
 <footer>
   <button class="btn btn-ghost" id="btnPrev">上一步</button>
   <button class="btn" id="btnNext">下一步</button>
+  <span class="app-ver" id="appVer"></span>
 </footer>
 
+<script>
+/* ===========================================================================
+ * 年龄解析与换算 —— 界面、生成器、诊断提示共用同一套口径
+ *
+ * 解决的问题（旧实现散落在 generator / hints / app 三处正则里）：
+ *   - 列表页把「14日龄」再拼一个「岁」，显示成「14日龄岁」
+ *   - 出生日期 + 入院日期能算年龄，但生成时只看手填的 age
+ *   - 儿科/成人判断各写一套 parseInt，月龄、日龄被当成 0 岁或 14 岁
+ *   - 电脑当天日期变化会让同一个病历的年龄漂移
+ *
+ * 本文件零依赖、不读写存储、不碰 DOM，可以在 node:test 里直接测。
+ * =========================================================================== */
+
+const AGE = (() => {
+  'use strict';
+
+  const DAY_MS = 24 * 60 * 60 * 1000;
+
+  const CN_DIGITS = { 零: 0, 〇: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+  const CN_UNITS = { 十: 10, 百: 100, 千: 1000 };
+
+  /** 中文数字（一 ~ 九百九十九）转数值；认不出返回 NaN */
+  function cnToNumber(text) {
+    const s = String(text || '').trim();
+    if (!s) return NaN;
+    if (/^\d+(?:\.\d+)?$/.test(s)) return Number(s);
+    let total = 0;
+    let section = 0;
+    let number = 0;
+    let seen = false;
+    for (const ch of s) {
+      if (ch in CN_DIGITS) {
+        number = CN_DIGITS[ch];
+        seen = true;
+      } else if (ch in CN_UNITS) {
+        const unit = CN_UNITS[ch];
+        if (number === 0 && unit === 10) number = 1; // 十五 → 15
+        section += number * unit;
+        number = 0;
+        seen = true;
+      } else if (ch === '零' || ch === '〇') {
+        seen = true;
+      } else {
+        return NaN;
+      }
+    }
+    if (!seen) return NaN;
+    total += section + number;
+    return total;
+  }
+
+  function toHalfWidth(text) {
+    return String(text == null ? '' : text)
+      .replace(/[\uFF10-\uFF19]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
+      .replace(/\u3000/g, ' ');
+  }
+
+  /** 去掉数值尾部的小数点/零，用于展示 */
+  function trimNumber(n) {
+    if (!Number.isFinite(n)) return '';
+    return String(Math.round(n * 100) / 100);
+  }
+
+  /**
+   * 解析年龄文本。支持：
+   *   65 / 65岁 / 65周岁 / 六十五岁
+   *   7月 / 7个月 / 7月龄 / 六个月
+   *   14天 / 14日 / 14日龄
+   *   3周 / 3星期
+   *   1岁3月 / 1岁3个月 / 1岁半
+   * @returns {{ok:boolean, kind:'years'|'months'|'days'|'weeks'|'ym'|'none',
+   *            value:number, years:number, months:number, days:number,
+   *            totalDays:number, text:string, raw:string, reason:string}}
+   */
+  function parseAge(input) {
+    const raw = toHalfWidth(input).trim();
+    const empty = { ok: false, kind: 'none', value: NaN, years: NaN, months: NaN, days: NaN, totalDays: NaN, text: '', raw, reason: 'empty' };
+    if (!raw) return empty;
+
+    const clean = raw.replace(/\s+/g, '').replace(/。$/, '');
+
+    // 1岁3个月 / 1岁半 / 1岁3月
+    let m = clean.match(/^(.+?)岁(半|(.+?)(?:个)?月)?$/);
+    if (m) {
+      const y = cnToNumber(m[1]);
+      if (!Number.isFinite(y) || y < 0) return { ...empty, ok: false, reason: 'invalid' };
+      let extraMonths = 0;
+      if (m[2] === '半') extraMonths = 6;
+      else if (m[3] !== undefined) {
+        const mm = cnToNumber(m[3]);
+        if (!Number.isFinite(mm) || mm < 0 || mm >= 12) return { ...empty, ok: false, reason: 'invalid' };
+        extraMonths = mm;
+      }
+      const years = y + extraMonths / 12;
+      return {
+        ok: true, kind: extraMonths ? 'ym' : 'years', value: years,
+        years, months: y * 12 + extraMonths, days: Math.round(years * 365.2425),
+        totalDays: Math.round(years * 365.2425), text: formatAge({ years }), raw, reason: ''
+      };
+    }
+
+    // 7月 / 7个月 / 7月龄
+    m = clean.match(/^(.+?)(?:个)?月(?:龄)?$/);
+    if (m) {
+      const v = cnToNumber(m[1]);
+      if (!Number.isFinite(v) || v < 0) return { ...empty, ok: false, reason: 'invalid' };
+      return {
+        ok: true, kind: 'months', value: v,
+        years: v / 12, months: v, days: Math.round(v * 30.436875),
+        totalDays: Math.round(v * 30.436875), text: formatAge({ months: v }), raw, reason: ''
+      };
+    }
+
+    // 14天 / 14日 / 14日龄
+    m = clean.match(/^(.+?)(?:天|日)(?:龄)?$/);
+    if (m) {
+      const v = cnToNumber(m[1]);
+      if (!Number.isFinite(v) || v < 0) return { ...empty, ok: false, reason: 'invalid' };
+      return {
+        ok: true, kind: 'days', value: v,
+        years: v / 365.2425, months: v / 30.436875, days: v,
+        totalDays: v, text: formatAge({ days: v }), raw, reason: ''
+      };
+    }
+
+    // 3周 / 3星期
+    m = clean.match(/^(.+?)(?:周|星期|礼拜)$/);
+    if (m) {
+      const v = cnToNumber(m[1]);
+      if (!Number.isFinite(v) || v < 0) return { ...empty, ok: false, reason: 'invalid' };
+      return {
+        ok: true, kind: 'weeks', value: v,
+        years: v * 7 / 365.2425, months: v * 7 / 30.436875, days: v * 7,
+        totalDays: v * 7, text: formatAge({ days: v * 7 }), raw, reason: ''
+      };
+    }
+
+    // 纯数字 / 65岁 / 65周岁
+    m = clean.match(/^(.+?)(?:周)?岁$/);
+    const bare = m ? m[1] : clean;
+    if (/^[\d.]+$/.test(bare) || /^[零〇一二两三四五六七八九十百千]+$/.test(bare)) {
+      const v = cnToNumber(bare);
+      if (!Number.isFinite(v) || v < 0) return { ...empty, ok: false, reason: 'invalid' };
+      return {
+        ok: true, kind: 'years', value: v,
+        years: v, months: v * 12, days: Math.round(v * 365.2425),
+        totalDays: Math.round(v * 365.2425), text: formatAge({ years: v }), raw, reason: ''
+      };
+    }
+
+    return { ...empty, ok: false, reason: 'unrecognized' };
+  }
+
+  /**
+   * 统一展示口径：
+   *   < 30 天 → 「X日龄」
+   *   < 12 月 → 「X月龄」
+   *   其余    → 「X岁」
+   * 这样列表页/生成器再拼单位也不会出现「14日龄岁」。
+   */
+  function formatAge(parts) {
+    const p = parts || {};
+    const days = Number(p.days);
+    const months = Number(p.months);
+    const years = Number(p.years);
+    if (Number.isFinite(days) && days >= 0 && days < 30) return `${Math.round(days)}日龄`;
+    if (Number.isFinite(months) && months >= 0 && months < 12) return `${Math.round(months)}月龄`;
+    if (Number.isFinite(years) && years >= 0) return `${trimNumber(years)}岁`;
+    if (Number.isFinite(months) && months >= 0) return `${Math.round(months)}月龄`;
+    if (Number.isFinite(days) && days >= 0) return `${Math.round(days)}日龄`;
+    return '';
+  }
+
+  /** 严格解析 YYYY-MM-DD / YYYY/MM/DD / YYYY年M月D日 / YYYYMMDD */
+  function parseDate(input) {
+    const s = toHalfWidth(input).trim();
+    if (!s) return null;
+    let m = s.match(/^(\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})日?$/);
+    if (!m) m = s.match(/^(\d{4})(\d{2})(\d{2})$/);
+    if (!m) return null;
+    const y = Number(m[1]);
+    const mo = Number(m[2]);
+    const d = Number(m[3]);
+    if (y < 1800 || y > 2200 || mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+    const ms = Date.UTC(y, mo - 1, d);
+    const check = new Date(ms);
+    if (check.getUTCFullYear() !== y || check.getUTCMonth() !== mo - 1 || check.getUTCDate() !== d) return null;
+    return { y, m: mo, d, ms, text: `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}` };
+  }
+
+  /** 两个日期之间的完整年/月/日（按日历，不按 365 天近似） */
+  function ageFromDates(birthInput, refInput) {
+    const birth = typeof birthInput === 'object' && birthInput ? birthInput : parseDate(birthInput);
+    const ref = typeof refInput === 'object' && refInput ? refInput : parseDate(refInput);
+    if (!birth || !ref) return { ok: false, reason: 'invalid-date', birthDate: birth ? birth.text : '', refDate: ref ? ref.text : '' };
+    if (ref.ms < birth.ms) return { ok: false, reason: 'before-birth', birthDate: birth.text, refDate: ref.text };
+
+    const totalDays = Math.round((ref.ms - birth.ms) / DAY_MS);
+    let years = ref.y - birth.y;
+    if (ref.m < birth.m || (ref.m === birth.m && ref.d < birth.d)) years--;
+    let months = (ref.y - birth.y) * 12 + (ref.m - birth.m);
+    if (ref.d < birth.d) months--;
+    if (months < 0) months = 0;
+    if (years < 0) years = 0;
+
+    return {
+      ok: true,
+      totalDays,
+      days: totalDays,
+      months,
+      years,
+      birthDate: birth.text,
+      refDate: ref.text,
+      text: formatAge({ days: totalDays, months, years })
+    };
+  }
+
+  function yearsOf(parsed) {
+    if (!parsed || !parsed.ok) return NaN;
+    return parsed.years;
+  }
+
+  /** 人工年龄与出生日期算出的年龄是否「明显不一致」 */
+  function isMismatch(manual, computed) {
+    if (!manual || !manual.ok || !computed || !computed.ok) return false;
+    if (manual.kind === 'years' || manual.kind === 'ym') {
+      return Math.abs(manual.years - computed.years) >= 1;
+    }
+    if (manual.kind === 'months') {
+      return Math.abs(manual.months - computed.months) >= 2;
+    }
+    if (manual.kind === 'days' || manual.kind === 'weeks') {
+      return Math.abs(manual.totalDays - computed.totalDays) > 14;
+    }
+    return false;
+  }
+
+  /**
+   * 解析一份病历的年龄。参考日期只用入院日期/记录日期，**不用电脑当天**，
+   * 保证同一份病历在任何时间打开都是同一个年龄。
+   *
+   * @returns {{ok:boolean, text:string, years:number, kind:string, source:'birthDate'|'manual'|'none',
+   *            refDate:string, pending:boolean, computed:object|null, manual:object,
+   *            mismatch:boolean, birthDate:string, reason:string}}
+   */
+  function resolveAge(record) {
+    const r = record && record.basic ? record : { basic: record || {} };
+    const b = r.basic || {};
+    const manual = parseAge(b.age);
+    const birth = parseDate(b.birthDate);
+    const refRaw = b.admitDate || b.recordDate || '';
+    const ref = parseDate(refRaw);
+
+    if (birth) {
+      if (ref) {
+        const computed = ageFromDates(birth, ref);
+        if (computed.ok) {
+          return {
+            ok: true,
+            text: computed.text,
+            years: computed.years,
+            kind: computed.totalDays < 30 ? 'days' : (computed.months < 12 ? 'months' : 'years'),
+            source: 'birthDate',
+            refDate: computed.refDate,
+            pending: false,
+            computed,
+            manual,
+            mismatch: isMismatch(manual, computed),
+            birthDate: computed.birthDate,
+            reason: ''
+          };
+        }
+        return {
+          ok: false, text: manual.ok ? manual.text : '', years: yearsOf(manual), kind: manual.kind,
+          source: manual.ok ? 'manual' : 'none', refDate: refRaw, pending: false,
+          computed: null, manual, mismatch: false, birthDate: birth.text, reason: computed.reason
+        };
+      }
+      // 有出生日期但没有入院日期：明确标记「待计算」，不用今天兜底
+      return {
+        ok: manual.ok, text: manual.ok ? manual.text : '', years: yearsOf(manual), kind: manual.kind,
+        source: manual.ok ? 'manual' : 'none', refDate: '', pending: true,
+        computed: null, manual, mismatch: false, birthDate: birth.text, reason: 'no-reference-date'
+      };
+    }
+
+    if (manual.ok) {
+      return {
+        ok: true, text: manual.text, years: manual.years, kind: manual.kind,
+        source: 'manual', refDate: ref ? ref.text : '', pending: false,
+        computed: null, manual, mismatch: false, birthDate: '', reason: ''
+      };
+    }
+
+    return {
+      ok: false, text: '', years: NaN, kind: 'none', source: 'none',
+      refDate: ref ? ref.text : '', pending: false, computed: null, manual,
+      mismatch: false, birthDate: '', reason: manual.reason || 'empty'
+    };
+  }
+
+  /** 生成器/提示共用的岁数：月龄日龄按 0 岁处理，未知返回 NaN */
+  function years(record) {
+    const r = resolveAge(record);
+    if (!r.ok) return NaN;
+    if (r.kind === 'days' || r.kind === 'months') return 0;
+    return r.years;
+  }
+
+  function isChild(record) {
+    const y = years(record);
+    return Number.isFinite(y) ? y < 14 : false;
+  }
+
+  function isInfant(record) {
+    const r = resolveAge(record);
+    if (!r.ok) return false;
+    if (r.computed) return r.computed.totalDays < 365;
+    return r.kind === 'days' || r.kind === 'months';
+  }
+
+  function isElderly(record) {
+    const y = years(record);
+    return Number.isFinite(y) ? y >= 65 : false;
+  }
+
+  /** 展示「年龄：X」时统一走这里，避免各处再拼单位 */
+  function display(record) {
+    return resolveAge(record).text;
+  }
+
+  return {
+    DAY_MS, parseAge, parseDate, ageFromDates, formatAge, resolveAge,
+    years, isChild, isInfant, isElderly, display, isMismatch, cnToNumber
+  };
+})();
+
+
+</script>
 <script>
 /* ===========================================================================
  * 大病历生成器 —— 数据模型 / 字段定义
@@ -3209,10 +3605,52 @@ const SCHEMA = (() => {
   /* ---------------------------------------------------------------------
    * 七、默认空病历数据
    * ------------------------------------------------------------------- */
+  /** 生成段落的来源元数据：记录「由哪些资料、哪一版生成」 */
+  function emptyDocMeta() {
+    return {
+      origin: '',              // generated | manual | legacy
+      inputFingerprint: '',    // 生成/手改时上游资料的指纹
+      inputGroups: {},         // 分组指纹，用于说明「哪类资料变了」
+      generatedTextHash: '',   // 生成时的文字指纹
+      reviewedFingerprint: '', // 用户确认时的上游资料指纹
+      updatedAt: ''
+    };
+  }
+
   function emptyRecord() {
     return {
+      schemaVersion: 3,
       // 元数据
-      meta: { createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+      meta: {
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        revision: 0,
+        // 字段来源与核对状态：{ 'basic.marital': { source, reviewed, reviewedValueHash, sourceRef } }
+        fieldStates: {},
+        // 旧数据冲突（如 basic.marital 与 marriage.status 不一致），保留双值等用户选择
+        conflicts: {},
+        migratedFrom: null,
+        migrationNotes: [],
+        // 最近一次模板带入：{ key, name, at, fields:[{path, value}] }，用于「撤销本次带入」
+        lastTemplateFill: null
+      },
+      // 文书级元数据：摘要 / 首次病程录分段 / 出院记录
+      documentMeta: {
+        summary: emptyDocMeta(),
+        firstCourse: {
+          s: emptyDocMeta(),
+          oPe: emptyDocMeta(),
+          oAux: emptyDocMeta(),
+          basis: emptyDocMeta()
+        },
+        discharge: {
+          admitCondition: emptyDocMeta(),
+          diagnoses: {
+            origin: '', inputFingerprint: '', textHash: '',
+            confirmed: false, confirmedFingerprint: ''
+          }
+        }
+      },
       // 基本信息
       basic: {
         department: 'general',
@@ -3421,6 +3859,9 @@ const SCHEMA = (() => {
        *   P 诊疗计划     25 = 符合原则 10 + 与诊断对应 10 + 个体化 5
        * ----------------------------------------------------------------- */
       soap: {
+        // 首次病程录有独立的记录时间：大病历记录入院资料，首次病程录是另一份文书，
+        // 不能永久共用同一个不断变化的状态而没有时间说明。
+        recordTime: '',
         s: {
           summary: '',        // 病历特点：对现病史概括简练、重点突出（10）
           consistency: ''     // 与病史采集病案信息一致性的补充说明（5）
@@ -3451,7 +3892,8 @@ const SCHEMA = (() => {
         admitCondition: '',   // 入院情况：简洁明了、重点突出、入院诊断合理（2）
         course: '',           // 诊疗经过：病情变化、检查结果、治疗经过及效果（5）
         dischargeStatus: '',  // 出院情况：主要症状、体征、辅助检查结果（2）
-        diagnoses: [],        // 出院诊断：完整、规范（2）；留空则继承 diagnosis.confirmed
+        diagnoses: [],        // 出院诊断：完整、规范（2）；留空保持「待填写」，不再静默沿用初步诊断
+        diagnosesConfirmed: false, // 出院诊断是否由用户单独确认过
         advice: {             // 出院医嘱：全面、具体（2）
           drug: '',           // 药物
           nonDrug: '',        // 非药物治疗
@@ -3679,7 +4121,7 @@ const SCHEMA = (() => {
 const RECORD_CORE = (() => {
   'use strict';
 
-  const SCHEMA_VERSION = 2;
+  const SCHEMA_VERSION = 3;
   /** 存储键：v1 起沿用，升级不改变键名 */
   const STORAGE_KEYS = {
     list: 'dabingli.records.v1',
@@ -3794,6 +4236,421 @@ const RECORD_CORE = (() => {
     return filled;
   }
 
+  /* ---------------------- 指纹 / 字段状态 / 文书元数据 ---------------------- */
+
+  /**
+   * 稳定序列化：对象键排序，保证同样的资料得到同样的指纹。
+   * 只用于判断「资料是否变化」，不是密码学哈希。
+   */
+  function stableStringify(value) {
+    if (value === undefined) return 'undefined';
+    if (value === null || typeof value !== 'object') return JSON.stringify(value);
+    if (Array.isArray(value)) return '[' + value.map(stableStringify).join(',') + ']';
+    const keys = Object.keys(value).sort();
+    return '{' + keys.map(k => JSON.stringify(k) + ':' + stableStringify(value[k])).join(',') + '}';
+  }
+
+  /** FNV-1a 32 位，输出 8 位十六进制 */
+  function hashText(text) {
+    const s = String(text == null ? '' : text);
+    let h = 0x811c9dc5;
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 0x01000193);
+    }
+    return ('00000000' + (h >>> 0).toString(16)).slice(-8);
+  }
+
+  function fingerprint(value) {
+    return hashText(stableStringify(value));
+  }
+
+  /** 取嵌套路径的值；路径不存在返回 undefined */
+  function getPath(obj, path) {
+    const parts = String(path || '').split('.').filter(Boolean);
+    let cur = obj;
+    for (const p of parts) {
+      if (cur === null || cur === undefined) return undefined;
+      if (DANGEROUS.includes(p)) return undefined;
+      cur = cur[p];
+    }
+    return cur;
+  }
+
+  /** 写嵌套路径；中间对象不存在则创建 */
+  function setPath(obj, path, value) {
+    const parts = String(path || '').split('.').filter(Boolean);
+    if (!parts.length || DANGEROUS.includes(parts[0])) return obj;
+    let cur = obj;
+    for (let i = 0; i < parts.length - 1; i++) {
+      const p = parts[i];
+      if (DANGEROUS.includes(p)) return obj;
+      if (!isObject(cur[p])) cur[p] = {};
+      cur = cur[p];
+    }
+    const last = parts[parts.length - 1];
+    if (!DANGEROUS.includes(last)) cur[last] = value;
+    return obj;
+  }
+
+  const FIELD_SOURCES = ['manual', 'template', 'default', 'example', 'generated', 'legacy', ''];
+
+  function defaultFieldState() {
+    return { source: '', reviewed: false, reviewedValueHash: '', sourceRef: '' };
+  }
+
+  function normalizeFieldState(raw) {
+    const s = isObject(raw) ? raw : {};
+    return {
+      source: FIELD_SOURCES.includes(s.source) ? s.source : '',
+      reviewed: s.reviewed === true,
+      reviewedValueHash: isText(s.reviewedValueHash) ? s.reviewedValueHash : '',
+      sourceRef: isText(s.sourceRef) ? s.sourceRef : ''
+    };
+  }
+
+  function fieldState(record, path) {
+    const states = (record && record.meta && record.meta.fieldStates) || {};
+    return normalizeFieldState(states[path]);
+  }
+
+  function setFieldState(record, path, patch) {
+    if (!record) return record;
+    if (!isObject(record.meta)) record.meta = {};
+    if (!isObject(record.meta.fieldStates)) record.meta.fieldStates = {};
+    const prev = normalizeFieldState(record.meta.fieldStates[path]);
+    record.meta.fieldStates[path] = { ...prev, ...(patch || {}) };
+    return record;
+  }
+
+  /** 用户手改某字段：来源改成 manual，旧核对状态立即失效 */
+  function markFieldManual(record, path, value) {
+    setFieldState(record, path, {
+      source: 'manual',
+      reviewed: false,
+      reviewedValueHash: '',
+      sourceRef: ''
+    });
+    return record;
+  }
+
+  /** 确认某字段当前内容；核对状态与当前值指纹绑定 */
+  function markFieldReviewed(record, path, source) {
+    const v = getPath(record, path);
+    const st = fieldState(record, path);
+    return setFieldState(record, path, {
+      source: source || st.source || 'manual',
+      reviewed: true,
+      reviewedValueHash: fingerprint(v)
+    });
+  }
+
+  /** 核对是否仍然有效：内容变过就失效 */
+  function fieldReviewValid(record, path, value) {
+    const st = fieldState(record, path);
+    // 默认查体的「实际输出文字」不在字段值里，核对状态要按生成时会写出的文字判断
+    const v = value === undefined ? getPath(record, path) : value;
+    return !!(st.reviewed && st.reviewedValueHash === fingerprint(v));
+  }
+
+  /** 把旧存档里所有有内容、但没有来源记录的字段标成 legacy */
+  function markLegacyFields(record) {
+    if (!record || !isObject(record.meta)) return record;
+    if (!isObject(record.meta.fieldStates)) record.meta.fieldStates = {};
+    const skip = new Set(['meta', 'documentMeta', 'schemaVersion', 'id']);
+    const walk = (obj, path) => {
+      Object.keys(obj).forEach(k => {
+        if (!path && skip.has(k)) return;
+        const p = path ? path + '.' + k : k;
+        const v = obj[k];
+        if (isObject(v)) { walk(v, p); return; }
+        if (isBlankValue(v)) return;
+        if (!record.meta.fieldStates[p]) {
+          record.meta.fieldStates[p] = {
+            source: 'legacy', reviewed: false, reviewedValueHash: '', sourceRef: ''
+          };
+        }
+      });
+    };
+    walk(record, '');
+    return record;
+  }
+
+  /* ---------------------- 生成段落的输入分组 ---------------------- */
+
+  const GROUP_LABELS = {
+    identity: '基本情况与主诉',
+    hpi: '现病史',
+    pe: '体格检查',
+    aux: '辅助检查',
+    diagnosis: '诊断'
+  };
+
+  function peValueGroups(record) {
+    const pe = (record && record.pe) || {};
+    const out = {};
+    Object.keys(pe).forEach(k => {
+      if (k === 'checked' || k === 'vitals') return;
+      out[k] = pe[k];
+    });
+    return out;
+  }
+
+  function identityGroup(record) {
+    const b = (record && record.basic) || {};
+    return {
+      department: b.department || '',
+      name: b.name || '',
+      gender: b.gender || '',
+      age: b.age || '',
+      birthDate: b.birthDate || '',
+      admitDate: b.admitDate || '',
+      marital: b.marital || '',
+      chiefComplaint: b.chiefComplaint || '',
+      chiefComplaintDuration: b.chiefComplaintDuration || '',
+      chiefComplaintDurationUnit: b.chiefComplaintDurationUnit || '',
+      admitDate: b.admitDate || '',
+      recordDate: b.recordDate || ''
+    };
+  }
+
+  function auxGroup(record) {
+    const items = (record && record.auxiliary && record.auxiliary.items) || [];
+    return items.map(it => ({
+      name: (it && it.name) || '',
+      result: (it && it.result) || '',
+      date: (it && it.date) || '',
+      hospital: (it && it.hospital) || '',
+      no: (it && it.no) || ''
+    }));
+  }
+
+  function summaryGroups(record) {
+    return {
+      identity: identityGroup(record),
+      hpi: (record && record.hpi) || {},
+      pe: {
+        vitals: (record && record.pe && record.pe.vitals) || {},
+        checked: (record && record.pe && record.pe.checked) || {},
+        values: peValueGroups(record)
+      },
+      aux: auxGroup(record)
+    };
+  }
+
+  function firstCourseGroups(record, section) {
+    if (section === 's') return { identity: identityGroup(record), hpi: (record && record.hpi) || {} };
+    if (section === 'oPe') return { pe: summaryGroups(record).pe };
+    if (section === 'oAux') return { aux: auxGroup(record) };
+    return {
+      diagnosis: (record && record.diagnosis && record.diagnosis.confirmed) || [],
+      hpi: (record && record.hpi) || {},
+      pe: summaryGroups(record).pe,
+      aux: auxGroup(record)
+    };
+  }
+
+  function dischargeGroups(record, part) {
+    if (part === 'diagnoses') return { diagnosis: (record && record.diagnosis && record.diagnosis.confirmed) || [] };
+    return {
+      identity: identityGroup(record),
+      hpi: (record && record.hpi) || {},
+      pe: summaryGroups(record).pe,
+      diagnosis: (record && record.diagnosis && record.diagnosis.confirmed) || []
+    };
+  }
+
+  /** 把分组数据折算成 {groups:{组:指纹}, fingerprint:总指纹} */
+  function groupFingerprints(groups) {
+    const out = {};
+    Object.keys(groups).forEach(k => { out[k] = fingerprint(groups[k]); });
+    return { groups: out, fingerprint: fingerprint(out) };
+  }
+
+  /** 对比保存时的分组指纹与当前分组，返回变化组标签 */
+  function changedGroups(savedGroups, currentGroups) {
+    const saved = isObject(savedGroups) ? savedGroups : {};
+    const labels = [];
+    Object.keys(currentGroups).forEach(k => {
+      if (saved[k] !== currentGroups[k]) labels.push(GROUP_LABELS[k] || k);
+    });
+    return labels;
+  }
+
+  function emptyDocMeta() {
+    return {
+      origin: '', inputFingerprint: '', inputGroups: {},
+      generatedTextHash: '', reviewedFingerprint: '', updatedAt: ''
+    };
+  }
+
+  function docMeta(record, kind, section) {
+    const dm = (record && record.documentMeta) || {};
+    if (kind === 'summary') return { ...emptyDocMeta(), ...(dm.summary || {}) };
+    if (kind === 'firstCourse') {
+      const fc = dm.firstCourse || {};
+      return { ...emptyDocMeta(), ...(fc[section || 's'] || {}) };
+    }
+    if (kind === 'discharge') {
+      const d = dm.discharge || {};
+      const key = section || 'admitCondition';
+      return { ...emptyDocMeta(), ...(d[key] || {}) };
+    }
+    return emptyDocMeta();
+  }
+
+  function ensureDocMeta(record, kind, section) {
+    if (!isObject(record.documentMeta)) record.documentMeta = {};
+    if (kind === 'summary') {
+      if (!isObject(record.documentMeta.summary)) record.documentMeta.summary = emptyDocMeta();
+      return record.documentMeta.summary;
+    }
+    if (kind === 'firstCourse') {
+      if (!isObject(record.documentMeta.firstCourse)) record.documentMeta.firstCourse = {};
+      const key = section || 's';
+      if (!isObject(record.documentMeta.firstCourse[key])) record.documentMeta.firstCourse[key] = emptyDocMeta();
+      return record.documentMeta.firstCourse[key];
+    }
+    if (kind === 'discharge') {
+      if (!isObject(record.documentMeta.discharge)) record.documentMeta.discharge = {};
+      const key = section || 'admitCondition';
+      if (!isObject(record.documentMeta.discharge[key])) {
+        record.documentMeta.discharge[key] = key === 'diagnoses'
+          ? { origin: '', inputFingerprint: '', textHash: '', confirmed: false, confirmedFingerprint: '' }
+          : emptyDocMeta();
+      }
+      return record.documentMeta.discharge[key];
+    }
+    return emptyDocMeta();
+  }
+
+  function docText(record, kind, section) {
+    if (kind === 'summary') return String((record && record.summary) || '');
+    if (kind === 'firstCourse') {
+      const s = (record && record.soap) || {};
+      if (section === 's') return String((s.s && s.s.summary) || '');
+      if (section === 'oPe') return String((s.o && s.o.pe) || '');
+      if (section === 'oAux') return String((s.o && s.o.aux) || '');
+      const basisText = String((s.a && s.a.basis) || '');
+      const detail = (s.a && s.a.basisDetail) || [];
+      return basisText + (detail.length ? '\n' + stableStringify(detail) : '');
+    }
+    if (kind === 'discharge') {
+      if (section === 'diagnoses') return stableStringify((record.discharge && record.discharge.diagnoses) || []);
+      return String((record.discharge && record.discharge.admitCondition) || '');
+    }
+    return '';
+  }
+
+  function docGroups(record, kind, section) {
+    if (kind === 'summary') return summaryGroups(record);
+    if (kind === 'firstCourse') return firstCourseGroups(record, section || 's');
+    if (kind === 'discharge') return dischargeGroups(record, section || 'admitCondition');
+    return {};
+  }
+
+  /**
+   * 生成段落状态：
+   *   empty | legacy | fresh | stale | manual | manual-stale | reviewed | reviewed-stale
+   */
+  function documentState(record, kind, section) {
+    const meta = docMeta(record, kind, section);
+    const text = docText(record, kind, section);
+    let hasText = text.trim() !== '';
+    if (kind === 'discharge' && section === 'diagnoses') {
+      try { hasText = JSON.parse(text || '[]').length > 0; } catch (e) { hasText = false; }
+    }
+    const cur = groupFingerprints(docGroups(record, kind, section));
+    const changed = changedGroups(meta.inputGroups, cur.groups);
+    const base = { meta, changed, current: cur, text };
+    if (!hasText) return { ...base, state: 'empty' };
+    if (!meta.origin) return { ...base, state: 'legacy' };
+    const textHash = hashText(text);
+    if (meta.origin === 'manual') {
+      return { ...base, state: changed.length ? 'manual-stale' : 'manual' };
+    }
+    // 标记为生成，但文字已经和生成时不同 → 实际是人工改过（旧版本可能没记状态）
+    if (meta.generatedTextHash && meta.generatedTextHash !== textHash) {
+      return { ...base, state: changed.length ? 'manual-stale' : 'manual' };
+    }
+    if (changed.length) {
+      return { ...base, state: meta.reviewedFingerprint ? 'reviewed-stale' : 'stale' };
+    }
+    if (meta.reviewedFingerprint && meta.reviewedFingerprint === cur.fingerprint) {
+      return { ...base, state: 'reviewed' };
+    }
+    return { ...base, state: 'fresh' };
+  }
+
+  function markDocumentGenerated(record, kind, section, text) {
+    const m = ensureDocMeta(record, kind, section);
+    const cur = groupFingerprints(docGroups(record, kind, section));
+    const body = text === undefined ? docText(record, kind, section) : String(text);
+    m.origin = 'generated';
+    m.inputGroups = cur.groups;
+    m.inputFingerprint = cur.fingerprint;
+    m.generatedTextHash = hashText(body);
+    m.reviewedFingerprint = '';
+    m.updatedAt = new Date().toISOString();
+    return m;
+  }
+
+  /** 用户手改：以当前资料为基线，之后资料再变才算「过期」 */
+  function markDocumentManual(record, kind, section) {
+    const m = ensureDocMeta(record, kind, section);
+    const cur = groupFingerprints(docGroups(record, kind, section));
+    m.origin = 'manual';
+    m.inputGroups = cur.groups;
+    m.inputFingerprint = cur.fingerprint;
+    m.generatedTextHash = hashText(docText(record, kind, section));
+    m.reviewedFingerprint = '';
+    m.updatedAt = new Date().toISOString();
+    return m;
+  }
+
+  function markDocumentReviewed(record, kind, section) {
+    const m = ensureDocMeta(record, kind, section);
+    const cur = groupFingerprints(docGroups(record, kind, section));
+    m.inputGroups = cur.groups;
+    m.inputFingerprint = cur.fingerprint;
+    m.reviewedFingerprint = cur.fingerprint;
+    m.updatedAt = new Date().toISOString();
+    return m;
+  }
+
+  /* ---------------------- 婚姻状态：唯一来源 ---------------------- */
+
+  function marriageValue(record) {
+    const b = (record && record.basic) || {};
+    const m = (record && record.marriage) || {};
+    return b.marital || m.status || '';
+  }
+
+  function marriageConflict(record) {
+    const c = record && record.meta && record.meta.conflicts && record.meta.conflicts.marriage;
+    if (!c || c.resolved) return null;
+    return c;
+  }
+
+  /** 用户选择后落定：basic.marital 是唯一来源，旧的 marriage.status 清空 */
+  function resolveMarriage(record, value) {
+    if (!record.basic) record.basic = {};
+    if (!record.marriage) record.marriage = {};
+    record.basic.marital = value || '';
+    record.marriage.status = '';
+    if (!record.meta) record.meta = {};
+    if (!isObject(record.meta.conflicts)) record.meta.conflicts = {};
+    record.meta.conflicts.marriage = {
+      basicValue: value || '',
+      marriageValue: '',
+      resolved: true,
+      chosen: value || '',
+      resolvedAt: new Date().toISOString()
+    };
+    markFieldManual(record, 'basic.marital');
+    return record;
+  }
+
   /* ---------------------- 科室键的迁移 ---------------------- */
 
   /**
@@ -3903,6 +4760,90 @@ const RECORD_CORE = (() => {
 
     filled.schemaVersion = SCHEMA_VERSION;
 
+    // ---- 元数据与迁移（v2 → v3）----
+    if (!isObject(filled.meta)) filled.meta = {};
+    if (!isObject(filled.meta.fieldStates)) filled.meta.fieldStates = {};
+    if (!isObject(filled.meta.conflicts)) filled.meta.conflicts = {};
+    if (!Array.isArray(filled.meta.migrationNotes)) filled.meta.migrationNotes = [];
+    const rev = Number(filled.meta.revision);
+    filled.meta.revision = Number.isFinite(rev) && rev >= 0 ? Math.floor(rev) : 0;
+    const rawVersion = Number(raw.schemaVersion);
+    if (Number.isFinite(rawVersion) && rawVersion < SCHEMA_VERSION) {
+      filled.meta.migratedFrom = rawVersion;
+      if (!filled.meta.migrationNotes.includes('已从 v' + rawVersion + ' 迁移到 v' + SCHEMA_VERSION)) {
+        filled.meta.migrationNotes.push('已从 v' + rawVersion + ' 迁移到 v' + SCHEMA_VERSION);
+      }
+    } else if (filled.meta.migratedFrom === undefined) {
+      filled.meta.migratedFrom = null;
+    }
+    if (!isObject(filled.documentMeta)) filled.documentMeta = {};
+
+    // 婚姻状态：basic.marital 是唯一来源。两处一致直接合并；
+    // 不一致保留两个原值，等用户选择，绝不静默舍弃。
+    const bMarital = isText(filled.basic.marital) ? filled.basic.marital.trim() : '';
+    const mStatus = filled.marriage && isText(filled.marriage.status) ? filled.marriage.status.trim() : '';
+    const existingConflict = filled.meta.conflicts.marriage;
+    if (bMarital && mStatus) {
+      if (bMarital === mStatus) {
+        filled.marriage.status = '';
+        if (!filled.meta.migrationNotes.includes('婚姻状态两处一致，已统一到基本情况')) {
+          filled.meta.migrationNotes.push('婚姻状态两处一致，已统一到基本情况');
+        }
+      } else if (!existingConflict || !existingConflict.resolved) {
+        filled.meta.conflicts.marriage = {
+          basicValue: bMarital,
+          marriageValue: mStatus,
+          resolved: false,
+          chosen: ''
+        };
+        if (!filled.meta.migrationNotes.includes('婚姻状态两处不一致，已保留两个原值待选择')) {
+          filled.meta.migrationNotes.push('婚姻状态两处不一致，已保留两个原值待选择');
+        }
+      }
+    } else if (!bMarital && mStatus) {
+      filled.basic.marital = mStatus;
+      filled.marriage.status = '';
+      if (!filled.meta.migrationNotes.includes('婚姻状态已从婚姻史迁移到基本情况')) {
+        filled.meta.migrationNotes.push('婚姻状态已从婚姻史迁移到基本情况');
+      }
+    } else if (bMarital && !mStatus) {
+      // 已经是唯一来源，无需处理
+    }
+
+    // 生成段落：旧存档里已有文字但没有来源 → legacy，保留原文、不判为已核对
+    const fc = isObject(filled.documentMeta.firstCourse) ? filled.documentMeta.firstCourse : {};
+    ['s', 'oPe', 'oAux', 'basis'].forEach(sec => {
+      if (!isObject(fc[sec])) fc[sec] = emptyDocMeta();
+      if (docText(filled, 'firstCourse', sec).trim() && !fc[sec].origin) fc[sec].origin = 'legacy';
+    });
+    filled.documentMeta.firstCourse = fc;
+    if (!isObject(filled.documentMeta.summary)) filled.documentMeta.summary = emptyDocMeta();
+    if (docText(filled, 'summary').trim() && !filled.documentMeta.summary.origin) {
+      filled.documentMeta.summary.origin = 'legacy';
+    }
+    if (!isObject(filled.documentMeta.discharge)) filled.documentMeta.discharge = {};
+    if (!isObject(filled.documentMeta.discharge.admitCondition)) {
+      filled.documentMeta.discharge.admitCondition = emptyDocMeta();
+    }
+    if (docText(filled, 'discharge', 'admitCondition').trim() && !filled.documentMeta.discharge.admitCondition.origin) {
+      filled.documentMeta.discharge.admitCondition.origin = 'legacy';
+    }
+    if (!isObject(filled.documentMeta.discharge.diagnoses)) {
+      filled.documentMeta.discharge.diagnoses = {
+        origin: '', inputFingerprint: '', textHash: '', confirmed: false, confirmedFingerprint: ''
+      };
+    }
+    if ((filled.discharge && filled.discharge.diagnoses || []).length &&
+        !filled.documentMeta.discharge.diagnoses.origin) {
+      filled.documentMeta.discharge.diagnoses.origin = 'legacy';
+    }
+
+    // 旧字段来源统一标 legacy（只补缺失的来源，不覆盖已有状态）
+    markLegacyFields(filled);
+    Object.keys(filled.meta.fieldStates).forEach(k => {
+      filled.meta.fieldStates[k] = normalizeFieldState(filled.meta.fieldStates[k]);
+    });
+
     // 科室键规范化
     if (validDeptKeys && validDeptKeys.length) {
       filled.basic.department = normalizeDeptKey(filled.basic.department, validDeptKeys);
@@ -3937,6 +4878,8 @@ const RECORD_CORE = (() => {
       name: b.name || '未命名',
       gender: b.gender || '',
       age: b.age || '',
+      birthDate: b.birthDate || '',
+      admitDate: b.admitDate || '',
       department: b.department || '',
       chiefComplaint: b.chiefComplaint || '',
       updatedAt: item.updatedAt || ''
@@ -3987,19 +4930,26 @@ const RECORD_CORE = (() => {
    * 导出格式：带包装的 JSON，含版本与时间，便于以后迁移
    * { schemaVersion, exportedAt, app, records:[...] }
    */
-  function buildExport(list, isoNow) {
-    const records = (Array.isArray(list) ? list : [])
+  function buildExport(list, isoNow, opts) {
+    const options = isObject(opts) ? opts : {};
+    let base = Array.isArray(list) ? list : [];
+    if (options.includeDraft && isObject(options.draft)) {
+      base = upsertRecord(base, options.draft, isoNow).list;
+    }
+    const records = base
       .filter(x => x && isObject(x.data))
       .map(x => {
         assertSafeKeys(x.data);
         return { id: x.id, updatedAt: x.updatedAt, data: x.data };
       });
-    return {
+    const out = {
       app: 'dabingli',
       schemaVersion: SCHEMA_VERSION,
       exportedAt: isoNow || new Date().toISOString(),
       records
     };
+    if (options.includeDraft && isObject(options.draft)) out.includesDraft = true;
+    return out;
   }
 
   /**
@@ -4144,12 +5094,39 @@ const RECORD_CORE = (() => {
   }
 
   /**
+   * 读取原始字符串：storage.getItem 本身也可能抛错（隐私模式、被禁用），
+   * 这里统一包住，调用方据此区分「没有存档」和「读不了存档」。
+   */
+  function readRaw(storage, key) {
+    try {
+      const raw = storage.getItem(key);
+      if (raw === null || raw === undefined) return { ok: true, raw: null, missing: true };
+      return { ok: true, raw: String(raw), missing: false };
+    } catch (e) {
+      return { ok: false, raw: '', missing: false, error: String((e && e.message) || e) };
+    }
+  }
+
+  function writeRaw(storage, key, value) {
+    try {
+      storage.setItem(key, value);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: String((e && e.message) || e) };
+    }
+  }
+
+  /**
    * 载入病历列表。损坏时**不覆盖原存档**，返回 ok:false 让界面提示用户。
    * 这是参考项目强调的行为：损坏数据不能静默丢弃。
    */
   function loadList(storage) {
-    const rawText = storage.getItem(STORAGE_KEYS.list);
-    if (rawText === null) return { ok: true, list: [], fresh: true };
+    const got = readRaw(storage, STORAGE_KEYS.list);
+    if (!got.ok) {
+      return { ok: false, list: [], error: true, reason: '无法读取浏览器存储：' + got.error, raw: '' };
+    }
+    if (got.missing) return { ok: true, list: [], fresh: true };
+    const rawText = got.raw;
     let parsed;
     try {
       parsed = JSON.parse(rawText);
@@ -4177,8 +5154,12 @@ const RECORD_CORE = (() => {
    * 于是空白病历被当成正常的空存档保存，把损坏的原文整个覆盖掉。
    */
   function loadCurrent(storage, emptyRecord, validDeptKeys) {
-    const rawText = storage.getItem(STORAGE_KEYS.current);
-    if (rawText === null) return { ok: true, record: null, fresh: true };
+    const got = readRaw(storage, STORAGE_KEYS.current);
+    if (!got.ok) {
+      return { ok: false, record: null, error: true, raw: '', reason: '无法读取浏览器存储：' + got.error };
+    }
+    if (got.missing) return { ok: true, record: null, fresh: true };
+    const rawText = got.raw;
     let parsed;
     try {
       parsed = JSON.parse(rawText);
@@ -4192,15 +5173,119 @@ const RECORD_CORE = (() => {
     }
   }
 
+  function loadSettings(storage) {
+    const got = readRaw(storage, STORAGE_KEYS.settings);
+    if (!got.ok || got.missing) return { ok: got.ok, settings: { ...SETTINGS_DEFAULTS }, raw: got.raw || '' };
+    try {
+      return { ok: true, settings: normalizeSettings(JSON.parse(got.raw)), raw: got.raw };
+    } catch (e) {
+      return { ok: false, settings: { ...SETTINGS_DEFAULTS }, corrupt: true, raw: got.raw };
+    }
+  }
+
+  /**
+   * 保存当前病历，带修订号检查。
+   * 其他标签页已经写入更新的修订号时返回 conflict，调用方不得覆盖。
+   */
+  function saveCurrent(storage, record, expectedRevision) {
+    if (!isObject(record)) return { ok: false, error: true, reason: '病历内容无效' };
+    const got = readRaw(storage, STORAGE_KEYS.current);
+    if (!got.ok) return { ok: false, error: true, reason: '无法读取当前存档：' + got.error };
+    let existing = null;
+    if (!got.missing) {
+      try {
+        existing = JSON.parse(got.raw);
+      } catch (e) {
+        return { ok: false, corrupt: true, raw: got.raw, reason: '现有存档无法解析，未覆盖' };
+      }
+    }
+    const remoteRev = Number(existing && existing.meta && existing.meta.revision) || 0;
+    const expect = expectedRevision === undefined || expectedRevision === null
+      ? null : Number(expectedRevision);
+    if (existing && expect !== null && existing.id && record.id && existing.id === record.id && remoteRev !== expect) {
+      return {
+        ok: false, conflict: true, remote: existing, remoteRevision: remoteRev,
+        reason: '其他页面已保存新版本'
+      };
+    }
+    const now = new Date().toISOString();
+    const next = cloneValue(record);
+    if (!isObject(next.meta)) next.meta = {};
+    next.schemaVersion = SCHEMA_VERSION;
+    next.meta.revision = Math.max(remoteRev, Number(next.meta.revision) || 0) + 1;
+    next.meta.updatedAt = now;
+    const wrote = writeRaw(storage, STORAGE_KEYS.current, JSON.stringify(next));
+    if (!wrote.ok) return { ok: false, error: true, reason: '保存失败：' + wrote.error };
+    return { ok: true, record: next, revision: next.meta.revision };
+  }
+
+  function saveList(storage, list) {
+    if (!Array.isArray(list)) return { ok: false, error: true, reason: '病历列表无效' };
+    const wrote = writeRaw(storage, STORAGE_KEYS.list, JSON.stringify(list));
+    if (!wrote.ok) return { ok: false, error: true, reason: '保存失败：' + wrote.error };
+    return { ok: true };
+  }
+
+  function saveSettings(storage, settings) {
+    const wrote = writeRaw(storage, STORAGE_KEYS.settings, JSON.stringify(normalizeSettings(settings)));
+    if (!wrote.ok) return { ok: false, error: true, reason: '设置保存失败：' + wrote.error };
+    return { ok: true };
+  }
+
+  /**
+   * 内存快照栈（按病历 id 绑定）。历史只在本机内存里，刷新即失效，
+   * 不能当作异地备份；这一点必须在界面上说清楚。
+   */
+  function createHistory(limit) {
+    const cap = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 20;
+    const stacks = new Map();
+    return {
+      push(record, label) {
+        if (!record || !record.id) return false;
+        let text;
+        try { text = JSON.stringify(record); } catch (e) { return false; }
+        if (text.length > 4 * 1024 * 1024) return false;
+        const arr = stacks.get(record.id) || [];
+        arr.push({ label: label || '编辑', at: new Date().toISOString(), snapshot: cloneValue(record) });
+        while (arr.length > cap) arr.shift();
+        stacks.set(record.id, arr);
+        return true;
+      },
+      pop(id) {
+        const arr = stacks.get(id) || [];
+        const item = arr.pop() || null;
+        return item;
+      },
+      peek(id) {
+        const arr = stacks.get(id) || [];
+        return arr[arr.length - 1] || null;
+      },
+      list(id) {
+        return (stacks.get(id) || []).map(x => ({ label: x.label, at: x.at }));
+      },
+      size(id) { return (stacks.get(id) || []).length; },
+      clear(id) { stacks.delete(id); }
+    };
+  }
+
   const api = {
     SCHEMA_VERSION, STORAGE_KEYS, SETTINGS_DEFAULTS,
     assertSafeKeys, deepMerge, normalizeDeptKey,
     isBlankValue, cloneValue, fillBlanks,
+    stableStringify, hashText, fingerprint, getPath, setPath,
+    fieldState, setFieldState, markFieldManual, markFieldReviewed, fieldReviewValid,
+    markLegacyFields, normalizeFieldState,
+    summaryGroups, firstCourseGroups, dischargeGroups, groupFingerprints, changedGroups,
+    docMeta, ensureDocMeta, docText, docGroups, documentState,
+    markDocumentGenerated, markDocumentManual, markDocumentReviewed,
+    marriageValue, marriageConflict, resolveMarriage,
     normalizeRecord, lookLikeRecord,
     uid, summarize, sortByUpdated, upsertRecord, removeRecord, findRecord,
     buildExport, parseImport, mergeImport, replaceImport,
     normalizeSettings,
-    memoryStorage, safeSet, safeGetJSON, loadList, loadCurrent
+    memoryStorage, safeSet, safeGetJSON,
+    readRaw, writeRaw, loadList, loadCurrent, loadSettings,
+    saveCurrent, saveList, saveSettings, createHistory
   };
 
   return api;
@@ -20335,14 +21420,33 @@ var TEMPLATES = (function () {
    *   count   写入项数
    *   skipped 非空而未覆盖的路径（用于提示「这些是你自己写的，没动」）
    *
+   * opts.mode:
+   *   'example'（默认）—— 教学范例：只填空位，逐字段记来源 template
+   *   'patient'        —— 患者录入提纲：**不写入任何内容**，只返回应问、应查的清单
+   *
    * 注意：模板里的 record 是**完整对象**，但 fillBlanks 只填空位，
    * 所以「先填一半再套模板」也不会把已填的内容冲掉。
    */
-  function apply(record, key) {
+  function apply(record, key, opts) {
     const t = get(key);
-    if (!t || !record) return { filled: [], count: 0, skipped: [], ok: false };
+    const mode = (opts && opts.mode) === 'patient' ? 'patient' : 'example';
+    if (!t || !record) return { filled: [], count: 0, skipped: [], ok: false, mode };
+    if (mode === 'patient') {
+      // 患者录入模式只给提纲：模板里的阴性病史、阳性体征、检查结果、诊断
+      // 都是「教学范例的事实」，不能当成这位患者的事实写进病历。
+      return {
+        ok: true,
+        mode,
+        filled: [],
+        count: 0,
+        skipped: [],
+        outline: outlineOf(t),
+        name: t.name,
+        dept: t.dept
+      };
+    }
     if (!RECORD_CORE || !RECORD_CORE.fillBlanks) {
-      return { filled: [], count: 0, skipped: [], ok: false };
+      return { filled: [], count: 0, skipped: [], ok: false, mode };
     }
 
     // 记录套用前的空/非空状态，用于统计「本来就有内容的没被动过」
@@ -20375,14 +21479,71 @@ var TEMPLATES = (function () {
       if (filled.indexOf('basic.department') < 0) filled.push('basic.department');
     }
 
+    // 逐字段记来源：以后「批量核对」必须能看到具体文字，而不是凭「来自模板」就当真
+    if (record.meta && RECORD_CORE.setFieldState) {
+      filled.forEach(p => {
+        RECORD_CORE.setFieldState(record, p, {
+          source: 'template',
+          reviewed: false,
+          reviewedValueHash: '',
+          sourceRef: key
+        });
+      });
+    }
+
+    // 记下本次带入的文字，供「查看本次带入内容」与「撤销本次带入」使用
+    const values = {};
+    filled.forEach(p => {
+      const v = RECORD_CORE.getPath ? RECORD_CORE.getPath(record, p) : undefined;
+      if (typeof v === 'string') values[p] = v;
+    });
+    if (record.meta) {
+      record.meta.lastTemplateFill = {
+        key, name: t.name, at: new Date().toISOString(),
+        filled: filled.slice(), values
+      };
+    }
+
     return {
       ok: true,
+      mode,
       filled,
       count: filled.length,
       skipped: before,
       name: t.name,
-      dept: t.dept
+      dept: t.dept,
+      values
     };
+  }
+
+  const SECTION_LABEL = {
+    basic: '基本情况', hpi: '现病史', ros: '系统回顾', pmh: '既往史',
+    personal: '个人史', marriage: '婚姻史', menstruation: '月经史',
+    childbirth: '生育史', family: '家族史', pe: '体格检查',
+    auxiliary: '辅助检查', diagnosis: '初步诊断', soap: '首次病程录',
+    discharge: '出院记录'
+  };
+
+  /** 患者录入提纲：只列「应该问/应该查什么」，不含模板里的具体事实 */
+  function outlineOf(t) {
+    const out = [];
+    (function walk(node, path) {
+      if (!node || typeof node !== 'object') return;
+      Object.keys(node).forEach(k => {
+        const p = path ? path + '.' + k : k;
+        const v = node[k];
+        if (v && typeof v === 'object' && !Array.isArray(v)) { walk(v, p); return; }
+        if (v === '' || v === null || v === undefined) return;
+        if (Array.isArray(v) && !v.length) return;
+        const top = p.split('.')[0];
+        out.push({
+          path: p,
+          section: SECTION_LABEL[top] || top,
+          label: p.split('.').slice(1).join(' · ') || p
+        });
+      });
+    })(t.record, '');
+    return out;
   }
 
   /**
@@ -20421,7 +21582,7 @@ var TEMPLATES = (function () {
     return out;
   }
 
-  return { listByDept, get, all, apply, previewPaths, deptName };
+  return { listByDept, get, all, apply, previewPaths, deptName, outlineOf, SECTION_LABEL };
 })();
 
 
@@ -21297,14 +22458,28 @@ const GENERATOR = (() => {
     return t;
   }
 
+  /** 传入的是整份病历（带 basic）还是只有 basic，两种调用方式都兼容 */
+  function asRecord(input) {
+    return input && typeof input === 'object' && input.basic && typeof input.basic === 'object' ? input : null;
+  }
+
   /**
    * 年龄文本：已经带单位就原样返回，否则补「岁」。
    *
    * 儿科病历写「7月」「3天」，成人写「58」。以前统一拼「岁」，
    * 儿科会输出「7月岁」这种不存在的写法。
+   *
+   * 传入整份病历时走 AGE 统一口径：有出生日期 + 入院日期就按日期算，
+   * 并且 <30 天写「日龄」、<12 月写「月龄」，不再让各处自己拼单位。
    */
-  function ageWithUnit(basic) {
-    const raw = stripTail((basic || {}).age);
+  function ageWithUnit(input) {
+    const rec = asRecord(input);
+    const basic = rec ? rec.basic : (input || {});
+    if (rec && typeof AGE !== 'undefined') {
+      const resolved = AGE.resolveAge(rec);
+      if (resolved.text) return resolved.text;
+    }
+    const raw = stripTail(basic.age);
     if (!raw) return '';
     // 「日龄」必须单独认：14日龄 只匹配到「日」也可，但「日龄岁」这种输出
     // 是把 14日龄 当成 14 岁又补了一个单位。日、天、周、月、时都算已有单位。
@@ -21333,8 +22508,14 @@ const GENERATOR = (() => {
    * @param {object} basic record.basic
    * @returns {number} 周岁；无法判断时为 NaN
    */
-  function ageYears(basic) {
-    const raw = stripTail((basic || {}).age);
+  function ageYears(input) {
+    const rec = asRecord(input);
+    const basic = rec ? rec.basic : (input || {});
+    if (rec && typeof AGE !== 'undefined') {
+      const y = AGE.years(rec);
+      if (Number.isFinite(y)) return y;
+    }
+    const raw = stripTail(basic.age);
     if (!raw) return NaN;
     if (!/岁/.test(raw) && /[天日周月时]/.test(raw)) return 0;
     const ar = raw.match(/[0-9０-９]+(?:\.[0-9]+)?/);
@@ -21392,7 +22573,7 @@ const GENERATOR = (() => {
   function buildBasicInfo(r) {
     const b = r.basic || {};
     const lines = [];
-    const age = ageWithUnit(b);
+    const age = ageWithUnit(r);
 
     // 科别：从 DEPARTMENTS 查中文名，绝不把内部 key（digestive）写进病历。
     const dept = SCHEMA.DEPARTMENTS.find(d => d.key === b.department);
@@ -21564,7 +22745,7 @@ const GENERATOR = (() => {
     // 开头不写主语时补上；已含"患者/孕妇/患儿"等主语则不再重复。
     // 主语按年龄判（见 subjectOf）：旧实现按科室判，70 岁挂儿科会写成「患儿，男，70岁」。
     if (!/^(患者|患儿|产妇|孕妇|本人|家属|该)/.test(text)) {
-      text = subjectOf(r.basic || {}) + text;
+      text = subjectOf(r) + text;
     }
     return text;
   }
@@ -22844,10 +24025,10 @@ const GENERATOR = (() => {
     const seg = [];
 
     // 1) 患者身份 + 主诉（直接复用主诉生成逻辑，避免时长重复追加）
-    const who = [b.gender, ageWithUnit(b)].filter(Boolean).join('，');
+    const who = [b.gender, ageWithUnit(r)].filter(Boolean).join('，');
     const ccFull = stripTail(buildChiefComplaint(r));  // 已含时长和句号
     // 主语按年龄判（subjectOf）：旧实现按科室判，儿科收 70 岁病人会写成「患儿，男，70岁」
-    const subj = subjectOf(b);
+    const subj = subjectOf(r);
     // 只有「患者」两个字的开头没有信息量，会生成「患者。」这种残句——干脆不写，
     // 让别人看得出这一段还是空的，比读到一个半截句子强。
     if (who || ccFull) {
@@ -23049,10 +24230,10 @@ const GENERATOR = (() => {
     const b = r.basic || {};
     const h = r.hpi || {};
     const seg = [];
-    const who = [b.gender, ageWithUnit(b)].filter(Boolean).join('，');
+    const who = [b.gender, ageWithUnit(r)].filter(Boolean).join('，');
     // 主语按年龄判（subjectOf）：与 draftSummary 保持一致，
     // 旧实现两处都按科室判，儿科 70 岁病人会写成「患儿，男，70岁」（已复现）。
-    const subj = subjectOf(b);
+    const subj = subjectOf(r);
     let head = who ? `${subj}，${who}` : subj;
     const cc = stripTail(buildChiefComplaint(r));
     if (cc) head += `，因“${cc}”入院`;
@@ -23230,7 +24411,7 @@ const GENERATOR = (() => {
     const p = soap.p || {};
 
     const lines = [];
-    const stamp = stripTail(opts.date);
+    const stamp = stripTail(opts.date) || stripTail((((r || {}).soap || {}).recordTime) || '');
     lines.push(stamp ? `【首次病程录】${stamp}` : '【首次病程录】');
 
     /* ---------- 一、病历特点（S） ---------- */
@@ -23373,6 +24554,19 @@ const GENERATOR = (() => {
    * @param {object} r record
    * @returns {string} 含六项小标题的纯文本
    */
+  /** 入院情况草稿：只写入院当时的主诉、体征与入院诊断 */
+  function draftAdmitCondition(r) {
+    const rec = asRecord(r);
+    const seg = [];
+    const cc = stripTail(buildChiefComplaint(rec));
+    if (cc) seg.push(`因“${cc}”入院`);
+    const abn = abnormalPE(rec);
+    if (abn.length) seg.push(`入院查体${abn.slice(0, 3).map(a => a.text).join('，')}`);
+    const dx = diagnosisList(rec);
+    if (dx.length) seg.push(`入院诊断：${dx.join('、')}`);
+    return seg.length ? joinSentences(seg) : '';
+  }
+
   function buildDischargeRecord(r) {
     const rec = r || {};
     const b = rec.basic || {};
@@ -23385,7 +24579,7 @@ const GENERATOR = (() => {
     const general = [];
     if (stripTail(b.name)) general.push(`姓名：${stripTail(b.name)}`);
     if (stripTail(b.gender)) general.push(`性别：${stripTail(b.gender)}`);
-    if (ageWithUnit(b)) general.push(`年龄：${ageWithUnit(b)}`);
+    if (ageWithUnit(rec)) general.push(`年龄：${ageWithUnit(rec)}`);
     if (stripTail(b.recordNo)) general.push(`病历号：${stripTail(b.recordNo)}`);
     if (stripTail(b.admitDate)) general.push(`入院日期：${stripTail(b.admitDate)}`);
     const disDate = stripTail(d.dischargeDate);
@@ -23397,17 +24591,7 @@ const GENERATOR = (() => {
 
     /* ---------- 入院情况 ---------- */
     lines.push('二、入院情况');
-    const admit = stripTail(d.admitCondition) || (() => {
-      // 自动草稿：主诉 + 主要阳性体征 + 入院诊断（只写入院当时的状态）
-      const seg = [];
-      const cc = stripTail(buildChiefComplaint(rec));
-      if (cc) seg.push(`因“${cc}”入院`);
-      const abn = abnormalPE(rec);
-      if (abn.length) seg.push(`入院查体${abn.slice(0, 3).map(a => a.text).join('，')}`);
-      const dx = diagnosisList(rec);
-      if (dx.length) seg.push(`入院诊断：${dx.join('、')}`);
-      return seg.length ? joinSentences(seg) : '';
-    })();
+    const admit = stripTail(d.admitCondition) || draftAdmitCondition(rec);
     lines.push(admit ? ensureSentence(admit) : '（待补充：入院时主要症状、体征与入院诊断）');
 
     /* ---------- 诊疗经过 ---------- */
@@ -23420,12 +24604,14 @@ const GENERATOR = (() => {
 
     /* ---------- 出院诊断 ---------- */
     lines.push('五、出院诊断');
+    // 出院诊断必须单独确认：留空时保留待填状态，不再静默沿用初步诊断。
+    // 回退看起来"省事"，实际会把尚未复核的「肺炎？」写成出院诊断，
+    // 而两者含义并不相同（出院诊断是最终结论）。
     const outDx = (Array.isArray(d.diagnoses) ? d.diagnoses : [])
       .map(s => stripTail(s)).filter(Boolean);
-    const dxList = outDx.length ? outDx : diagnosisList(rec);
-    lines.push(dxList.length
-      ? dxList.map((s, i) => `${i + 1}. ${s}`).join('\n')
-      : '（待补充出院诊断）');
+    lines.push(outDx.length
+      ? outDx.map((s, i) => `${i + 1}. ${s}`).join('\n')
+      : '（待补充：出院诊断未填写；如与初步诊断一致，请使用「从初步诊断带入」后核对确认）');
 
     /* ---------- 出院医嘱 ---------- */
     lines.push('六、出院医嘱');
@@ -23466,6 +24652,58 @@ const GENERATOR = (() => {
     return lines.join('\n');
   }
 
+  /* ---------------------- 病史跨栏去重（安全边界） ---------------------- */
+
+  const HISTORY_SECTION_KEYS = ['现病史', '既往史', '系统回顾', '个人史'];
+
+  /** 句子切分：只按句末标点切，保留标点；不拆逗号，避免把「起病时发热，今日无发热」拆散 */
+  function splitSentences(text) {
+    const s = String(text == null ? '' : text);
+    if (!s) return [];
+    const out = s.match(/[^。；;！？!?]+[。；;！？!?]?/g) || [s];
+    return out.map(x => x.trim()).filter(Boolean);
+  }
+
+  function sentenceKey(sentence) {
+    return String(sentence || '').replace(/\s+/g, '').replace(/[。；;！？!?]+$/, '');
+  }
+
+  /**
+   * 跨病史栏目去掉**完全重复**的句子。
+   *
+   * 边界（与任务书 5.3 对应）：
+   *   - 只有整句一字不差才去重；近似重复只提示，不合并；
+   *   - 同一栏内部重复不在这里删（只由 validate 提示，用户自己决定）；
+   *   - 否定/肯定、左右侧、时间进展本来就不是同一句，不会命中；
+   *   - 只处理病史类栏目，不动体格检查，避免把整句拆成缺主语残句。
+   */
+  function dedupeHistorySections(sections) {
+    const seenAcross = new Set();
+    HISTORY_SECTION_KEYS.forEach(key => {
+      const body = sections[key];
+      if (!body || body === PH) return;
+      const seenHere = new Set();
+      const kept = [];
+      String(body).split('\n').forEach(line => {
+        const sentences = splitSentences(line);
+        if (!sentences.length) { kept.push(line); return; }
+        const out = [];
+        sentences.forEach(sentence => {
+          const k = sentenceKey(sentence);
+          if (!k) { out.push(sentence); return; }
+          if (seenHere.has(k)) { out.push(sentence); return; } // 同栏重复：保留，交给提示
+          if (seenAcross.has(k)) return;                       // 跨栏重复：安全去重
+          seenHere.add(k);
+          seenAcross.add(k);
+          out.push(sentence);
+        });
+        if (out.length) kept.push(out.join(''));
+      });
+      sections[key] = kept.join('\n') || PH;
+    });
+    return sections;
+  }
+
   /**
    * 生成大病历全文
    *
@@ -23484,23 +24722,78 @@ const GENERATOR = (() => {
    * @param {object} r record
    * @param {object} opts { rosMode: 'detail'|'brief' }
    */
+  /** 病史类字段的固定遍历顺序：先出现的保留，后出现的跨字段重复去掉 */
+  const HISTORY_FIELD_PATHS = [
+    'hpi.onset', 'hpi.cause', 'hpi.symptoms', 'hpi.relief', 'hpi.evolution',
+    'hpi.accompanying', 'hpi.negativeDiscriminating', 'hpi.treatment',
+    'hpi.generalCondition', 'hpi.extra',
+    'pmh.health', 'pmh.diseaseDetail', 'pmh.longTermMeds', 'pmh.infection',
+    'pmh.surgery', 'pmh.trauma', 'pmh.transfusion', 'pmh.poisoning',
+    'pmh.vaccine', 'pmh.allergy', 'pmh.allergenOther', 'pmh.allergyReaction',
+    'pmh.relatedHistory', 'pmh.otherTreatDiseases', 'pmh.special',
+    'personal.maternal', 'personal.birth', 'personal.feeding', 'personal.growth',
+    'personal.residence', 'personal.travel', 'personal.smoking', 'personal.drinking',
+    'personal.drugs', 'personal.environment', 'personal.habits', 'personal.sexualHistory',
+    'personal.occupationEnv', 'personal.premorbidPersonality', 'personal.stressEvent'
+  ];
+
+  /**
+   * 跨字段去重：同一句完整的话填进多个病史字段时，只保留第一次出现。
+   * - 只处理「整句完全相同」，不做近似合并；
+   * - 同一字段内的重复原样保留（由 validate 提示，用户自己决定）；
+   * - 返回克隆后的病历，绝不修改传入的 record（生成器保持纯函数）。
+   */
+  function dedupeRecordFields(record) {
+    const out = (RECORD_CORE && RECORD_CORE.cloneValue)
+      ? RECORD_CORE.cloneValue(record)
+      : JSON.parse(JSON.stringify(record || {}));
+    const owner = new Map();
+    HISTORY_FIELD_PATHS.forEach(path => {
+      const v = (RECORD_CORE && RECORD_CORE.getPath) ? RECORD_CORE.getPath(out, path) : undefined;
+      if (typeof v !== 'string' || !v.trim()) return;
+      const kept = [];
+      v.split('\n').forEach(line => {
+        const sentences = splitSentences(line);
+        if (!sentences.length) { kept.push(line); return; }
+        const parts = [];
+        sentences.forEach(s => {
+          const k = sentenceKey(s);
+          if (!k) { parts.push(s); return; }
+          const prev = owner.get(k);
+          if (prev && prev !== path) return; // 跨字段重复：去掉
+          if (!prev) owner.set(k, path);
+          parts.push(s);
+        });
+        if (parts.length) kept.push(parts.join(''));
+      });
+      const next = kept.join('\n');
+      if (next !== v && RECORD_CORE && RECORD_CORE.setPath) RECORD_CORE.setPath(out, path, next);
+    });
+    return out;
+  }
+
   function generate(r, opts = {}) {
     const rosMode = opts.rosMode || 'detail';
+    // 生成用克隆：跨字段整句去重，原记录一个字都不改
+    const rec = dedupeRecordFields(r);
     const sections = {};
-    sections['一般项目'] = buildBasicInfo(r);
-    sections['主诉'] = buildChiefComplaint(r);
-    sections['现病史'] = buildHPI(r);
-    sections['既往史'] = buildPMH(r);
-    sections['系统回顾'] = buildROS(r, rosMode);
-    sections['个人史'] = buildPersonal(r);
-    sections['婚姻史'] = buildMarriageHistory(r);
-    sections['月经与生育史'] = buildMenstruationChildbirth(r);
-    sections['家庭史'] = buildFamily(r);
-    sections['体格检查'] = buildPE(r);
-    sections['辅助检查'] = buildAuxiliary(r);
-    sections['摘要'] = buildSummary(r);
-    sections['诊断依据'] = buildBasisSection(r);
-    sections['初步诊断'] = buildDiagnosis(r);
+    sections['一般项目'] = buildBasicInfo(rec);
+    sections['主诉'] = buildChiefComplaint(rec);
+    sections['现病史'] = buildHPI(rec);
+    sections['既往史'] = buildPMH(rec);
+    sections['系统回顾'] = buildROS(rec, rosMode);
+    sections['个人史'] = buildPersonal(rec);
+    sections['婚姻史'] = buildMarriageHistory(rec);
+    sections['月经与生育史'] = buildMenstruationChildbirth(rec);
+    sections['家庭史'] = buildFamily(rec);
+    sections['体格检查'] = buildPE(rec);
+    sections['辅助检查'] = buildAuxiliary(rec);
+    sections['摘要'] = buildSummary(rec);
+    sections['诊断依据'] = buildBasisSection(rec);
+    sections['初步诊断'] = buildDiagnosis(rec);
+
+    // 同一句话填进两个病史栏目时只输出一次；同栏内重复保留并提示。
+    dedupeHistorySections(sections);
 
     const lines = [];
     SECTION_ORDER.forEach(name => {
@@ -23795,16 +25088,27 @@ const GENERATOR = (() => {
   /** 科室与年龄是否对得上：儿科接成人、成人科接 14 岁以下都值得问一句 */
   function checkDeptAge(r, w) {
     const b = r.basic || {};
-    const m = String(b.age === undefined ? '' : b.age).match(/\d+/);
-    if (!m) return;
-    const age = Number(m[0]);
-    if (!Number.isFinite(age) || age <= 0) return;
+    let age = NaN;
+    let ageLabel = '';
+    if (typeof AGE !== 'undefined') {
+      const info = AGE.resolveAge(r);
+      if (!info.ok) return;
+      // 月龄/日龄按 0 岁判断科室，但提示里必须写「7月龄」而不是「0 岁」
+      age = info.kind === 'days' || info.kind === 'months' ? 0 : info.years;
+      ageLabel = info.kind === 'years' ? `${info.text.replace(/岁$/, '')} 岁` : info.text;
+    } else {
+      const m = String(b.age === undefined ? '' : b.age).match(/\d+/);
+      if (!m) return;
+      age = Number(m[0]);
+      ageLabel = `${age} 岁`;
+    }
+    if (!Number.isFinite(age) || age < 0 || !ageLabel) return;
     const dept = b.department;
     const name = (SCHEMA.DEPARTMENTS.find(d => d.key === dept) || {}).name || '';
     if (dept === 'pediatrics' && age >= 14) {
-      w.push(`【一般项目】科室是${name}，但年龄 ${age} 岁，请确认是否选错科室（儿科一般指 14 岁以下）。`);
+      w.push(`【一般项目】科室是${name}，但年龄 ${ageLabel}，请确认是否选错科室（儿科一般指 14 岁以下）。`);
     } else if (dept && dept !== 'pediatrics' && dept !== 'emergency' && age < 14) {
-      w.push(`【一般项目】年龄 ${age} 岁，科室却是${name}；14 岁以下建议选儿科。`);
+      w.push(`【一般项目】年龄 ${ageLabel}，科室却是${name}；14 岁以下建议选儿科。`);
     }
   }
 
@@ -23879,6 +25183,110 @@ const GENERATOR = (() => {
     });
   }
 
+  /**
+   * 本轮新增的一致性检查：年龄/出生日期、婚姻两处旧值、过敏与烟酒、
+   * 出院诊断确认、辅助检查日期、病史重复。全部只提示，不改数据。
+   */
+  function checkNewConsistency(r, w) {
+    // 1) 年龄与出生日期：只有能按入院/记录日期算出年龄时才比较
+    if (typeof AGE !== 'undefined') {
+      const info = AGE.resolveAge(r);
+      if (info.ok && info.mismatch) {
+        w.push(`【一般项目】年龄写「${info.manual.text}」，按出生日期 ${info.birthDate} 和参考日期 ${info.refDate} 算出「${info.text}」，两者明显不一致，请核对。`);
+      }
+    }
+
+    // 2) 婚姻：旧存档两处不一致且用户还没选择
+    const mc = r.meta && r.meta.conflicts && r.meta.conflicts.marriage;
+    if (mc && !mc.resolved && stripTail(mc.basicValue) && stripTail(mc.marriageValue) &&
+      stripTail(mc.basicValue) !== stripTail(mc.marriageValue)) {
+      w.push(`【婚姻史】基本信息写「${stripTail(mc.basicValue)}」，婚姻史写「${stripTail(mc.marriageValue)}」，两处不一致，请选择以哪个为准。`);
+    }
+
+    // 3) 过敏：写了「无过敏」又勾了过敏原/填了过敏反应
+    const pmh = r.pmh || {};
+    const allergyText = stripTail(pmh.allergy);
+    const allergenPicked = Object.keys(pmh.allergenChecks || {}).some(k => pmh.allergenChecks[k]) ||
+      stripTail(pmh.allergenOther);
+    if (allergyText && /^(无|否认|没有|未见|未发现)/.test(allergyText) && allergenPicked) {
+      w.push('【既往史】过敏史写的是「无/否认」，但又勾选或填写了具体过敏原，请核对。');
+    }
+
+    // 4) 烟酒：状态说没有，数量却填了数字
+    const per = r.personal || {};
+    const smoke = stripTail(per.smoking);
+    const smokeAmount = stripTail(per.smokingAmount);
+    if (smoke && /^(无|不|否|从未|已戒)/.test(smoke) && /\d/.test(smokeAmount)) {
+      w.push(`【个人史】吸烟写「${smoke}」，数量却填了「${smokeAmount}」，请核对。`);
+    }
+    const drink = stripTail(per.drinking);
+    const drinkAmount = stripTail(per.drinkingAmount);
+    if (drink && /^(无|不|否|从未|已戒)/.test(drink) && /\d/.test(drinkAmount)) {
+      w.push(`【个人史】饮酒写「${drink}」，数量却填了「${drinkAmount}」，请核对。`);
+    }
+
+    // 5) 出院诊断：填了要确认；没填就保持待填（不再静默沿用初步诊断）
+    const d = r.discharge || {};
+    const outDx = (Array.isArray(d.diagnoses) ? d.diagnoses : []).map(s => stripTail(s)).filter(Boolean);
+    if (!outDx.length) {
+      w.push('【出院记录】出院诊断未填写；如与初步诊断一致，请使用「从初步诊断带入」后核对确认。');
+    } else if (d.diagnosesConfirmed !== true) {
+      w.push('【出院记录】出院诊断已填写但尚未确认，请核对后再定稿。');
+    }
+
+    // 6) 辅助检查日期：格式不认识、或顺序与录入顺序相反
+    const dated = auxItems(r).filter(it => stripTail(it.date));
+    const parsed = [];
+    dated.forEach(it => {
+      const p = typeof AGE !== 'undefined' ? AGE.parseDate(it.date) : null;
+      if (!p) w.push(`【辅助检查】「${stripTail(it.name) || '未命名检查'}」的日期「${stripTail(it.date)}」无法识别，请按 YYYY-MM-DD 填写。`);
+      else parsed.push(p.ms);
+    });
+    for (let i = 1; i < parsed.length; i++) {
+      if (parsed[i] < parsed[i - 1]) {
+        w.push('【辅助检查】检查日期不是按时间先后排列，请核对每条结果对应的日期。');
+        break;
+      }
+    }
+
+    // 7) 病史重复：同栏重复只提示；跨栏完全重复生成时已去重，也提示来源
+    const fields = ['onset', 'cause', 'symptoms', 'relief', 'evolution', 'accompanying',
+      'negativeDiscriminating', 'treatment', 'generalCondition', 'extra'];
+    const seenAcross = new Map();
+    fields.forEach(key => {
+      const text = stripTail((r.hpi || {})[key]);
+      if (!text) return;
+      const local = new Map();
+      splitSentences(text).forEach(sentence => {
+        const k = sentenceKey(sentence);
+        if (!k) return;
+        local.set(k, (local.get(k) || 0) + 1);
+        if (!seenAcross.has(k)) seenAcross.set(k, key);
+      });
+      local.forEach((count, k) => {
+        if (count > 1) w.push(`【现病史】「${k}」在同一栏里重复了 ${count} 次，请删除多余的一句。`);
+      });
+    });
+    if (seenAcross.size) {
+      const counts = new Map();
+      fields.forEach(key => {
+        const text = stripTail((r.hpi || {})[key]);
+        if (!text) return;
+        splitSentences(text).forEach(sentence => {
+          const k = sentenceKey(sentence);
+          if (!k) return;
+          if (!counts.has(k)) counts.set(k, new Set());
+          counts.get(k).add(key);
+        });
+      });
+      counts.forEach((set, k) => {
+        if (set.size > 1) {
+          w.push(`【现病史】「${k}」同时写在 ${[...set].length} 个栏目里，生成时只保留一次，请核对是否需要合并。`);
+        }
+      });
+    }
+  }
+
   function validate(r) {
     const w = [];
     const b = r.basic || {};
@@ -23945,6 +25353,7 @@ const GENERATOR = (() => {
     checkDates(r, w);
     checkDeptAge(r, w);
     checkRecordConsistency(r, w);
+    checkNewConsistency(r, w);
     if (!((r.diagnosis || {}).confirmed || []).length) w.push('【初步诊断】未填写，可参考"诊断提示"。');
     else warnDiagnosisOrder(r, w);
     if (!stripTail(r.summary || '')) {
@@ -23984,8 +25393,111 @@ const GENERATOR = (() => {
     return w;
   }
 
+  /* ---------------------- 结构化校验提示 ---------------------- */
+
+  /**
+   * 把现有字符串提醒映射成可定位的结构化条目。
+   *
+   * 兼容策略：validate() 仍返回字符串数组（现有调用与 579 条测试不动），
+   * validateStructured() 在其上补充 code / severity / document / paths / action。
+   * 以后新增检查只要往 validate 里加一句，再在下面的规则表里补一条即可。
+   */
+  const WARNING_RULES = [
+    [/缺少姓名/, 'NAME_MISSING', 'record', ['basic.name'], 'error', '填写姓名'],
+    [/缺少性别/, 'GENDER_MISSING', 'record', ['basic.gender'], 'error', '选择性别'],
+    [/缺少年龄/, 'AGE_MISSING', 'record', ['basic.age', 'basic.birthDate'], 'error', '填写年龄或出生日期'],
+    [/年龄写「.*」.*出生日期.*不一致/, 'AGE_BIRTHDATE_MISMATCH', 'record', ['basic.age', 'basic.birthDate', 'basic.admitDate'], 'warning', '核对年龄与出生日期'],
+    [/【主诉】未填写/, 'CHIEF_COMPLAINT_MISSING', 'record', ['basic.chiefComplaint'], 'error', '填写主诉'],
+    [/【主诉】文字偏长/, 'CHIEF_COMPLAINT_TOO_LONG', 'record', ['basic.chiefComplaint'], 'warning', '压缩到 20 字以内'],
+    [/【主诉】疑似包含诊断性词语/, 'CHIEF_COMPLAINT_DIAGNOSIS_WORD', 'record', ['basic.chiefComplaint'], 'warning', '改成症状描述'],
+    [/【主诉】缺少持续时间/, 'CHIEF_COMPLAINT_DURATION_MISSING', 'record', ['basic.chiefComplaint', 'basic.chiefComplaintDuration'], 'warning', '补持续时间'],
+    [/【现病史】未填写/, 'HPI_MISSING', 'record', ['hpi'], 'error', '填写现病史'],
+    [/【系统回顾】尚未问诊/, 'ROS_UNTOUCHED', 'record', ['ros'], 'info', '逐系统问诊'],
+    [/【婚姻史】未填写/, 'MARITAL_MISSING', 'record', ['basic.marital', 'marriage.status'], 'warning', '填写婚姻状态'],
+    [/【婚姻史】.*两处不一致/, 'MARITAL_CONFLICT', 'record', ['basic.marital', 'marriage.status'], 'warning', '选择以哪个为准'],
+    [/【个人史】未填写/, 'PERSONAL_MISSING', 'record', ['personal'], 'warning', '补个人史'],
+    [/【既往史】过敏史.*具体过敏原/, 'ALLERGY_CONFLICT', 'record', ['pmh.allergy', 'pmh.allergenChecks'], 'warning', '核对过敏史'],
+    [/【个人史】吸烟/, 'SMOKING_CONFLICT', 'record', ['personal.smoking', 'personal.smokingAmount'], 'warning', '核对吸烟状态与数量'],
+    [/【个人史】饮酒/, 'DRINKING_CONFLICT', 'record', ['personal.drinking', 'personal.drinkingAmount'], 'warning', '核对饮酒状态与数量'],
+    [/【体格检查】未录入异常或生命体征/, 'PE_MISSING', 'record', ['pe'], 'warning', '录入查体'],
+    [/【体格检查】.*(不一致|冲突|未写入)/, 'PE_CONFLICT', 'record', ['pe'], 'warning', '核对查体描述'],
+    [/【生命体征】/, 'VITAL_RANGE', 'record', ['pe.vitals'], 'warning', '核对生命体征'],
+    [/【日期】/, 'DATE_INVALID', 'record', ['basic.admitDate', 'discharge.dischargeDate'], 'warning', '核对日期'],
+    [/【一般项目】科室是.*年龄/, 'DEPT_AGE_MISMATCH', 'record', ['basic.department', 'basic.age'], 'warning', '核对科室与年龄'],
+    [/【一般项目】年龄.*科室却是/, 'DEPT_AGE_MISMATCH', 'record', ['basic.department', 'basic.age'], 'warning', '核对科室与年龄'],
+    [/【现病史】左右侧肢体无力/, 'HISTORY_LATERALITY', 'record', ['hpi'], 'warning', '核对患侧与时间'],
+    [/【现病史】「.*」同时出现有和无/, 'HISTORY_POLARITY_CONFLICT', 'record', ['hpi'], 'warning', '核对是否对应不同时间'],
+    [/【现病史】起病描述写无明显诱因/, 'HISTORY_CAUSE_CONFLICT', 'record', ['hpi.onset', 'hpi.cause'], 'warning', '核对诱因'],
+    [/【现病史】同时写了症状同前/, 'HISTORY_PROGRESS_CONFLICT', 'record', ['hpi.evolution'], 'warning', '核对时间'],
+    [/【现病史】请按起病、就诊/, 'HISTORY_DURATION_CHECK', 'record', ['hpi'], 'warning', '核对时长'],
+    [/【现病史】「.*」在同一栏里重复/, 'HISTORY_DUPLICATE', 'record', ['hpi'], 'warning', '删除多余的一句'],
+    [/【现病史】「.*」同时写在 .* 个栏目/, 'HISTORY_DUPLICATE_ACROSS', 'record', ['hpi'], 'warning', '合并重复病史'],
+    [/【辅助检查】现病史提到了检查/, 'AUX_MISSING', 'record', ['auxiliary.items'], 'warning', '补检查结果'],
+    [/【辅助检查】.*日期.*无法识别/, 'AUX_DATE_INVALID', 'record', ['auxiliary.items'], 'warning', '改成 YYYY-MM-DD'],
+    [/【辅助检查】检查日期不是按时间先后/, 'AUX_DATE_ORDER', 'record', ['auxiliary.items'], 'warning', '按时间排序'],
+    [/【初步诊断】未填写/, 'DIAGNOSIS_MISSING', 'record', ['diagnosis.confirmed'], 'error', '填写初步诊断'],
+    [/【摘要】目前为自动生成的初稿/, 'SUMMARY_DRAFT', 'record', ['summary'], 'info', '核对并定稿'],
+    [/【首次病程录】鉴别诊断未填写/, 'SOAP_DIFF_MISSING', 'firstCourse', ['soap.a.diff'], 'warning', '补鉴别诊断'],
+    [/【首次病程录】诊疗计划/, 'SOAP_PLAN_MISSING', 'firstCourse', ['soap.p.perDiagnosis'], 'warning', '按诊断列计划'],
+    [/【首次病程录】.*关联不明确/, 'SOAP_DIFF_UNRELATED', 'firstCourse', ['soap.a.diff'], 'warning', '核对鉴别诊断'],
+    [/【出院记录】出院情况未填写/, 'DISCHARGE_STATUS_MISSING', 'discharge', ['discharge.dischargeStatus'], 'warning', '填写出院情况'],
+    [/【出院记录】出院日期未填写/, 'DISCHARGE_DATE_MISSING', 'discharge', ['discharge.dischargeDate'], 'warning', '填写出院日期'],
+    [/【出院记录】出院医嘱未填写/, 'DISCHARGE_ADVICE_MISSING', 'discharge', ['discharge.advice'], 'warning', '填写出院医嘱'],
+    [/【出院记录】出院医嘱缺/, 'DISCHARGE_ADVICE_MISSING', 'discharge', ['discharge.advice'], 'warning', '补出院医嘱'],
+    [/【出院记录】出院诊断未填写/, 'DISCHARGE_DX_MISSING', 'discharge', ['discharge.diagnoses'], 'warning', '从初步诊断带入并确认'],
+    [/【出院记录】出院诊断已填写但尚未确认/, 'DISCHARGE_DX_UNCONFIRMED', 'discharge', ['discharge.diagnoses', 'discharge.diagnosesConfirmed'], 'warning', '确认出院诊断']
+  ];
+
+  function warningMeta(message) {
+    for (const [re, code, document, paths, severity, action] of WARNING_RULES) {
+      if (re.test(message)) return { code, severity, document, paths, action };
+    }
+    return { code: 'GENERAL', severity: 'info', document: 'record', paths: [], action: '' };
+  }
+
+  /** 文书过期属于「资料变了、文字没跟上」，不在 validate 的缺项里重复刷屏 */
+  function staleDocumentWarnings(r) {
+    const out = [];
+    if (typeof RECORD_CORE === 'undefined' || !RECORD_CORE.documentState) return out;
+    const summaryState = RECORD_CORE.documentState(r, 'summary');
+    if (summaryState && /(^|-)stale$/.test(summaryState.state)) {
+      out.push({
+        code: 'DOC_STALE_SUMMARY', severity: 'warning', document: 'record', paths: ['summary'],
+        message: `【摘要】原始资料已变化（${(summaryState.changed || []).join('、') || '资料'}），当前摘要可能过期，请比较后更新。`,
+        action: '查看摘要更新'
+      });
+    }
+    ['s', 'oPe', 'oAux', 'basis'].forEach(seg => {
+      const st = RECORD_CORE.documentState(r, 'firstCourse', seg);
+      if (st && /(^|-)stale$/.test(st.state)) {
+        out.push({
+          code: 'DOC_STALE_SOAP', severity: 'warning', document: 'firstCourse', paths: [`soap.${seg === 's' ? 's.summary' : seg === 'oPe' ? 'o.pe' : seg === 'oAux' ? 'o.aux' : 'a.basis'}`],
+          message: `【首次病程录】${seg === 's' ? 'S 段' : seg === 'oPe' ? 'O 段体检' : seg === 'oAux' ? 'O 段辅助检查' : '诊断依据'}的原始资料已变化，当前文字可能过期。`,
+          action: '查看该段更新'
+        });
+      }
+    });
+    const dState = RECORD_CORE.documentState(r, 'discharge', 'admitCondition');
+    if (dState && /(^|-)stale$/.test(dState.state)) {
+      out.push({
+        code: 'DOC_STALE_DISCHARGE', severity: 'warning', document: 'discharge', paths: ['discharge.admitCondition'],
+        message: '【出院记录】入院情况是按较早的资料生成的，之后资料有变化；当前文字保留不改，请核对是否需要更新。',
+        action: '核对入院情况'
+      });
+    }
+    return out;
+  }
+
+  function validateStructured(r) {
+    const list = validate(r).map(message => {
+      const meta = warningMeta(message);
+      return { ...meta, message };
+    });
+    return list.concat(staleDocumentWarnings(r));
+  }
+
   return {
-    generate, generatePlain, validate,
+    generate, generatePlain, validate, validateStructured,
     buildBasicInfo, buildChiefComplaint, buildHPI, buildROS, buildPMH,
     buildPersonal, buildMarriage, buildMenstruation, buildChildbirth,
     buildMarriageChildbirth,
@@ -23995,7 +25507,7 @@ const GENERATOR = (() => {
     peEntries, buildFocusPE,
     // 首次病程录（SOAP）与出院记录
     buildFirstCourseRecord, buildDischargeRecord,
-    draftCaseSummary, draftObjectivePE, draftObjectiveAux, draftBasisDetail,
+    draftCaseSummary, draftObjectivePE, draftObjectiveAux, draftBasisDetail, draftAdmitCondition,
     diffRelatedToDiagnosis, diagnosisList, auxItems, hospitalDays,
     mergeIntoHistory,
     joinSentences, stripTail, SECTION_ORDER,
@@ -25339,6 +26851,9 @@ const APP = (() => {
   const CORE = RECORD_CORE;
   const K = CORE.STORAGE_KEYS;
 
+  /** 应用版本，显示在页脚，便于判断手机是否仍在用旧版 */
+  const APP_VERSION = '3.0.0';
+
   /** 当前正在编辑的病历 */
   let R = null;
   /** 已保存病历列表 */
@@ -25348,6 +26863,14 @@ const APP = (() => {
   let settings = { ...CORE.SETTINGS_DEFAULTS };
   /** 存储异常提示（损坏 / 写满），显示在界面顶部 */
   let storageAlert = '';
+  /** 其他标签页写了更新版本时的冲突状态；有值时禁止本页覆盖 */
+  let remoteConflict = null;
+  /** 本页会话 ID，用于区分「自己的写入」和「其他页面的写入」 */
+  const SESSION_ID = 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  /** 撤销栈：只在本机内存里，刷新即失效 */
+  const HISTORY = CORE.createHistory(20);
+  /** 界面层临时展示的生命体征示例值（绝不写入病历） */
+  let vitalsExample = null;
 
   /** 当前所有合法科室键，供 core 校验 */
   const deptKeys = () => SCHEMA.DEPARTMENTS.map(d => d.key);
@@ -25429,6 +26952,8 @@ const APP = (() => {
   let listSaveBlocked = false;
   let corruptCurrentRaw = '';
   let corruptListRaw = '';
+  /** 上一次写入是否失败，用于「恢复保存」时明确告知一次 */
+  let lastSaveFailed = false;
 
   function loadList() {
     const res = CORE.loadList(localStorage);
@@ -25472,9 +26997,33 @@ const APP = (() => {
       return false;
     }
     if (!R) return false;
-    const ok = CORE.safeSet(localStorage, K.current, JSON.stringify(R));
-    if (!ok) storageAlert = '当前病历自动保存失败，存储空间可能已满。';
-    return ok;
+    if (remoteConflict) {
+      // 其他标签页已有更新版本：在用户选择「载入新版本 / 保留为副本」前不写
+      return false;
+    }
+    if (!R.meta) R.meta = {};
+    const expected = Number(R.meta.revision) || 0;
+    const res = CORE.saveCurrent(localStorage, R, expected);
+    if (res.ok) {
+      R.meta.revision = res.record.meta.revision;
+      R.meta.updatedAt = res.record.meta.updatedAt;
+      const recovered = lastSaveFailed;
+      lastSaveFailed = false;
+      storageAlert = '';
+      if (recovered) toast('本机保存已恢复');
+      return true;
+    }
+    if (res.conflict) {
+      remoteConflict = { remote: res.remote, remoteRevision: res.remoteRevision };
+      storageAlert = '其他页面已保存了这份病历的更新版本（修订号 '
+        + res.remoteRevision + '）。为避免互相覆盖，本页已暂停保存。';
+      return false;
+    }
+    // 存储层失败：保留内存内容，明确告诉用户尚未落盘
+    lastSaveFailed = true;
+    storageAlert = '当前病历自动保存失败：' + (res.reason || '无法写入本机存储')
+      + '。内容仍在当前页面，请先导出留底。';
+    return false;
   }
 
   function loadCurrent() {
@@ -25502,7 +27051,7 @@ const APP = (() => {
     try { localStorage.removeItem(K.current); } catch (e) { /* 删不掉也不能把锁解开 */ }
     currentSaveBlocked = false;
     corruptCurrentRaw = '';
-    R = SCHEMA.emptyRecord();
+    R = newRecord();
     storageAlert = '';
     return saveCurrent();
   }
@@ -25515,6 +27064,43 @@ const APP = (() => {
     LIST = [];
     storageAlert = '';
     return saveList();
+  }
+
+  /** 新病历先分配 ID：撤销栈、多标签页冲突都按 ID 绑定，未保存过也要能撤销 */
+  function newRecord() {
+    const r = SCHEMA.emptyRecord();
+    r.id = CORE.uid();
+    return r;
+  }
+
+  /** 操作前存快照：只在本机内存，刷新即失效 */
+  function snapshot(label) {
+    if (!R) return false;
+    return HISTORY.push(R, label);
+  }
+
+  /** 撤销最近一次可撤销操作（按病历 ID 绑定） */
+  function undoLast() {
+    if (!R) return false;
+    const item = HISTORY.pop(R.id);
+    if (!item) { toast('没有可撤销的操作'); return false; }
+    let rec;
+    try {
+      rec = CORE.normalizeRecord(item.snapshot, SCHEMA.emptyRecord, deptKeys());
+    } catch (e) {
+      toast('撤销失败：快照无法读取');
+      return false;
+    }
+    const keepRev = Number(R.meta && R.meta.revision) || 0;
+    R = rec;
+    if (!R.meta) R.meta = {};
+    // 快照里的修订号是旧的，直接写会被当成冲突；撤销本身是一次新的写入
+    R.meta.revision = keepRev;
+    // 撤销后的内容要立即落盘，否则刷新又回到撤销前
+    const saved = saveCurrent();
+    render();
+    toast(saved ? `已撤销：${item.label}` : `已撤销：${item.label}（尚未写入本机）`);
+    return true;
   }
 
   function loadSettings() {
@@ -25715,20 +27301,37 @@ const APP = (() => {
       });
       const aliases = alias.length
         ? `<span class="tpl-alias">又叫：${esc(alias.join('、'))}</span>` : '';
-      return `<button class="tpl-item" data-tpl="${esc(t.key)}">
-        <span class="tpl-name">${esc(t.name)}</span>
+      return `<div class="tpl-item-group">
+        <div class="tpl-name">${esc(t.name)}</div>
         ${aliases}
-        ${t.hint ? `<span class="tpl-hint">${esc(t.hint)}</span>` : ''}
-        ${t.source ? `<span class="tpl-source">${esc(t.source.label)}：${esc(t.source.note)}</span>` : ''}
-      </button>`;
+        ${t.hint ? `<div class="tpl-hint">${esc(t.hint)}</div>` : ''}
+        ${t.source ? `<div class="tpl-source">${esc(t.source.label)}：${esc(t.source.note)}</div>` : ''}
+        <div class="btn-row">
+          <button class="btn btn-mini" data-tpl="${esc(t.key)}" data-tplmode="example">作为学习范例填入</button>
+          <button class="btn btn-mini btn-ghost" data-tpl="${esc(t.key)}" data-tplmode="patient">查看患者录入提纲</button>
+        </div>
+      </div>`;
     }).join('');
+
+    const last = R.meta && R.meta.lastTemplateFill;
+    const lastHtml = last
+      ? `<div class="doc-state doc-state-muted" data-doc-state="template-fill">
+          <div class="doc-state-title">本次带入：${esc(last.name || last.key)}（${(last.filled || []).length} 项，来源已逐字段标记）</div>
+          <div class="doc-state-btns">
+            <button type="button" class="btn btn-mini" data-act="viewTemplateFill">查看本次带入内容</button>
+            <button type="button" class="btn btn-mini btn-ghost" data-act="undoTemplateFill">撤销本次带入</button>
+          </div>
+          <div class="hint">撤销只回滚本次带入且此后没被改过的字段；你后来手改的内容会保留。</div>
+        </div>`
+      : '';
 
     return `<details class="tpl-card optional-details" id="tplCard">
       <summary>用模板开始（可选）<span class="tpl-count">${list.length} 个病种</span></summary>
-      <div class="hint">选一个病种，工具会填入一份<b>病历范例</b>已有的内容。院内范例按原资料保留缺项和诊断不确定性。
-        <b>请按实际问诊、查体和报告逐条核对补充</b>——模板不代表当前患者。</div>
+      <div class="hint">两种用途分开：<b>学习范例</b>会填入一份典型病例供对照，所有内容都标为「模板来源、未核对」；
+        <b>患者录入提纲</b>只列出应该问、应该查的项目，<b>不写入任何患者事实</b>。</div>
       <div class="tpl-list">${items}</div>
-      <div class="hint">套用只补空白项；一份病历只能套用一个模板。要换模板，请先新建病历。</div>
+      <div class="hint">范例只补空白项；一份病历只能套用一个模板。要换模板，请先新建病历。</div>
+      ${lastHtml}
     </details>`;
   }
 
@@ -26105,6 +27708,17 @@ const APP = (() => {
     `;
   }
 
+  function marriageConflictHtml() {
+    const c = CORE.marriageConflict(R);
+    if (!c) return '';
+    const btn = v => `<button type="button" class="btn btn-mini" data-act="resolveMarriage" data-value="${esc(v)}">采用「${esc(v || '未填')}」</button>`;
+    return `<div class="doc-state doc-state-stale" data-doc-state="marriage-conflict">
+      <div class="doc-state-title">旧存档里婚姻状态有两处不同的值，需要你选一个</div>
+      <div class="hint">基本情况：${esc(c.basicValue || '未填')}；婚姻史：${esc(c.marriageValue || '未填')}。两个原值都已保留，选择前不会静默舍弃。</div>
+      <div class="doc-state-btns">${btn(c.basicValue)}${btn(c.marriageValue)}</div>
+    </div>`;
+  }
+
   function renderMarriage() {
     const b = R.basic;
     const isFemale = b.gender === '女';
@@ -26115,8 +27729,9 @@ const APP = (() => {
               属于完全静默的丢失。schema 的 marriage.status 本来默认就是 ''，
               但 seg 没有空选项时界面会"看起来"一个都没选中，用户以为选过了。
               加「未填」空选项，选中态与数据一致，点一下也能主动清空。 */ ''}
-        ${seg('婚姻状况', 'marriage.status', [{ value: '', text: '未填' }, ...SCHEMA.MARITAL], {
-          hint: '不选＝没问过，病历这一节写「／」，同时在质控提醒里提示。'
+        ${marriageConflictHtml()}
+        ${seg('婚姻状况', 'basic.marital', [{ value: '', text: '未填' }, ...SCHEMA.MARITAL], {
+          hint: '婚姻状态只有一个来源：这里与「基本情况」是同一个字段，改任一处另一处立即一致。不选＝没问过。'
         })}
         ${input('结婚年龄', 'marriage.age', { type: 'number', inputmode: 'numeric', placeholder: '25' })}
         ${input('配偶健康状况', 'marriage.spouseHealth', { placeholder: '如：配偶体健' })}
@@ -26264,6 +27879,10 @@ const APP = (() => {
           <button class="btn btn-ghost" data-act="fillVitalsNormal">填入正常值</button>
         </div>
         <div class="hint">这是示例数值，不是实测结果；请按实际测量值逐项修改。</div>
+        ${vitalsExample ? `<div class="doc-state doc-state-muted" data-doc-state="vitals-example">
+          <div class="doc-state-title">参考示例（未写入病历）</div>
+          <div class="hint">体温 ${esc(vitalsExample.temperature)} ℃、脉搏 ${esc(vitalsExample.pulse)} 次/分、呼吸 ${esc(vitalsExample.respiration)} 次/分、血压 ${esc(vitalsExample.sbp)}/${esc(vitalsExample.dbp)} mmHg</div>
+        </div>` : ''}
         <div class="live-preview" id="bmiPreview"></div>
         <div class="ros-jump pe-jump">
           ${SCHEMA.PE_COMMON.map(g => `<button class="jump-btn" data-jump="pe-${g.key}">${esc(g.name)}</button>`).join('')}
@@ -26320,6 +27939,15 @@ const APP = (() => {
    * 判定逻辑的唯一实现是 SCHEMA.peChecked（那里也已删掉「有默认描述就算已勾」那一级），
    * 这里只负责呈现。
    */
+  /**
+   * 查体项的核对状态必须和「实际会输出的文字」绑定：
+   * 手填就用填入值，系统默认就用默认描述，内容一变核对即失效。
+   */
+  function peReviewValid(path, shownText) {
+    const st = CORE.fieldState(R, path);
+    return !!(st.reviewed && st.reviewedValueHash === CORE.fingerprint(String(shownText || '')));
+  }
+
   function peItemHtml(groupKey, containerKey, it) {
     const cur = (R.pe[containerKey] || {})[it.key];
     const val = cur !== undefined && cur !== null && String(cur) !== '' ? String(cur) : '';
@@ -26351,10 +27979,17 @@ const APP = (() => {
     const hint = state === 'default'
       ? '已勾选但没填具体所见，生成时自动写这句正常描述。'
       : (state === 'blank' ? '这一项没有默认描述，留空则病历里不会出现这句。' : '');
+    const reviewPath = `pe.${containerKey}.${it.key}`;
+    const reviewed = state !== 'off' && !!shown && peReviewValid(reviewPath, shown);
+    const reviewBadge = state === 'off' || !shown
+      ? ''
+      : (reviewed
+        ? '<span class="tag-done tag-review">已核对</span>'
+        : `<button type="button" class="chip small tag-review-btn" data-act="confirmPe" data-path="${esc(reviewPath)}">待核对·确认</button>`);
     return `<div class="pe-item is-${state}" data-pe-group="${esc(groupKey)}" data-pe-key="${esc(it.key)}">
       <div class="pe-label">
         <label class="pe-check"><input type="checkbox" data-pecheck="${esc(groupKey)}" data-pekey="${esc(it.key)}"${checked ? ' checked' : ''}><span>本次检查</span></label>
-        ${esc(it.label)}${badge}
+        ${esc(it.label)}${badge}${reviewBadge}
       </div>
       <div class="pe-input">
         <textarea rows="2" class="pe-text" data-path="pe.${containerKey}.${it.key}"
@@ -26379,6 +28014,7 @@ const APP = (() => {
       <div class="btn-row pe-tools">
         <button type="button" class="btn btn-ghost btn-sm" data-pall="1" data-pgroup="${esc(opt.groupKey)}">全选</button>
         <button type="button" class="btn btn-ghost btn-sm" data-pall="0" data-pgroup="${esc(opt.groupKey)}">全不选</button>
+        <button type="button" class="btn btn-ghost btn-sm" data-act="confirmAllPe" data-group="${esc(opt.groupKey)}" data-container="${esc(opt.containerKey || opt.groupKey)}">确认本组描述</button>
       </div>
       <div class="pe-body">${opt.itemHtml}</div>
     </details>`;
@@ -26483,10 +28119,142 @@ const APP = (() => {
     `;
   }
 
+  /* ---------------------- 文书状态（摘要 / SOAP / 出院） ---------------------- */
+
+  const DOC_LABEL = {
+    empty: '尚未生成', fresh: '与当前资料一致', stale: '需更新',
+    manual: '人工修改', 'manual-stale': '人工修改，资料已变化',
+    reviewed: '已核对', 'reviewed-stale': '已核对，但资料已变化',
+    legacy: '旧存档，来源不明'
+  };
+
+  function docStateOf(kind, section) {
+    try { return CORE.documentState(R, kind, section); } catch (e) { return null; }
+  }
+
+  function docStateClass(st) {
+    if (!st) return 'unknown';
+    if (/(^|-)stale$/.test(st.state)) return 'stale';
+    if (st.state === 'reviewed' || st.state === 'fresh') return 'ok';
+    if (st.state === 'manual') return 'manual';
+    return 'muted';
+  }
+
+  function changedText(st) {
+    const names = { identity: '身份与主诉', hpi: '现病史', pe: '体格检查', aux: '辅助检查', diagnoses: '诊断' };
+    const list = (st && st.changed) || [];
+    return list.map(k => names[k] || k).join('、');
+  }
+
+  /**
+   * 摘要状态面板：显示现有文字、最新草稿、哪类资料变了，并给出
+   * 「采用新草稿 / 保留原文并核对 / 撤销」三个明确动作。
+   * 不自动覆盖人工摘要。
+   */
+  function summaryStateHtml() {
+    const st = docStateOf('summary');
+    if (!st) return '';
+    const draft = GENERATOR.draftSummary(R);
+    const stale = /(^|-)stale$/.test(st.state);
+    const empty = st.state === 'empty';
+    const changed = changedText(st);
+    const tone = docStateClass(st);
+    if (empty) {
+      return `<div class="doc-state doc-state-muted" data-doc-state="summary">
+        <div class="doc-state-title">摘要为空：生成时实时使用自动草稿，未写入存档。</div>
+      </div>`;
+    }
+    return `<div class="doc-state doc-state-${tone}" data-doc-state="summary">
+      <div class="doc-state-title">摘要状态：${esc(DOC_LABEL[st.state] || st.state)}${stale && changed ? `（${esc(changed)}已变化）` : ''}</div>
+      ${stale ? `<details class="doc-diff"><summary>对比最新自动草稿</summary>
+        <div class="doc-diff-label">现有摘要</div><pre class="doc-pre">${esc(st.text)}</pre>
+        <div class="doc-diff-label">最新自动草稿</div><pre class="doc-pre">${esc(draft)}</pre>
+      </details>` : ''}
+      <div class="doc-state-btns">
+        <button type="button" class="btn btn-mini" data-act="updateSummary">采用新草稿</button>
+        <button type="button" class="btn btn-mini btn-ghost" data-act="keepSummary">保留原文并标记已核对</button>
+        <button type="button" class="btn btn-mini btn-ghost" data-act="undoDoc">撤销上一步</button>
+      </div>
+      <div class="hint">「保留原文」只确认当前文字，不会因为资料变化自动改写；撤销历史只在本机内存，刷新后失效。</div>
+    </div>`;
+  }
+
+  const SOAP_SEG_DRAFT = {
+    s: r => GENERATOR.draftCaseSummary(r),
+    oPe: r => GENERATOR.draftObjectivePE(r),
+    oAux: r => GENERATOR.draftObjectiveAux(r),
+    basis: r => GENERATOR.buildBasisSection(r)
+  };
+
+  /** 单个 SOAP 段落的状态条：只提示本段，更新也只动本段 */
+  function soapStateHtml(seg, title) {
+    const st = docStateOf('firstCourse', seg);
+    if (!st) return '';
+    if (st.state === 'empty') {
+      return `<div class="doc-state doc-state-muted" data-doc-state="fc-${seg}">
+        <div class="doc-state-title">${title}：留空时按当前资料自动生成，未写入存档。</div>
+      </div>`;
+    }
+    const stale = /(^|-)stale$/.test(st.state);
+    const changed = changedText(st);
+    const draft = SOAP_SEG_DRAFT[seg] ? SOAP_SEG_DRAFT[seg](R) : '';
+    return `<div class="doc-state doc-state-${docStateClass(st)}" data-doc-state="fc-${seg}">
+      <div class="doc-state-title">${title}：${esc(DOC_LABEL[st.state] || st.state)}${stale && changed ? `（${esc(changed)}已变化）` : ''}</div>
+      ${stale ? `<details class="doc-diff"><summary>对比最新草稿</summary>
+        <div class="doc-diff-label">现有文字</div><pre class="doc-pre">${esc(st.text)}</pre>
+        <div class="doc-diff-label">最新草稿</div><pre class="doc-pre">${esc(draft)}</pre>
+      </details>` : ''}
+      <div class="doc-state-btns">
+        <button type="button" class="btn btn-mini" data-act="updateSoapSeg" data-seg="${seg}">更新此段</button>
+        <button type="button" class="btn btn-mini btn-ghost" data-act="reviewSoapSeg" data-seg="${seg}">标记已核对</button>
+      </div>
+    </div>`;
+  }
+
+  function dischargeDxStateHtml() {
+    const st = docStateOf('discharge', 'diagnoses');
+    if (!st) return '';
+    const d = R.discharge || {};
+    const list = Array.isArray(d.diagnoses) ? d.diagnoses : [];
+    const confirmed = !!d.diagnosesConfirmed;
+    if (!list.length) {
+      return `<div class="doc-state doc-state-muted" data-doc-state="discharge-dx">
+        <div class="doc-state-title">出院诊断：待填写。不会自动沿用初步诊断。</div>
+        <div class="doc-state-btns">
+          <button type="button" class="btn btn-mini" data-act="importDischargeDx">从初步诊断带入</button>
+        </div>
+      </div>`;
+    }
+    const tone = confirmed ? 'ok' : 'stale';
+    return `<div class="doc-state doc-state-${tone}" data-doc-state="discharge-dx">
+      <div class="doc-state-title">出院诊断：${confirmed ? '已确认' : '已填写，尚未确认'}</div>
+      ${st.state === 'legacy' ? '<div class="hint">这份出院诊断来自旧存档，来源无法判断，请核对。</div>' : ''}
+      <div class="doc-state-btns">
+        <button type="button" class="btn btn-mini" data-act="confirmDischargeDx">确认出院诊断</button>
+        <button type="button" class="btn btn-mini btn-ghost" data-act="importDischargeDx">从初步诊断重新带入</button>
+      </div>
+    </div>`;
+  }
+
+  function admitConditionStateHtml() {
+    const st = docStateOf('discharge', 'admitCondition');
+    if (!st || st.state === 'empty') return '';
+    const stale = /(^|-)stale$/.test(st.state);
+    return `<div class="doc-state doc-state-${docStateClass(st)}" data-doc-state="discharge-admit">
+      <div class="doc-state-title">入院情况：${esc(DOC_LABEL[st.state] || st.state)}${stale ? `（${esc(changedText(st))}已变化）` : ''}</div>
+      ${stale ? `<div class="hint">已确认的入院情况不会被后来更新的出院查体悄悄改写；如需按当前资料重写，请点「更新入院情况」。</div>
+      <div class="doc-state-btns">
+        <button type="button" class="btn btn-mini" data-act="updateAdmitCondition">更新入院情况</button>
+      </div>` : ''}
+    </div>`;
+  }
+
   function renderSummary() {
     const diagList = ((R.diagnosis || {}).confirmed) || [];
     const hints = HINTS.analyze(R);
-    const warnings = GENERATOR.validate(R);
+    const warnings = (typeof GENERATOR.validateStructured === 'function')
+      ? GENERATOR.validateStructured(R)
+      : GENERATOR.validate(R).map(m => ({ code: 'GENERAL', severity: 'warning', paths: [], message: m }));
 
     const diagHtml = diagList.map((d, i) => `
       <div class="diag-row">
@@ -26507,7 +28275,13 @@ const APP = (() => {
     `).join('') : '<div class="empty">暂无匹配的参考提示。已有足够的阳性发现时才会出现提示。</div>';
 
     const warnHtml = warnings.length
-      ? warnings.map(w => `<div class="warn-item">${esc(w)}</div>`).join('')
+      ? warnings.map(w => {
+        const p = (w.paths && w.paths[0]) || '';
+        const jump = p
+          ? ` <button type="button" class="btn btn-mini btn-ghost" data-act="jumpPath" data-path="${esc(p)}">定位</button>`
+          : '';
+        return `<div class="warn-item warn-${esc(w.severity || 'warning')}" data-code="${esc(w.code || '')}">${esc(w.message)}${jump}</div>`;
+      }).join('')
       : '<div class="hint">当前规则未发现提醒，仍请逐项核对。</div>';
 
     return `
@@ -26545,6 +28319,7 @@ const APP = (() => {
           rows: 5,
           placeholder: '留空自动生成'
         })}
+        ${summaryStateHtml()}
       </div>
 
       ${renderSoap()}
@@ -26636,6 +28411,7 @@ const APP = (() => {
             rows: 3,
             placeholder: '留空则自动归纳现病史，并标注「待补充」'
           })}
+          ${soapStateHtml('s', 'S 段')}
           <details class="optional-details"${String(s.consistency || '').trim() ? ' open' : ''}>
             <summary>补充说明</summary>
             ${input('与病史采集一致性的补充说明', 'soap.s.consistency', {
@@ -26650,10 +28426,12 @@ const APP = (() => {
             rows: 2,
             placeholder: '留空则由阳性体征自动生成（只取阳性，不抄整段查体）'
           })}
+          ${soapStateHtml('oPe', 'O 段·体格检查')}
           ${textarea('与疾病相关的辅助检查结果', 'soap.o.aux', {
             rows: 2,
             placeholder: '留空则由「辅助检查」页自动生成'
           })}
+          ${soapStateHtml('oAux', 'O 段·辅助检查')}
         </div>
 
         <div class="soap-sec">
@@ -26662,6 +28440,7 @@ const APP = (() => {
             rows: 3,
             placeholder: '把病史、体检、辅助检查三方面的关键点各写一两句，不要逐条罗列全部检查'
           })}
+          ${soapStateHtml('basis', 'A 段·诊断依据')}
           <div class="soap-subtitle">各项诊断的依据（每条诊断都要病史 / 体检 / 辅助检查齐全）</div>
           ${basisRows || '<div class="empty">还没有按诊断列依据，点下面添加</div>'}
           <button class="btn btn-ghost" data-act="addSoapBasis">+ 添加一条诊断依据</button>
@@ -26716,11 +28495,12 @@ const APP = (() => {
     return `
       <details class="card mini-details soap-card" id="dischargeCard">
         <summary>出院记录</summary>
-        <div class="hint">出院诊断留空时沿用初步诊断；填写出院日期后可计算住院天数。</div>
+        <div class="hint">出院诊断需单独填写并确认，不会自动沿用初步诊断；填写出院日期后可计算住院天数。</div>
         ${input('出院日期', 'discharge.dischargeDate', { type: 'date' })}
         ${textarea('入院情况（入院时主要症状、体征与入院诊断）', 'discharge.admitCondition', {
           rows: 3, placeholder: '留空则按主诉 + 阳性体征 + 初步诊断自动生成'
         })}
+        ${admitConditionStateHtml()}
         ${textarea('诊疗经过（病情变化、检查结果、治疗经过及效果）', 'discharge.course', {
           rows: 4,
           placeholder: '如：入院后完善血常规示……，予……治疗，体温于第 3 天降至正常，复查胸片示……'
@@ -26729,8 +28509,9 @@ const APP = (() => {
           rows: 3, placeholder: '如：无发热，咳嗽明显减轻，双肺呼吸音清，复查血常规正常'
         })}
         <div class="soap-subtitle">出院诊断</div>
-        ${rows || '<div class="empty">留空则沿用初步诊断</div>'}
+        ${rows || '<div class="empty">尚未填写出院诊断</div>'}
         <button class="btn btn-ghost" data-act="addDischargeDiag">+ 添加一条出院诊断</button>
+        ${dischargeDxStateHtml()}
         <div class="soap-subtitle">出院医嘱</div>
         ${input('药物治疗', 'discharge.advice.drug', { placeholder: '如：口服头孢克洛 0.25g tid × 5 天' })}
         ${input('非药物治疗', 'discharge.advice.nonDrug', { placeholder: '如：戒烟、呼吸功能锻炼' })}
@@ -26794,6 +28575,68 @@ const APP = (() => {
     return k;
   }
 
+  /** 已勾选、没填文字、但生成时会输出默认描述的查体项 */
+  function peCheckedDefaults() {
+    const out = [];
+    const groups = SCHEMA.PE_COMMON.map(g => ({ key: g.key, container: g.key, items: g.items || [] }));
+    Object.keys(SCHEMA.PE_SPECIAL || {}).forEach(k => {
+      groups.push({ key: 'special_' + k, container: 'special_' + k, items: (SCHEMA.PE_SPECIAL[k] || {}).items || [] });
+    });
+    groups.forEach(g => g.items.forEach(it => {
+      const val = String(((R.pe || {})[g.container] || {})[it.key] || '');
+      if (val) return;
+      if (!SCHEMA.peChecked(R, g.key, it.key)) return;
+      const text = SCHEMA.peNormalText(it);
+      if (!text) return;
+      out.push({ path: 'pe.' + g.container + '.' + it.key, text, label: it.label || it.key });
+    }));
+    return out;
+  }
+
+  /** 输出前核对清单：只提示、不自动往正文里塞「正常」事实 */
+  function outputChecklistHtml() {
+    const fs = (R.meta && R.meta.fieldStates) || {};
+    let tpl = 0;
+    Object.keys(fs).forEach(p => {
+      const st = CORE.fieldState(R, p);
+      if (st.source === 'template' && !CORE.fieldReviewValid(R, p)) tpl++;
+    });
+    const pePending = peCheckedDefaults().filter(x => !CORE.fieldReviewValid(R, x.path, x.text));
+    const peDefault = pePending.length;
+    const stale = [];
+    const sm = CORE.documentState(R, 'summary');
+    if (/(^|-)stale$/.test(sm.state)) stale.push({ label: '摘要', path: 'summary' });
+    [['s', '首次病程录 S 段', 'soap.s.summary'], ['oPe', '首次病程录 O 段（体检）', 'soap.o.pe'],
+      ['oAux', '首次病程录 O 段（辅助检查）', 'soap.o.aux'], ['basis', '诊断依据', 'soap.a.basis']]
+      .forEach(([seg, label, path]) => {
+        if (/(^|-)stale$/.test(CORE.documentState(R, 'firstCourse', seg).state)) stale.push({ label, path });
+      });
+    if (/(^|-)stale$/.test(CORE.documentState(R, 'discharge', 'admitCondition').state)) {
+      stale.push({ label: '出院记录·入院情况', path: 'discharge.admitCondition' });
+    }
+    const dxUnconfirmed = (R.discharge && (R.discharge.diagnoses || []).filter(Boolean).length)
+      && !R.discharge.diagnosesConfirmed;
+
+    const items = [];
+    if (tpl) items.push({ text: `有 ${tpl} 个字段来自教学模板，尚未核对`, path: Object.keys(fs).find(p => CORE.fieldState(R, p).source === 'template' && !CORE.fieldReviewValid(R, p)) });
+    if (peDefault) items.push({ text: `有 ${peDefault} 项查体使用系统默认描述，尚未确认：` + pePending.slice(0, 3).map(x => `${x.label}「${x.text}」`).join('；'), path: pePending[0].path });
+    stale.forEach(s => items.push({ text: `${s.label}已过期：原始资料变过，当前文字未更新`, path: s.path }));
+    if (dxUnconfirmed) items.push({ text: '出院诊断已填写，但尚未单独确认', path: 'discharge.diagnoses' });
+
+    if (!items.length) {
+      return `<div class="doc-state doc-state-ok" data-doc-state="output-check">
+        <div class="doc-state-title">输出前核对：没有未确认的模板事实、默认查体或过期段落。</div>
+        <div class="hint">自动检查不能替代逐字核对；复制的是草稿，不是已签发的病历。</div>
+      </div>`;
+    }
+    return `<div class="doc-state doc-state-stale" data-doc-state="output-check">
+      <div class="doc-state-title">输出前核对：以下 ${items.length} 类内容尚未确认（仍可复制草稿）</div>
+      <ul class="outline-list">
+        ${items.map(it => `<li>${esc(it.text)}${it.path ? ` <button type="button" class="btn btn-mini btn-ghost" data-act="jumpPath" data-path="${esc(it.path)}">定位</button>` : ''}</li>`).join('')}
+      </ul>
+    </div>`;
+  }
+
   function renderOutput() {
     const res = GENERATOR.generate(R, { rosMode: settings.rosMode });
     GENERATED = res;
@@ -26807,6 +28650,7 @@ const APP = (() => {
       <button type="button" class="view-btn${OUT_VIEW === v.key ? ' on' : ''}"
         data-view="${v.key}">${esc(v.name)}</button>`).join('');
     return `
+      ${outputChecklistHtml()}
       <div class="card review-panel">
         <div class="card-title">核对提醒</div>
         <div class="hint">请结合实际问诊、查体和报告核对；自动检查不能保证病历正确或完整。</div>
@@ -26834,7 +28678,7 @@ const APP = (() => {
         ${OUT_VIEW === 'firstCourse' ? `
           <label class="field">
             <span class="field-label">记录时间（可留空）</span>
-            <input type="text" data-fcdate value="${esc(fcDate)}" placeholder="如：2026-10-18 09:30">
+            <input type="text" data-fcdate value="${esc(fcStamp())}" placeholder="如：2026-10-18 09:30">
           </label>` : ''}
         <div class="btn-row">
           <button class="btn" data-act="copyText">复制本篇</button>
@@ -26974,8 +28818,10 @@ const APP = (() => {
 
   /** 当前生成视图（只在界面层保存，不写进病历存档） */
   let OUT_VIEW = 'record';
-  /** 首次病程录的标题时间（界面层临时值，不参与评分，故不入存档） */
-  let fcDate = '';
+  /** 首次病程录的记录时间存在病历里（soap.recordTime），随病历保存和切换，不跨病历串用 */
+  function fcStamp() {
+    return String((R.soap && R.soap.recordTime) || '').trim();
+  }
 
   function outputViewMeta() {
     const v = OUTPUT_VIEWS.find(x => x.key === OUT_VIEW) || OUTPUT_VIEWS[0];
@@ -26987,7 +28833,7 @@ const APP = (() => {
       return '首次病程录是归纳而非复制：S 段概括现病史，O 段只取阳性体征，A 段按诊断给依据，P 段按诊断列检查与治疗。标「待补充」的地方就是还没写的内容。';
     }
     if (OUT_VIEW === 'discharge') {
-      return '出院记录包括入院情况、诊疗经过、出院情况、出院诊断和出院医嘱；出院诊断留空时沿用初步诊断，请核对。';
+      return '出院记录包括入院情况、诊疗经过、出院情况、出院诊断和出院医嘱；出院诊断需要单独填写并确认，不会自动沿用初步诊断。';
     }
     return '大病历 = 一般项目 → 主诉 → 现病史 → 既往史 → 系统回顾 → 个人史 → 婚姻史 → 月经与生育史 → 家庭史 → 体格检查 → 辅助检查 → 摘要 → 诊断依据 → 初步诊断。';
   }
@@ -26996,7 +28842,7 @@ const APP = (() => {
   function outputTextOf(view, res) {
     const r = res || GENERATOR.generate(R, { rosMode: settings.rosMode });
     if (view === 'firstCourse') {
-      return GENERATOR.buildFirstCourseRecord(R, fcDate.trim() ? { date: fcDate.trim() } : {});
+      return GENERATOR.buildFirstCourseRecord(R, fcStamp() ? { date: fcStamp() } : {});
     }
     if (view === 'discharge') return GENERATOR.buildDischargeRecord(R);
     return r.text;
@@ -27097,7 +28943,7 @@ const APP = (() => {
         return txt((R.personal || {}).smoking) || txt(R.personal.environment) ? 'done'
           : (anyText(R.personal) ? 'part' : 'empty');
       case 'marriage':
-        return txt((R.marriage || {}).status) ? 'done' : (anyText(R.marriage) ? 'part' : 'empty');
+        return txt(b.marital) ? 'done' : (anyText(R.marriage) ? 'part' : 'empty');
       case 'family':
         return anyText(R.family) ? 'part' : 'empty';
       case 'pe': {
@@ -27192,6 +29038,29 @@ const APP = (() => {
     render();
   }
 
+  /** 提醒里的「定位」：切到字段所在步骤并聚焦，返回后不丢填写位置 */
+  function jumpToPath(path) {
+    if (!path) return;
+    const top = String(path).split('.')[0];
+    const stepKey = {
+      basic: 'basic', hpi: 'hpi', pmh: 'pmh', ros: 'ros', personal: 'personal',
+      marriage: 'marriage', menstruation: 'marriage', childbirth: 'marriage',
+      family: 'family', pe: 'pe', auxiliary: 'aux', summary: 'summary',
+      diagnosis: 'summary', soap: 'summary', discharge: 'summary'
+    }[top];
+    if (stepKey) {
+      const i = STEPS.findIndex(s => s.key === stepKey);
+      if (i >= 0 && i !== step) { step = i; render(); }
+    }
+    const sel = `[data-path="${path}"],[data-diag],[data-aux]`;
+    const el = document.querySelector(`[data-path="${path}"]`) || document.querySelector(sel);
+    if (el) {
+      if (el.tagName === 'DETAILS') el.open = true;
+      if (el.scrollIntoView) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      if (el.focus) el.focus({ preventScroll: true });
+    }
+  }
+
   /**
    * 套用模板病例。
    *
@@ -27203,10 +29072,28 @@ const APP = (() => {
    *   3. 套完留在原步骤、滚回顶部，用 toast 报「补了多少项」，
    *      不自动跳到下一步——学生通常想先看看都写了什么。
    */
-  function applyTemplate(tplKey) {
+  function applyTemplate(tplKey, mode) {
     if (typeof TEMPLATES === 'undefined' || !TEMPLATES.get) return;
     const t = TEMPLATES.get(tplKey);
     if (!t) return;
+
+    if (mode === 'patient') {
+      const res = TEMPLATES.apply(R, tplKey, { mode: 'patient' });
+      if (!res || !res.ok) { toast('模板数据不完整'); return; }
+      const groups = {};
+      (res.outline || []).forEach(o => {
+        (groups[o.section] = groups[o.section] || []).push(o.label);
+      });
+      const body = Object.keys(groups).map(sec => `
+        <div class="soap-subtitle">${esc(sec)}</div>
+        <ul class="outline-list">${groups[sec].map(x => `<li>${esc(x)}</li>`).join('')}</ul>
+      `).join('');
+      showModal(`患者录入提纲：${t.name}`,
+        `<div class="hint">以下只是「应该问什么、应该查什么」的提纲，<b>没有写入任何患者事实</b>；
+          模板里的阴性病史、阳性体征、检查结果和诊断都不属于当前患者。</div>${body}
+         <div class="btn-row"><button class="btn" data-close>关闭</button></div>`);
+      return;
+    }
 
     if (R.__templateKey && R.__templateKey !== tplKey) {
       showModal('不能混合模板', '<div class="warn-item">这份病历已套用其他模板。为避免混入不同病例的内容，请先新建病历，再选择新模板。</div><div class="btn-row"><button class="btn" data-close>关闭</button></div>');
@@ -27214,17 +29101,18 @@ const APP = (() => {
     }
 
     const ok = window.confirm(
-      `套用模板：${t.name}\n\n` +
+      `作为学习范例套用：${t.name}\n\n` +
       (t.source ? `${t.source.label}：${t.source.note}\n\n` : '') +
-      '这会把病历范例已有的内容填进**空白项**（现病史、既往史、查体、辅助检查、诊断等），' +
-      '你已经写过的内容不会被覆盖。已有内容若来自另一份旧模板，会与新模板混合，请先新建病历。\n\n' +
+      '这会把教学范例已有的内容填进**空白项**（现病史、既往史、查体、辅助检查、诊断等），' +
+      '你已经写过的内容不会被覆盖。所有带入内容都会标为「模板来源、未核对」。\n\n' +
       '套用后请按实际问到的、查到的逐条核对补充；缺项保持待填，影像考虑不能替代病理诊断。\n\n' +
       '确定套用吗？'
     );
     if (!ok) return;
 
     const before = R.basic.chiefComplaint || R.hpi.symptoms || '';
-    const res = TEMPLATES.apply(R, tplKey);
+    snapshot('套用模板：' + t.name);
+    const res = TEMPLATES.apply(R, tplKey, { mode: 'example' });
     if (!res || !res.ok) { toast('套用失败，模板数据可能不完整'); return; }
     R.__templateKey = tplKey;
 
@@ -27237,10 +29125,50 @@ const APP = (() => {
     render();
     window.scrollTo({ top: 0, behavior: 'instant' });
 
-    const parts = [`已套用「${t.name}」，填入 ${res.count} 项`];
+    const parts = [`已套用「${t.name}」，填入 ${res.count} 项（模板来源，未核对）`];
     if (deptChanged) parts.push(`科室已设为${TEMPLATES.deptName(t.dept)}`);
     if (before) parts.push('你原先写的内容没有被覆盖');
     toast(parts.join('；'));
+  }
+
+  /** 查看本次模板带入的具体文字 */
+  function viewTemplateFill() {
+    const last = R.meta && R.meta.lastTemplateFill;
+    if (!last) { toast('没有本次带入记录'); return; }
+    const rows = Object.keys(last.values || {}).map(p =>
+      `<li><code>${esc(p)}</code>：${esc(last.values[p])}</li>`).join('');
+    showModal('本次带入内容',
+      `<div class="hint">共 ${(last.filled || []).length} 项，全部标记为「模板来源、未核对」。
+        请逐条对照实际问诊和查体修改。</div>
+       <ul class="outline-list">${rows || '<li>（没有可显示的文字字段）</li>'}</ul>
+       <div class="btn-row"><button class="btn" data-close>关闭</button></div>`);
+  }
+
+  /**
+   * 撤销本次模板带入：只回滚「本次写入、且此后没被改过」的字段。
+   * 用户后来手改过的内容一律保留，不做整段覆盖。
+   */
+  function undoTemplateFill() {
+    const last = R.meta && R.meta.lastTemplateFill;
+    if (!last) { toast('没有本次带入记录'); return; }
+    const paths = Object.keys(last.values || {});
+    if (!paths.length) { toast('本次带入没有可撤销的文字字段'); return; }
+    snapshot('撤销模板带入：' + (last.name || last.key));
+    let cleared = 0, kept = 0;
+    paths.forEach(p => {
+      const cur = CORE.getPath(R, p);
+      if (String(cur == null ? '' : cur) === String(last.values[p])) {
+        CORE.setPath(R, p, '');
+        CORE.setFieldState(R, p, { source: 'manual', reviewed: false, reviewedValueHash: '', sourceRef: '' });
+        cleared++;
+      } else {
+        kept++;
+      }
+    });
+    R.meta.lastTemplateFill = null;
+    saveCurrent();
+    render();
+    toast(`已撤销 ${cleared} 项${kept ? `，保留 ${kept} 项你后来改过的内容` : ''}`);
   }
 
   /* ========================= 渲染主循环 ========================= */
@@ -27276,6 +29204,8 @@ const APP = (() => {
              ${currentSaveBlocked ? '<button type="button" class="alert-act" data-discard-corrupt="current">新建空白病历</button>' : ''}
              ${listSaveBlocked ? '<button type="button" class="alert-act" data-export-corrupt="list">导出原始列表</button>' : ''}
              ${listSaveBlocked ? '<button type="button" class="alert-act" data-discard-corrupt="list">新建空列表</button>' : ''}
+             ${remoteConflict ? '<button type="button" class="alert-act" data-act="loadRemote">载入新版本</button>' : ''}
+             ${remoteConflict ? '<button type="button" class="alert-act" data-act="keepCopy">保留为副本</button>' : ''}
              <button type="button" class="alert-x" data-dismiss-alert>知道了</button>
            </div>
          </div>`
@@ -27389,6 +29319,27 @@ const APP = (() => {
       else if (state === 'default') { span.className = 'tag-auto'; span.textContent = '系统默认'; }
       else { span.className = 'tag-req'; span.textContent = '需填'; }
       label.appendChild(span);
+
+      // 核对角标：与「实际输出文字」绑定，手改后立即回到待核对
+      label.querySelectorAll('.tag-review,.tag-review-btn').forEach(n => n.remove());
+      const path = `pe.${containerKey}.${itemKey}`;
+      const shownText = val || (checked ? normalText : '');
+      if (shownText) {
+        if (peReviewValid(path, shownText)) {
+          const ok = document.createElement('span');
+          ok.className = 'tag-done tag-review';
+          ok.textContent = '已核对';
+          label.appendChild(ok);
+        } else {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'chip small tag-review-btn';
+          btn.dataset.act = 'confirmPe';
+          btn.dataset.path = path;
+          btn.textContent = '待核对·确认';
+          label.appendChild(btn);
+        }
+      }
     }
 
     // 提示文案跟着状态切换（只动我们自己加的那条，别碰别的 hint）
@@ -27470,11 +29421,26 @@ const APP = (() => {
           // 保留原始字符串，生成时再处理
         }
         setPath(R, t.dataset.path, v);
+        // 记录来源：手写摘要 / 手写 SOAP 段落要能区分「生成后被改」与「原本就是人写的」
+        if (t.dataset.path === 'summary') {
+          CORE.markDocumentManual(R, 'summary');
+        } else if (t.dataset.path === 'soap.s.summary') {
+          CORE.markDocumentManual(R, 'firstCourse', 's');
+        } else if (t.dataset.path === 'soap.o.pe') {
+          CORE.markDocumentManual(R, 'firstCourse', 'oPe');
+        } else if (t.dataset.path === 'soap.o.aux') {
+          CORE.markDocumentManual(R, 'firstCourse', 'oAux');
+        } else if (t.dataset.path === 'soap.a.basis') {
+          CORE.markDocumentManual(R, 'firstCourse', 'basis');
+        } else if (t.dataset.path === 'discharge.admitCondition') {
+          CORE.markDocumentManual(R, 'discharge', 'admitCondition');
+        }
         saveCurrent();
         updateLivePreviews();
         // 查体项：只刷新这一个条目的「已填 / 系统默认 / 需填」标记，
         // 不整页重绘（否则输入框会失焦、光标跳到开头）。
         if (t.dataset.path.startsWith('pe.')) refreshPeBadge(t);
+        if (t.dataset.path.startsWith('pe.')) CORE.markFieldManual(R, t.dataset.path);
         // 生命体征的可信范围：边输边标，不等生成时才说
         if (t.dataset.path.startsWith('pe.vitals.')) markVital(t);
         // 过敏史/性别切换需要重绘
@@ -27504,14 +29470,20 @@ const APP = (() => {
         const list = getPath(R, t.dataset.arrstr);
         if (Array.isArray(list)) {
           list[parseInt(t.dataset.idx, 10)] = t.value;
+          if (t.dataset.arrstr === 'discharge.diagnoses') {
+            // 改过就必须重新确认，不能继承上一次的确认状态
+            R.discharge.diagnosesConfirmed = false;
+            CORE.markDocumentManual(R, 'discharge', 'diagnoses');
+          }
           saveCurrent();
         }
       }
-      // 首次病程录标题时间（界面层临时值，不入存档）
+      // 首次病程录记录时间：写入当前病历，切换病历不沿用上一份
       if (t.dataset.fcdate !== undefined) {
-        fcDate = t.value;
+        R.soap.recordTime = t.value;
+        saveCurrent();
         const pre = document.getElementById('outputText');
-        if (pre) pre.textContent = GENERATOR.buildFirstCourseRecord(R, fcDate.trim() ? { date: fcDate.trim() } : {});
+        if (pre) pre.textContent = GENERATOR.buildFirstCourseRecord(R, fcStamp() ? { date: fcStamp() } : {});
       }
     });
 
@@ -27523,7 +29495,7 @@ const APP = (() => {
 
       // 套用模板病例
       if (ds.tpl !== undefined) {
-        applyTemplate(ds.tpl);
+        applyTemplate(ds.tpl, ds.tplmode || 'example');
         return;
       }
 
@@ -27734,6 +29706,13 @@ const APP = (() => {
       // 勾选 / 取消勾选一个查体项
       if (ds.pecheck !== undefined) {
         SCHEMA.setPeChecked(R, ds.pecheck, ds.pekey, t.checked);
+        const path = 'pe.' + ds.pecheck + '.' + ds.pekey;
+        const filled = String((R.pe[ds.pecheck] || {})[ds.pekey] || '');
+        if (t.checked && !filled) {
+          CORE.setFieldState(R, path, { source: 'default', reviewed: false, reviewedValueHash: '' });
+        } else if (!t.checked) {
+          CORE.setFieldState(R, path, { source: 'default', reviewed: false, reviewedValueHash: '' });
+        }
         saveCurrent();
         // 就地刷新，不整页重绘（重绘会丢滚动位置）
         const box = t.closest('.pe-item');
@@ -27852,13 +29831,41 @@ const APP = (() => {
         break;
       }
       case 'draftSummary': {
+        snapshot('生成摘要');
         R.summary = '';  // 先清空，让它自动生成
-        saveCurrent();
         const draft = GENERATOR.draftSummary(R);
         R.summary = draft;
+        CORE.markDocumentGenerated(R, 'summary');
         saveCurrent();
         render();
         toast('已生成摘要初稿，请核对');
+        break;
+      }
+      case 'updateSummary': {
+        snapshot('更新摘要');
+        R.summary = GENERATOR.draftSummary(R);
+        CORE.markDocumentGenerated(R, 'summary');
+        saveCurrent();
+        render();
+        toast('已采用最新草稿；旧摘要仍可通过撤销恢复');
+        break;
+      }
+      case 'resolveMarriage': {
+        CORE.resolveMarriage(R, String(el.dataset.value || ''));
+        saveCurrent();
+        render();
+        toast('婚姻状态已统一，之后只维护这一个字段');
+        break;
+      }
+      case 'keepSummary': {
+        CORE.markDocumentReviewed(R, 'summary');
+        saveCurrent();
+        render();
+        toast('已按当前文字标记核对；资料再变化时会重新提示');
+        break;
+      }
+      case 'undoDoc': {
+        undoLast();
         break;
       }
       case 'rosAllNegative': {
@@ -27900,11 +29907,73 @@ const APP = (() => {
         break;
       }
       case 'fillVitalsNormal': {
-        if (!confirm('这些是示例数值，不是患者的实测结果。填入后请逐项改为实际测量值。确定填入吗？')) return;
+        // 只展示对照示例，不写入任何数字：未实测的生命体征不能被当成患者事实
         const normal = { temperature: '36.5', pulse: '78', respiration: '18', sbp: '120', dbp: '80' };
-        Object.keys(normal).forEach(k => { if (!R.pe.vitals[k]) R.pe.vitals[k] = normal[k]; });
+        const msg = '以下只是示例数值，不是患者的实测结果：\n\n'
+          + `体温 ${normal.temperature} ℃、脉搏 ${normal.pulse} 次/分、呼吸 ${normal.respiration} 次/分、血压 ${normal.sbp}/${normal.dbp} mmHg\n\n`
+          + '这些数字不会写入病历。请按实际测量值逐项填写。';
+        if (!window.confirm(msg)) return;
+        vitalsExample = normal;
+        render();
+        toast('示例值仅供参考，未写入病历');
+        break;
+      }
+      case 'jumpPath': {
+        jumpToPath(String(el.dataset.path || ''));
+        break;
+      }
+      case 'viewTemplateFill': { viewTemplateFill(); break; }
+      case 'undoTemplateFill': { undoTemplateFill(); break; }
+      case 'confirmPe': {
+        const path = String(el.dataset.path || '');
+        const m = path.match(/^pe\.([^.]+)\.(.+)$/);
+        if (!m) return;
+        const containerKey = m[1], itemKey = m[2];
+        const groupKey = containerKey;
+        const it = peItemsOf(groupKey).find(x => x.key === itemKey);
+        const val = String((R.pe[containerKey] || {})[itemKey] || '');
+        const checked = SCHEMA.peChecked(R, groupKey, itemKey);
+        const shown = val || (checked && it ? SCHEMA.peNormalText(it) : '');
+        if (!shown) { toast('这一项还没有可核对的内容'); return; }
+        const prev = CORE.fieldState(R, path);
+        CORE.setFieldState(R, path, {
+          source: prev.source || (val ? 'manual' : 'default'),
+          reviewed: true,
+          reviewedValueHash: CORE.fingerprint(shown)
+        });
         saveCurrent();
         render();
+        toast('已确认这一项的描述');
+        break;
+      }
+      case 'confirmAllPe': {
+        const groupKey = String(el.dataset.group || '');
+        const containerKey = String(el.dataset.container || groupKey);
+        const items = peItemsOf(groupKey);
+        const pending = [];
+        items.forEach(it => {
+          const val = String((R.pe[containerKey] || {})[it.key] || '');
+          const checked = SCHEMA.peChecked(R, groupKey, it.key);
+          const shown = val || (checked ? SCHEMA.peNormalText(it) : '');
+          if (!shown) return;
+          const path = `pe.${containerKey}.${it.key}`;
+          if (peReviewValid(path, shown)) return;
+          pending.push({ path, label: it.label, shown, source: val ? 'manual' : 'default' });
+        });
+        if (!pending.length) { toast('本组没有待确认的描述'); return; }
+        const msg = '将确认以下 ' + pending.length + ' 项的实际输出文字：\n\n'
+          + pending.map((p, i) => `${i + 1}. ${p.label}：${p.shown}`).join('\n')
+          + '\n\n确认后若文字再变化，会自动回到待核对。';
+        if (!window.confirm(msg)) return;
+        snapshot('批量确认查体描述');
+        pending.forEach(p => {
+          CORE.setFieldState(R, p.path, {
+            source: p.source, reviewed: true, reviewedValueHash: CORE.fingerprint(p.shown)
+          });
+        });
+        saveCurrent();
+        render();
+        toast(`已确认 ${pending.length} 项查体描述`);
         break;
       }
       case 'addAux': {
@@ -27924,18 +29993,81 @@ const APP = (() => {
         break;
       }
       // 首次病程录：按已填内容生成初稿（只补空字段，不覆盖手写内容）
+      case 'loadRemote': {
+        if (!remoteConflict || !remoteConflict.remote) return;
+        const rec = CORE.normalizeRecord(remoteConflict.remote, SCHEMA.emptyRecord, deptKeys());
+        if (!rec.ok) { toast('新版本无法读取，已保留当前内容'); return; }
+        R = rec.record;
+        remoteConflict = null;
+        storageAlert = '';
+        saveCurrent();
+        render();
+        toast('已载入其他页面保存的新版本');
+        break;
+      }
+      case 'keepCopy': {
+        if (!remoteConflict) return;
+        // 两份内容都保留：当前内存内容另存为副本，新版本仍在原 ID 下
+        const copy = CORE.cloneValue(R);
+        copy.id = CORE.uid();
+        copy.meta = copy.meta || {};
+        copy.meta.revision = 0;
+        copy.meta.updatedAt = new Date().toISOString();
+        if (copy.basic) {
+          copy.basic.name = (copy.basic.name || '未命名') + '（副本）';
+        }
+        LIST = CORE.upsertRecord(LIST, copy, new Date().toISOString());
+        saveList();
+        R = copy;
+        remoteConflict = null;
+        storageAlert = '';
+        saveCurrent();
+        render();
+        toast('已保留为副本；原病历的新版本仍在病历列表中');
+        break;
+      }
       case 'draftSoap': {
+        snapshot('生成首次病程录');
         const soap = ensureSoap();
-        // 四段各自用生成器里对外的兜底草稿函数，避免把成品文本再切回来
-        if (!soap.s.summary.trim()) soap.s.summary = GENERATOR.draftCaseSummary(R) || '';
-        if (!soap.o.pe.trim()) soap.o.pe = GENERATOR.draftObjectivePE(R) || '';
-        if (!soap.o.aux.trim()) soap.o.aux = GENERATOR.draftObjectiveAux(R) || '';
+        // 四段各自用生成器里对外的兜底草稿函数，避免把成品文本再切回来。
+        // 只补空白段，已有手写内容一律不动。
+        const fillSeg = (seg, key, text) => {
+          if (String(soap[key] || '').trim()) return;
+          if (!text) return;
+          soap[key] = text;
+          CORE.markDocumentGenerated(R, 'firstCourse', seg);
+        };
+        fillSeg('s', 'summary', GENERATOR.draftCaseSummary(R) || '');
+        fillSeg('oPe', 'pe', GENERATOR.draftObjectivePE(R) || '');
+        fillSeg('oAux', 'aux', GENERATOR.draftObjectiveAux(R) || '');
+        fillSeg('basis', 'basis', GENERATOR.buildBasisSection(R) || '');
         if (!soap.a.basisDetail.length && typeof GENERATOR.draftBasisDetail === 'function') {
           soap.a.basisDetail = GENERATOR.draftBasisDetail(R) || [];
         }
         saveCurrent();
         render();
-        toast('已生成首次病程录初稿，请按本例修改');
+        toast('已补全空白段落，已有手写内容未改动');
+        break;
+      }
+      case 'updateSoapSeg': {
+        const seg = String(el.dataset.seg || '');
+        if (!SOAP_SEG_DRAFT[seg]) return;
+        const soap = ensureSoap();
+        const key = { s: 'summary', oPe: 'pe', oAux: 'aux', basis: 'basis' }[seg];
+        snapshot('更新 SOAP ' + seg);
+        soap[key] = SOAP_SEG_DRAFT[seg](R) || '';
+        CORE.markDocumentGenerated(R, 'firstCourse', seg);
+        saveCurrent();
+        render();
+        toast('已更新该段，其他段落未改动');
+        break;
+      }
+      case 'reviewSoapSeg': {
+        const seg = String(el.dataset.seg || '');
+        CORE.markDocumentReviewed(R, 'firstCourse', seg);
+        saveCurrent();
+        render();
+        toast('已按当前文字标记核对');
         break;
       }
       case 'addSoapBasis': {
@@ -27957,9 +30089,49 @@ const APP = (() => {
         break;
       }
       case 'addDischargeDiag': {
-        ensureDischarge().diagnoses.push('');
+        const d = ensureDischarge();
+        d.diagnoses.push('');
+        d.diagnosesConfirmed = false;
         saveCurrent();
         render();
+        break;
+      }
+      case 'importDischargeDx': {
+        const src = (R.diagnosis && R.diagnosis.confirmed) || [];
+        const cleaned = src.map(x => String(x || '').trim()).filter(Boolean);
+        if (!cleaned.length) { toast('初步诊断还没有内容，先填写初步诊断'); return; }
+        const msg = '将把以下初步诊断带入出院诊断（保留「？」等待查标记）：\n\n'
+          + cleaned.map((x, i) => `${i + 1}. ${x}`).join('\n')
+          + '\n\n带入后仍可逐条修改、排序、删除，并需要单独确认。';
+        if (!window.confirm(msg)) return;
+        snapshot('从初步诊断带入出院诊断');
+        const d = ensureDischarge();
+        d.diagnoses = cleaned.slice();
+        d.diagnosesConfirmed = false;
+        CORE.markDocumentGenerated(R, 'discharge', 'diagnoses');
+        saveCurrent();
+        render();
+        toast('已带入，请核对后点「确认出院诊断」');
+        break;
+      }
+      case 'confirmDischargeDx': {
+        const d = ensureDischarge();
+        const list = (d.diagnoses || []).map(x => String(x || '').trim()).filter(Boolean);
+        if (!list.length) { toast('出院诊断还没有内容'); return; }
+        d.diagnosesConfirmed = true;
+        CORE.markDocumentReviewed(R, 'discharge', 'diagnoses');
+        saveCurrent();
+        render();
+        toast('出院诊断已确认；初步诊断再变化时会提示差异');
+        break;
+      }
+      case 'updateAdmitCondition': {
+        snapshot('更新入院情况');
+        R.discharge.admitCondition = GENERATOR.draftAdmitCondition(R) || '';
+        CORE.markDocumentGenerated(R, 'discharge', 'admitCondition');
+        saveCurrent();
+        render();
+        toast('已按当前资料重写入院情况；旧文字可通过撤销恢复');
         break;
       }
       case 'copyText': {
@@ -28153,7 +30325,7 @@ const APP = (() => {
         <div class="list-row">
           <div class="list-main" data-open="${esc(s.id)}">
             <div class="list-name">${esc(s.name)}
-              <span class="list-meta">${esc(s.gender)} ${esc(s.age)}${s.age ? '岁' : ''}</span>
+              <span class="list-meta">${esc(s.gender)} ${esc(AGE.display({ age: s.age, birthDate: s.birthDate, admitDate: s.admitDate }))}</span>
             </div>
             <div class="list-sub">${esc(dept)} · ${esc((s.chiefComplaint || '无主诉').slice(0, 20))}</div>
             <div class="list-sub muted">更新于 ${esc(fmtTime(s.updatedAt))}</div>
@@ -28193,7 +30365,7 @@ const APP = (() => {
           if (!confirm('新建病历？当前病历会先保存。')) return;
           if (!saveToLibrary()) { wrap.remove(); render(); return; }
         }
-        if (!switchRecord(SCHEMA.emptyRecord())) { wrap.remove(); render(); return; }
+        if (!switchRecord(newRecord())) { wrap.remove(); render(); return; }
         wrap.remove();
         render();
         return;
@@ -28265,14 +30437,20 @@ const APP = (() => {
   /* ========================= 备份导出 / 导入 ========================= */
 
   function exportBackup() {
-    const payload = CORE.buildExport(LIST, new Date().toISOString());
+    // 当前草稿可能比列表里的版本更新，导出前必须让用户明确选择
+    const includeDraft = !!R && window.confirm(
+      '备份默认包含已保存到「病历列表」的记录。\n\n' +
+      '是否同时包含当前正在编辑的最新草稿？\n' +
+      '（选「确定」= 包含最新草稿；选「取消」= 只导出病历列表）'
+    );
+    const payload = CORE.buildExport(LIST, new Date().toISOString(), { includeDraft, draft: R });
     if (!payload.records.length) {
       toast('还没有保存的病历可导出');
       return;
     }
     const name = `大病历备份_${SCHEMA.todayStr()}.json`;
     downloadBlob(JSON.stringify(payload, null, 2), name, 'application/json');
-    toast(`已导出 ${payload.records.length} 份病历`);
+    toast(`已导出 ${payload.records.length} 份病历${payload.includesDraft ? '（含当前草稿）' : ''}`);
   }
 
   function exportCurrentBackup() {
@@ -28353,7 +30531,7 @@ const APP = (() => {
       const dept = (SCHEMA.DEPARTMENTS.find(d => d.key === s.department) || {}).name || '通用';
       return `<div class="list-row">
         <div class="list-main">
-          <div class="list-name">${esc(s.name)} <span class="list-meta">${esc(s.gender)} ${esc(s.age)}${s.age ? '岁' : ''}</span></div>
+          <div class="list-name">${esc(s.name)} <span class="list-meta">${esc(s.gender)} ${esc(AGE.display({ age: s.age, birthDate: s.birthDate, admitDate: s.admitDate }))}</span></div>
           <div class="list-sub">${esc(dept)} · ${esc((s.chiefComplaint || '无主诉').slice(0, 18))}</div>
         </div>
       </div>`;
@@ -28419,10 +30597,34 @@ const APP = (() => {
 
   /* ========================= 初始化 ========================= */
 
+  /**
+   * 在线版离线缓存：只在 http(s) 下注册 Service Worker。
+   * 本地 HTML（file://）不依赖 SW 才能工作。
+   */
+  function registerOffline() {
+    if (!('serviceWorker' in navigator)) return;
+    if (!/^https?:$/.test(location.protocol)) return;
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js').then(reg => {
+        if (reg.active) toast('已可离线使用');
+        reg.addEventListener('updatefound', () => {
+          const w = reg.installing;
+          if (!w) return;
+          w.addEventListener('statechange', () => {
+            if (w.state === 'installed' && navigator.serviceWorker.controller) {
+              // 不强制刷新：用户可能正在编辑，下次打开生效
+              toast('新版本已准备好，下次打开本页时生效');
+            }
+          });
+        });
+      }).catch(() => { /* 注册失败不影响正常使用 */ });
+    });
+  }
+
   function init() {
     loadSettings();
     if (!loadCurrent()) {
-      R = SCHEMA.emptyRecord();
+      R = newRecord();
     }
 
     // 回到上次停留的那一步。键不认识（改过步骤、旧存档）就退回第一步，
@@ -28451,11 +30653,31 @@ const APP = (() => {
       render();
     });
 
+    // 版本号：手机端要能判断自己是不是还在用旧版
+    const ver = document.getElementById('appVer');
+    if (ver) ver.textContent = 'v' + APP_VERSION;
+    registerOffline();
+
     // 自动保存
     setInterval(() => { saveCurrent(); }, 10000);
 
     // 防误关：尝试保存一次
     window.addEventListener('beforeunload', () => { saveCurrent(); });
+
+    // 多标签页：其他页面写入当前病历时，只提示、不自动合并
+    window.addEventListener('storage', ev => {
+      if (!ev || ev.key !== K.current || !ev.newValue) return;
+      let rec = null;
+      try { rec = JSON.parse(ev.newValue); } catch (e) { return; }
+      if (!rec || !R || rec.id !== R.id) return;
+      const remoteRev = Number(rec.meta && rec.meta.revision) || 0;
+      const mineRev = Number(R.meta && R.meta.revision) || 0;
+      if (remoteRev <= mineRev) return;
+      remoteConflict = { remote: rec, remoteRevision: remoteRev };
+      storageAlert = '其他页面已保存了这份病历的更新版本（修订号 ' + remoteRev
+        + '）。为避免互相覆盖，本页已暂停保存。';
+      render();
+    });
 
     // 回到前台时若之前有存储异常，重新渲染让提示可见
     document.addEventListener('visibilitychange', () => {
