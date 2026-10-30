@@ -121,6 +121,32 @@ const APP = (() => {
   /** 上一次写入是否失败，用于「恢复保存」时明确告知一次 */
   let lastSaveFailed = false;
 
+  /** 每个标签页自己的「当前病历」指针；localStorage 里的 current 只作兜底 */
+  const SESSION_KEY = 'dabingli.session.current.v1';
+  let sessionIdCache = '';
+  function getSessionId() {
+    // window.name 是每个标签页自己的，刷新后仍在，也不会被同源其他标签页读写；
+    // sessionStorage 作为第二选择（部分浏览器/隐私模式行为不同）。
+    try {
+      const named = String(window.name || '');
+      if (named.indexOf('dabingli:') === 0) return named.slice('dabingli:'.length);
+    } catch (e) { /* ignore */ }
+    try { return sessionStorage.getItem(SESSION_KEY) || sessionIdCache; } catch (e) { return sessionIdCache; }
+  }
+  function setSessionId(id) {
+    sessionIdCache = String(id || '');
+    try { window.name = sessionIdCache ? 'dabingli:' + sessionIdCache : ''; } catch (e) { /* ignore */ }
+    try { sessionStorage.setItem(SESSION_KEY, sessionIdCache); } catch (e) { /* 隐私模式也不影响使用 */ }
+  }
+
+  /** Web Locks 在 Chrome/Edge/Android Chrome 可用；不可用时退回单页检查 */
+  function lockAvailable() {
+    return typeof navigator !== 'undefined' && navigator.locks
+      && typeof navigator.locks.request === 'function';
+  }
+  let saveQueue = Promise.resolve();
+  let listQueue = Promise.resolve();
+
   function loadList() {
     const res = CORE.loadList(localStorage);
     if (res.ok) {
@@ -140,11 +166,16 @@ const APP = (() => {
     return res;
   }
 
-  function saveList() {
+  function saveListNow(opts = {}) {
     if (listSaveBlocked) {
       storageAlert = '病历列表读不出来，已停止写入以免覆盖原数据。'
         + '请先在下方导出原始数据或新建列表，再继续保存。';
       return false;
+    }
+    if (!opts.replace) {
+      // 写前合并：另一个标签页可能刚保存了别的病历
+      const stored = CORE.loadList(localStorage);
+      if (stored.ok) LIST = CORE.mergeListForWrite(stored.list, LIST);
     }
     const ok = CORE.safeSet(localStorage, K.list, JSON.stringify(LIST));
     if (!ok) {
@@ -155,7 +186,26 @@ const APP = (() => {
     return true;
   }
 
-  function saveCurrent() {
+  /**
+   * 需要知道列表到底写没写成功时用它：有 Web Locks 返回 Promise<boolean>，
+   * 没有该 API 时同步返回布尔值。
+   */
+  function saveListAwait(opts = {}) {
+    if (!lockAvailable()) return saveListNow(opts);
+    const run = listQueue
+      .then(() => navigator.locks.request('dabingli:list', () => saveListNow(opts)))
+      .catch(() => false);
+    listQueue = run.then(() => {}, () => {});
+    return run;
+  }
+
+  /** 普通保存入口：排队写入，不阻塞界面 */
+  function saveList(opts = {}) {
+    const result = saveListAwait(opts);
+    return result && typeof result.then === 'function' ? true : result;
+  }
+
+  function saveCurrentNow() {
     if (currentSaveBlocked) {
       // 静默拒绝：这条路径会被定时器和 beforeunload 频繁触发，
       // 每次都改 storageAlert 会把用户正在读的提示刷成别的内容。
@@ -192,10 +242,44 @@ const APP = (() => {
     return false;
   }
 
+  /**
+   * 保存入口：有 Web Locks 时按病历 id 排队并加跨标签页锁，锁内再读修订号；
+   * 没有该 API 的环境（Node 测试、旧浏览器）退回同步检查。
+   */
+  function saveCurrent() {
+    if (currentSaveBlocked || !R || remoteConflict) return saveCurrentNow();
+    const id = R.id;
+    if (!lockAvailable()) return saveCurrentNow();
+    saveCurrentAwait();
+    return true;
+  }
+
+  /**
+   * 需要知道「到底写成功没有」的路径用它：锁内重新读修订号再比较，
+   * 保证两个标签页不会都基于同一个旧修订号写入。
+   * 无 Web Locks 时同步返回布尔值，有锁时返回 Promise<boolean>。
+   */
+  function saveCurrentAwait() {
+    if (currentSaveBlocked || !R || remoteConflict) return saveCurrentNow();
+    const id = R.id;
+    if (!lockAvailable()) return saveCurrentNow();
+    const run = saveQueue.then(() =>
+      navigator.locks.request('dabingli:record:' + id, () => saveCurrentNow())
+    ).catch(() => false);
+    saveQueue = run;
+    return run;
+  }
+
+  /** 统一处理「同步布尔 / 异步 Promise」两种返回 */
+  function afterSave(result, done) {
+    if (result && typeof result.then === 'function') return result.then(done);
+    return done(result);
+  }
+
   function loadCurrent() {
-    const res = CORE.loadCurrent(localStorage, SCHEMA.emptyRecord, deptKeys());
+    const res = CORE.loadCurrent(localStorage, SCHEMA.emptyRecord, deptKeys(), getSessionId());
     if (res.ok) {
-      if (res.record) { R = res.record; }
+      if (res.record) { R = res.record; setSessionId(R.id); }
       currentSaveBlocked = false;
       corruptCurrentRaw = '';
       return !!res.record;
@@ -218,6 +302,7 @@ const APP = (() => {
     currentSaveBlocked = false;
     corruptCurrentRaw = '';
     R = newRecord();
+    setSessionId(R.id);
     storageAlert = '';
     return saveCurrent();
   }
@@ -2159,7 +2244,7 @@ const APP = (() => {
     </div>`;
     document.body.appendChild(wrap);
 
-    wrap.addEventListener('click', ev => {
+    wrap.addEventListener('click', async ev => {
       if (ev.target === wrap) { wrap.remove(); return; }
       if (ev.target.closest('[data-navclose]')) { wrap.remove(); return; }
       const row = ev.target.closest('[data-navstep]');
@@ -3182,7 +3267,7 @@ const APP = (() => {
         if (copy.basic) {
           copy.basic.name = (copy.basic.name || '未命名') + '（副本）';
         }
-        LIST = CORE.upsertRecord(LIST, copy, new Date().toISOString());
+        LIST = CORE.upsertRecord(LIST, copy, new Date().toISOString()).list;
         saveList();
         R = copy;
         remoteConflict = null;
@@ -3408,7 +3493,7 @@ const APP = (() => {
         </div>
       </div>`;
     document.body.appendChild(wrap);
-    wrap.addEventListener('click', ev => {
+    wrap.addEventListener('click', async ev => {
       if (ev.target === wrap || ev.target.hasAttribute('data-close')) wrap.remove();
     });
     const ta = wrap.querySelector('textarea');
@@ -3430,7 +3515,7 @@ const APP = (() => {
         <div class="btn-row"><button class="btn" data-close>关闭</button></div>
       </div>`;
     document.body.appendChild(wrap);
-    wrap.addEventListener('click', ev => {
+    wrap.addEventListener('click', async ev => {
       if (ev.target.hasAttribute('data-close') || ev.target === wrap) wrap.remove();
       const sec = ev.target.dataset.sec;
       if (sec) {
@@ -3471,15 +3556,34 @@ const APP = (() => {
     return differs(record, blank, '');
   }
 
+  /** 打开病历：优先读该 id 的最新草稿，草稿缺失/损坏时才退回列表快照 */
+  function recordForOpen(id, fallback) {
+    const draft = CORE.loadCurrent(localStorage, SCHEMA.emptyRecord, deptKeys(), id);
+    if (draft.ok && draft.record) return draft.record;
+    if (fallback) {
+      try {
+        return CORE.normalizeRecord(JSON.parse(JSON.stringify(fallback)), SCHEMA.emptyRecord, deptKeys());
+      } catch (e) {
+        return deepMerge(SCHEMA.emptyRecord(), JSON.parse(JSON.stringify(fallback)));
+      }
+    }
+    return null;
+  }
+
   function switchRecord(next) {
     const previous = R;
-    R = next;
-    if (!saveCurrent()) {
-      R = previous;
-      return false;
-    }
-    step = 0;
-    return true;
+    const go = saved => {
+      if (!saved) return false;
+      R = next;
+      setSessionId(next.id);
+      step = 0;
+      return true;
+    };
+    // 先落盘上一份（有锁时等锁内比较完成），避免切换后只留下下一份。
+    // 内容没改过就不写：无意义的修订号自增会让另一个标签页的正常编辑变成冲突。
+    if (!previous) return go(true);
+    if (CORE.draftMatches(localStorage, previous)) return go(true);
+    return afterSave(saveCurrentAwait(), go);
   }
 
   function openList() {
@@ -3521,7 +3625,7 @@ const APP = (() => {
       </div>`;
     document.body.appendChild(wrap);
 
-    wrap.addEventListener('click', ev => {
+    wrap.addEventListener('click', async ev => {
       if (ev.target === wrap || ev.target.hasAttribute('data-close')) { wrap.remove(); return; }
       if (ev.target.hasAttribute('data-backup')) { exportBackup(); return; }
       if (ev.target.hasAttribute('data-backup-current')) { exportCurrentBackup(); return; }
@@ -3529,9 +3633,9 @@ const APP = (() => {
       if (ev.target.hasAttribute('data-new')) {
         if (hasRecordContent(R)) {
           if (!confirm('新建病历？当前病历会先保存。')) return;
-          if (!saveToLibrary()) { wrap.remove(); render(); return; }
+          if (!(await saveToLibrary())) { wrap.remove(); render(); return; }
         }
-        if (!switchRecord(newRecord())) { wrap.remove(); render(); return; }
+        if (!(await switchRecord(newRecord()))) { wrap.remove(); render(); return; }
         wrap.remove();
         render();
         return;
@@ -3540,7 +3644,7 @@ const APP = (() => {
       if (delId) {
         if (!confirm('确定删除这份病历？删除后无法恢复，建议先导出备份。')) return;
         LIST = CORE.removeRecord(LIST, delId);
-        saveList();
+        await saveListAwait({ replace: true });
         wrap.remove();
         openList();
         return;
@@ -3550,19 +3654,14 @@ const APP = (() => {
         let found = CORE.findRecord(LIST, openId);
         if (!found) return;
         if (!confirm('打开这份病历？当前病历会先保存。')) return;
-        if (hasRecordContent(R) && !saveToLibrary()) { wrap.remove(); render(); return; }
+        if (hasRecordContent(R) && !(await saveToLibrary())) { wrap.remove(); render(); return; }
         // 保存当前记录可能刚好更新了用户选择的那一条。
         found = CORE.findRecord(LIST, openId) || found;
         // 用 core 规范化，兼容旧版本存档
-        let next;
-        try {
-          next = CORE.normalizeRecord(JSON.parse(JSON.stringify(found.data)), SCHEMA.emptyRecord, deptKeys());
-        } catch (e) {
-          next = deepMerge(SCHEMA.emptyRecord(), JSON.parse(JSON.stringify(found.data || found)));
-          storageAlert = '该病历结构较旧，已尽量补齐字段。';
-        }
+        const next = recordForOpen(found.id, found.data || found);
+        if (!next) { wrap.remove(); render(); return; }
         next.id = found.id;
-        if (!switchRecord(next)) { wrap.remove(); render(); return; }
+        if (!(await switchRecord(next))) { wrap.remove(); render(); return; }
         wrap.remove();
         render();
       }
@@ -3586,18 +3685,26 @@ const APP = (() => {
     R.id = res.id;
     R.updatedAt = res.list.find(x => x.id === res.id).updatedAt;
     // 先保存当前记录和稳定 ID；若列表写失败，重试会更新同一条记录。
-    if (!saveCurrent()) {
-      R.id = before.id;
-      R.updatedAt = before.updatedAt;
-      return false;
-    }
-    LIST = res.list;
-    if (!saveList()) {
-      storageAlert = '当前病历已保存在本机编辑槽，但未能写入病历列表。请先导出当前病历，再重试保存。';
-      return false;
-    }
-    storageAlert = '';
-    return true;
+    // 有 Web Locks 时 saveCurrentAwait 返回 Promise，必须等草稿真正落盘再写列表，
+    // 否则「列表已保存、草稿没保存」会被当成成功。
+    const finish = saved => {
+      if (!saved) {
+        R.id = before.id;
+        R.updatedAt = before.updatedAt;
+        return false;
+      }
+      LIST = res.list;
+      const listed = ok => {
+        if (!ok) {
+          storageAlert = '当前病历已保存在本机编辑槽，但未能写入病历列表。请先导出当前病历，再重试保存。';
+          return false;
+        }
+        storageAlert = '';
+        return true;
+      };
+      return afterSave(saveListAwait(), listed);
+    };
+    return afterSave(saveCurrentAwait(), finish);
   }
 
   /* ========================= 备份导出 / 导入 ========================= */
@@ -3687,7 +3794,7 @@ const APP = (() => {
       corruptListRaw = '';
     }
     LIST = CORE.replaceImport(records);
-    return { ok: saveList(), replaced: LIST.length };
+    return { ok: saveList({ replace: true }), replaced: LIST.length };
   }
 
   /** 导入预览：显示条数与摘要，让用户选择合并或替换 */
@@ -3714,7 +3821,7 @@ const APP = (() => {
         <button class="btn btn-ghost" data-close>取消</button>
       </div>
     `, wrap => {
-      wrap.addEventListener('click', ev => {
+      wrap.addEventListener('click', async ev => {
         const mode = ev.target.dataset.import;
         if (!mode) return;
         if (mode === 'replace') {
@@ -3746,7 +3853,7 @@ const APP = (() => {
       ${bodyHtml}
     </div>`;
     document.body.appendChild(wrap);
-    wrap.addEventListener('click', ev => {
+    wrap.addEventListener('click', async ev => {
       if (ev.target === wrap || ev.target.hasAttribute('data-close')) wrap.remove();
     });
     if (setup) setup(wrap);
@@ -3830,12 +3937,15 @@ const APP = (() => {
     // 防误关：尝试保存一次
     window.addEventListener('beforeunload', () => { saveCurrent(); });
 
-    // 多标签页：其他页面写入当前病历时，只提示、不自动合并
+    // 多标签页：只关心「同一份病历」的草稿键；不同病历各写各的槽位。
     window.addEventListener('storage', ev => {
-      if (!ev || ev.key !== K.current || !ev.newValue) return;
+      if (!ev || !ev.key || !ev.newValue) return;
+      if (ev.key.indexOf(K.draftPrefix) !== 0) return;
+      const id = ev.key.slice(K.draftPrefix.length);
+      if (!R || id !== R.id) return;
       let rec = null;
       try { rec = JSON.parse(ev.newValue); } catch (e) { return; }
-      if (!rec || !R || rec.id !== R.id) return;
+      if (!rec || rec.id !== R.id) return;
       const remoteRev = Number(rec.meta && rec.meta.revision) || 0;
       const mineRev = Number(R.meta && R.meta.revision) || 0;
       if (remoteRev <= mineRev) return;
@@ -3871,6 +3981,19 @@ const APP = (() => {
       getList: () => LIST,
       render,
       setRecord: r => { R = r; },
+      newRecord: () => {
+        const rec = newRecord();
+        return afterSave(switchRecord(rec), ok => { if (ok) render(); return ok; });
+      },
+      openRecord: id => {
+        loadList();
+        const item = LIST.find(x => x.id === id) || CORE.findRecord(LIST, id);
+        if (!item) return false;
+        const next = recordForOpen(id, item.data || item);
+        if (!next) return false;
+        next.id = id;
+        return afterSave(switchRecord(next), ok => { if (ok) render(); return ok; });
+      },
       openList,
       gotoStep,
       stepIndexOf,
@@ -3890,12 +4013,14 @@ const APP = (() => {
       openNav,
       navRowsHtml: () => navRowsHtml(),
       // 存储写入锁：测试要能直接触发自动保存、普通保存，并读到锁状态
-      saveCurrent, saveWithFeedback, saveList,
+      saveCurrent, saveCurrentAwait, saveWithFeedback, saveList,
       currentSaveBlocked: () => currentSaveBlocked,
       listSaveBlocked: () => listSaveBlocked,
       corruptCurrentRaw: () => corruptCurrentRaw,
       corruptListRaw: () => corruptListRaw,
       storageAlertText: () => storageAlert,
+      remoteConflict: () => remoteConflict,
+      sessionId: () => getSessionId(),
       discardCorruptCurrent, discardCorruptList,
       // 导入合并/替换的落盘入口：列表损坏时合并必须整单不写，替换要能解锁
       applyImport
