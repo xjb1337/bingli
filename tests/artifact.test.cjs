@@ -40,6 +40,7 @@ const MODULES = [
   ['depth.js', 'DEPTH'],
   ['generator.js', 'GENERATOR'],
   ['hints.js', 'HINTS'],
+  ['action-handlers.js', 'ACTION_HANDLERS'],
   ['ai-core.js', 'AI_CORE'],
   ['ai.js', 'AI_ASSIST']
 ];
@@ -89,7 +90,7 @@ test('产物中的样式与源码一致', () => {
 
 /* ======================= 结构完整性 ======================= */
 
-test('产物中八个模块按正确顺序内联', () => {
+test('产物中九个模块按正确顺序内联', () => {
   const html = distHtml();
   const iSchema = html.indexOf('const SCHEMA =');
   const iCore = html.indexOf('const RECORD_CORE =');
@@ -98,14 +99,15 @@ test('产物中八个模块按正确顺序内联', () => {
   const iDepth = html.indexOf('var DEPTH =');
   const iGen = html.indexOf('const GENERATOR =');
   const iHints = html.indexOf('const HINTS =');
+  const iActions = html.indexOf('const ACTION_HANDLERS =');
   const iApp = html.indexOf('const APP =');
 
   for (const [name, idx] of [['SCHEMA', iSchema], ['CORE', iCore], ['TEMPLATE_DATA', iTplData],
     ['TEMPLATES', iTpl], ['DEPTH', iDepth], ['GENERATOR', iGen],
-    ['HINTS', iHints], ['APP', iApp]]) {
+    ['HINTS', iHints], ['ACTION_HANDLERS', iActions], ['APP', iApp]]) {
     assert.ok(idx > 0, `产物中缺少 ${name} 模块`);
   }
-  // 依赖顺序：schema → core → 模板数据 → 模板逻辑 → depth → generator → hints → app
+  // 依赖顺序：schema → core → 模板数据 → 模板逻辑 → depth → generator → hints → actions → app
   assert.ok(iSchema < iCore, 'SCHEMA 应在 CORE 之前');
   assert.ok(iCore < iTplData, 'CORE 应在 TEMPLATE_DATA 之前');
   // templates.js 读 TEMPLATE_DATA，顺序反了会静默拿到空数组
@@ -113,7 +115,8 @@ test('产物中八个模块按正确顺序内联', () => {
   assert.ok(iTpl < iDepth, 'TEMPLATES 应在 DEPTH 之前');
   assert.ok(iDepth < iGen, 'DEPTH 应在 GENERATOR 之前');
   assert.ok(iGen < iHints, 'GENERATOR 应在 HINTS 之前');
-  assert.ok(iHints < iApp, 'HINTS 应在 APP 之前');
+  assert.ok(iHints < iActions, 'HINTS 应在 ACTION_HANDLERS 之前');
+  assert.ok(iActions < iApp, 'ACTION_HANDLERS 应在 APP 之前');
 });
 
 test('产物里没有残留的模板占位符', () => {

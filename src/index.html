@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#125e55">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -18,9 +18,10 @@
   <div class="topbar">
     <div class="brand-mark" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" fill="none"><defs><clipPath id="brandClip"><rect width="108" height="108" rx="25"/></clipPath></defs><g clip-path="url(#brandClip)"><rect width="108" height="108" rx="25" fill="#125E55"/><circle cx="94" cy="12" r="48" fill="#23796B"/><path d="M37 28h27l13 13v38a6 6 0 0 1-6 6H37a6 6 0 0 1-6-6V34a6 6 0 0 1 6-6Z" fill="#F8F9ED"/><path d="M64 28v13h13" fill="#BBD9CA"/><rect x="43" y="23" width="22" height="11" rx="5" fill="#D5E7BA"/><path d="M46 45v12m-6-6h12M41 66h23M41 74h16" stroke="#24695F" stroke-width="3.5" stroke-linecap="round"/><circle cx="77" cy="77" r="14" fill="#D5E7BA"/><path d="m70 77 5 5 9-11" stroke="#125E55" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/></g></svg></div>
     <div class="brand-copy"><h1>大病历生成器</h1><span class="brand-caption">问诊 · 查体 · 文书</span></div>
-    <button class="btn-icon" id="btnSave"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2ZM7 3v6h10V4M7 21v-8h10v8"/></svg><span>保存</span></button>
-    <button class="btn-icon" id="btnList"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7ZM3 10h18"/></svg><span>病历</span></button>
-    <button class="btn-icon" id="btnExport"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 16v5h14v-5"/></svg><span>导出</span></button>
+    <button class="btn-icon" id="btnSave" data-save-action aria-label="保存病历"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2ZM7 3v6h10V4M7 21v-8h10v8"/></svg><span>保存</span></button>
+    <button class="btn-icon" id="btnList" aria-label="病历列表"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7ZM3 10h18"/></svg><span>病历</span></button>
+    <button class="btn-icon" id="btnExport" aria-label="导出病历"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 16v5h14v-5"/></svg><span>导出</span></button>
+    <button class="btn-icon" id="btnSettings" aria-label="打开设置"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.43 12.98c.04-.32.07-.65.07-.98s-.02-.66-.07-.98l2.11-1.65c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.37-.31-.6-.22l-2.49 1a8.7 8.7 0 0 0-1.69-.98l-.38-2.65A.51.51 0 0 0 14 2h-4c-.25 0-.46.18-.5.42l-.38 2.65a8.7 8.7 0 0 0-1.69.98l-2.49-1c-.23-.08-.48 0-.6.22l-2 3.46c-.12.22-.07.49.12.64l2.11 1.65c-.04.32-.08.65-.08.98s.03.66.08.98l-2.11 1.65c-.19.15-.24.42-.12.64l2 3.46c.12.22.37.31.6.22l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.04.24.25.42.5.42h4c.25 0 .46-.18.5-.42l.38-2.65a8.7 8.7 0 0 0 1.69-.98l2.49 1c.23.08.48 0 .6-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.65Z"/><circle cx="12" cy="12" r="3"/></svg><span>设置</span></button>
   </div>
   <div class="stepbar" id="stepBar" role="button" tabindex="0" aria-label="打开步骤导航">
     <span class="title" id="stepTitle">基本情况</span>
@@ -34,8 +35,7 @@
 
 <footer>
   <button class="btn btn-ghost" id="btnPrev">上一步</button>
-  <button class="btn" id="btnNext">下一步</button>
-  <div class="footer-meta"><span class="workspace-label"><i></i>本机病历工作台</span><span class="app-ver" id="appVer"></span><button id="btnAI" class="update-link" hidden>AI 助手</button><button id="btnUpdate" class="update-link" hidden>检查更新</button></div>
+  <button class="btn" id="btnNext" data-save-action>下一步</button>
 </footer>
 
 <script>
@@ -46,6 +46,9 @@
 </script>
 <script>
 /*__CORE__*/
+</script>
+<script>
+/*__REPOSITORY__*/
 </script>
 <script>
 /*__TPL_DATA__*/
@@ -61,6 +64,9 @@
 </script>
 <script>
 /*__HINTS__*/
+</script>
+<script>
+/*__ACTION_HANDLERS__*/
 </script>
 <script>
 /*__APP__*/

@@ -2,7 +2,7 @@
  * 在 Node 环境中显式搭好，保证被测代码与线上一致。
  *
  * 线上 index.html 的脚本顺序：
- *   AGE → SCHEMA → CORE → TEMPLATE_DATA → TEMPLATES → DEPTH → GENERATOR → HINTS → APP
+ *   AGE → SCHEMA → CORE → REPOSITORY → TEMPLATE_DATA → TEMPLATES → DEPTH → GENERATOR → HINTS → ACTIONS → APP
  * 这里照搬同样的顺序与全局名。
  */
 const path = require('node:path');

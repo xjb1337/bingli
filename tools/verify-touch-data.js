@@ -25,6 +25,7 @@ const findChrome = () => [
 (async () => {
   const proc = spawn(findChrome(), [
     `--remote-debugging-port=${PORT}`, '--headless=new', '--disable-gpu',
+    '--no-sandbox', '--disable-dev-shm-usage',
     '--no-first-run', '--no-default-browser-check', '--hide-scrollbars',
     '--user-data-dir=' + path.join(os.tmpdir(), 'p-dt-' + Date.now()), 'about:blank',
   ], { stdio: 'ignore' });

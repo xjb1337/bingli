@@ -128,7 +128,10 @@ public class MainActivity extends Activity {
         }
     }
     @Override protected void onPause() {
-        web.evaluateJavascript("if(typeof APP!=='undefined') APP._test.saveCurrentAwait()",null);
+        // Flush the WebView editor's debounced draft before the Activity goes
+        // into the background. The callback is intentionally best-effort;
+        // Android may stop the process immediately after onPause.
+        web.evaluateJavascript("if(typeof APP!=='undefined' && APP._test.flushPendingSave) APP._test.flushPendingSave()", null);
         super.onPause();
     }
     @Override protected void onDestroy() {
@@ -147,7 +150,7 @@ public class MainActivity extends Activity {
         super.onDestroy();
     }
     @Override public void onBackPressed() {
-        web.evaluateJavascript("(()=>{if(typeof AI_ASSIST!=='undefined'&&AI_ASSIST.isOpen()){AI_ASSIST.close();return true;}if(typeof APP!=='undefined')APP._test.saveCurrentAwait();return false;})()", value -> {
+        web.evaluateJavascript("(()=>{if(typeof AI_ASSIST!=='undefined'&&AI_ASSIST.isOpen()){AI_ASSIST.close();return true;}if(typeof APP!=='undefined'&&APP._test.flushPendingSave)APP._test.flushPendingSave();return false;})()", value -> {
             if ("true".equals(value) || isFinishing() || isDestroyed()) return;
             new AlertDialog.Builder(this).setMessage("退出大病历？请确认页面没有保存失败提示。")
                 .setPositiveButton("退出",(d,w)->finish()).setNegativeButton("继续填写",null).show();

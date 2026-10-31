@@ -32,6 +32,11 @@ const AI_ASSIST = (() => {
       <div class="ai-heading"><div><span class="ai-eyebrow">DEEPSEEK · 填写辅助</span><h2 id="aiTitle">AI 病历助手</h2></div><button id="aiClose" class="btn btn-ghost">关闭</button></div>
       <p class="ai-note">只处理你选择的资料。结果须核对后采纳；未问、未查、不详不得当成正常。联网内容将发送至 DeepSeek。当前辅助填写文本病史，过敏、吸烟饮酒等选择项仍需手动确认。</p>
       <div class="ai-settings-row"><button id="aiSettings" class="btn btn-ghost">API 设置 / 测试连接</button><span id="aiModel"></span></div>
+      <div id="aiOnboarding" class="ai-onboarding" hidden>
+        <strong>首次使用 AI</strong>
+        <ol><li>打开「API 设置」，按教程创建 DeepSeek API Key。</li><li>粘贴密钥并保存，点击「保存并测试连接」。</li><li>回到这里预览资料，确认后再发送。</li></ol>
+        <p>密钥只保存在本机加密存储中，不会写入病历备份；联网前请检查预览内容。</p>
+      </div>
       <label for="aiOperation">需要什么帮助</label><select id="aiOperation">${Object.entries(AI_CORE.operations).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select>
       <div id="aiTargetWrap" hidden><label for="aiTarget">选择要润色的段落</label><select id="aiTarget">${Object.entries(AI_CORE.fields).filter(([k]) => k !== 'summary').map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('')}</select></div>
       <div id="aiNotesWrap"><label for="aiNotes">原始问诊笔记（仅在本次窗口保留）</label><textarea id="aiNotes" rows="5" maxlength="16000" placeholder="如：患者诉咳嗽3天，昨晚加重，发热情况未问，既往有高血压，具体用药不详。"></textarea></div>
@@ -59,7 +64,7 @@ const AI_ASSIST = (() => {
     pendingFields(); refreshModel(); $('aiClose').focus();
   }
   function refreshModel() {
-    try { const s = JSON.parse(bridge().aiStatus()); model = s.model || ''; $('aiModel').textContent = s.configured ? model : '尚未设置 API Key'; return s.configured; }
+    try { const s = JSON.parse(bridge().aiStatus()); model = s.model || ''; $('aiModel').textContent = s.configured ? model : '尚未设置 API Key'; $('aiOnboarding').hidden = !!s.configured; return s.configured; }
     catch (e) { status('无法读取 AI 设置'); return false; }
   }
   function prepare() {
@@ -117,11 +122,5 @@ const AI_ASSIST = (() => {
       status(applied.saved ? '已采纳 ' + applied.count + ' 项并保存到草稿，仍待逐项核对；可撤销上一步' : '已采纳到内存，但保存失败；请立即导出备份并处理主页面提示');
     } catch (e) { if (!panel) return; if ($('aiApply')) $('aiApply').disabled = false; status(e.message); }
   }
-  function init() {
-    const button = document.getElementById('btnAI');
-    if (!button || !bridge() || !bridge().aiRequest) return;
-    button.hidden = false; button.addEventListener('click', open);
-  }
-  if (typeof document !== 'undefined') document.addEventListener('DOMContentLoaded', init);
   return {open, close, receive, isOpen: () => !!panel};
 })();

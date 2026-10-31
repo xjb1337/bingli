@@ -765,8 +765,24 @@ const RECORD_CORE = (() => {
 
   /* ---------------------- 病历列表操作（纯函数） ---------------------- */
 
+  function secureUidPart() {
+    try {
+      const cryptoApi = typeof globalThis !== 'undefined' ? globalThis.crypto : null;
+      if (cryptoApi && typeof cryptoApi.getRandomValues === 'function') {
+        const bytes = new Uint32Array(2);
+        cryptoApi.getRandomValues(bytes);
+        return Array.from(bytes).map(n => n.toString(36)).join('');
+      }
+    } catch (e) { /* 旧 WebView 没有 Web Crypto 时退回 Math.random */ }
+    return '';
+  }
+
   function uid(now = Date.now(), rand = Math.random) {
-    return 'r' + now.toString(36) + rand().toString(36).slice(2, 7);
+    // 多标签页可能在同一毫秒内创建病历；Chrome 的各个页面还可能拿到相同的
+    // Math.random 初始序列。浏览器优先使用 Web Crypto，避免两个页面复用同一 ID。
+    const secure = rand === Math.random ? secureUidPart() : '';
+    const entropy = secure || rand().toString(36).slice(2, 9);
+    return 'r' + now.toString(36) + entropy;
   }
 
   /** 列表项摘要（用于列表页展示，不依赖界面） */
@@ -1183,7 +1199,14 @@ const RECORD_CORE = (() => {
     if (!got.ok || got.missing) return false;
     try {
       const existing = JSON.parse(got.raw);
-      const strip = r => { const c = cloneValue(r); delete c.meta; return c; };
+      const strip = r => {
+        const c = cloneValue(r);
+        delete c.meta;
+        // 病历列表快照会在记录根部补一个 updatedAt；它不是编辑内容，
+        // 不应让另一标签页仅因列表写入就被误判成未保存冲突。
+        delete c.updatedAt;
+        return c;
+      };
       return stableStringify(strip(existing)) === stableStringify(strip(record));
     } catch (e) {
       return false;

@@ -123,6 +123,8 @@ async function main() {
     '--no-first-run',
     '--no-default-browser-check',
     '--disable-gpu',
+    '--no-sandbox',
+    '--disable-dev-shm-usage',
     '--window-size=430,932',
     'about:blank'
   ], { stdio: 'ignore' });
@@ -169,7 +171,6 @@ async function main() {
     await p2.goto(url);
     const p2Start = await p2.eval('return APP.getRecord().basic.name;');
     check('B03 第二标签页能找回未入列表的草稿', p2Start === '患者A', `读到「${p2Start}」`);
-
     await p1.eval('return await APP._test.saveToLibrary();');
     const p2dbg = await p2.eval(`
       await APP._test.newRecord();
@@ -213,7 +214,6 @@ async function main() {
       return { a: !!a, b: !!b };
     `);
     check('B01 两份草稿各自落盘', stored.a && stored.b, JSON.stringify(stored));
-
     // B02：同一病历并发保存，后写者必须收到冲突而不是覆盖
     const opened = await p2.eval(`
       const ids = APP._test.getList().map(x => x.id);

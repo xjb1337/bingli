@@ -157,22 +157,27 @@ var TEMPLATES = (function () {
   /** 患者录入提纲：只列「应该问/应该查什么」，不含模板里的具体事实 */
   function outlineOf(t) {
     const out = [];
-    (function walk(node, path) {
-      if (!node || typeof node !== 'object') return;
-      Object.keys(node).forEach(k => {
-        const p = path ? path + '.' + k : k;
-        const v = node[k];
-        if (v && typeof v === 'object' && !Array.isArray(v)) { walk(v, p); return; }
-        if (v === '' || v === null || v === undefined) return;
-        if (Array.isArray(v) && !v.length) return;
-        const top = p.split('.')[0];
-        out.push({
-          path: p,
-          section: SECTION_LABEL[top] || top,
-          label: p.split('.').slice(1).join(' · ') || p
-        });
+    const add = (path, section, label) => out.push({ path, section, label });
+    const r = t.record || {};
+    const chief = (r.basic || {}).chiefComplaint;
+    if (chief) add('basic.chiefComplaint', '本范例的问诊线索',
+      `围绕范例主诉「${chief}」询问当前患者：是否存在相关症状？何时开始、如何变化？不要照抄范例的时长。`);
+    add('hpi', '现病史', '逐项询问起病时间与诱因、症状部位与性质、程度、持续时间、加重缓解因素、伴随症状、诊疗经过及一般情况；按患者实际回答记录。');
+    add('pmh', '病史补充', '询问既往疾病、手术外伤、用药及过敏史，补充个人史、婚育史和家族史；不把范例中的阴性病史当作已询问。');
+    Object.entries(r.pe || {}).forEach(([group, fields]) => {
+      if (!fields || typeof fields !== 'object' || group === 'vitals') return;
+      Object.keys(fields).forEach(key => {
+        const item = SCHEMA.findPEItem && SCHEMA.findPEItem(group + '.' + key);
+        const label = item && (item.item || item).label;
+        if (label) add('pe.' + group + '.' + key, '体格检查', `检查并记录：${label}（以本次实际查体为准）`);
       });
-    })(t.record, '');
+    });
+    add('pe.vitals', '体格检查', '测量并记录本次生命体征；未检查的项目保持待查。');
+    ((r.auxiliary || {}).items || []).forEach((item, i) => {
+      if (item.name) add('auxiliary.items.' + i, '本范例涉及的检查核实项目',
+        `${item.name}：当前患者是否已有报告？核对日期、来源和实际结果；是否需要检查由临床判断。`);
+    });
+    add('diagnosis', '诊断与记录', '根据当前患者的病史、查体和实际检查资料整理诊断依据、鉴别诊断与待完善项目，不直接套用范例诊断。');
     return out;
   }
 

@@ -19,6 +19,7 @@ async function main() {
   const chrome = spawn(CHROME, [
     '--headless=new', `--remote-debugging-port=${PORT}`, `--user-data-dir=${dir}`,
     '--no-first-run', '--no-default-browser-check', '--disable-gpu',
+    '--no-sandbox', '--disable-dev-shm-usage',
     '--window-size=412,915', '--hide-scrollbars', 'about:blank'
   ], { stdio: 'ignore' });
   await sleep(2500);

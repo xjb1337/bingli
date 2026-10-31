@@ -16,9 +16,24 @@ const APP = (() => {
 
   const CORE = RECORD_CORE;
   const K = CORE.STORAGE_KEYS;
+  const REPO = RECORD_REPOSITORY.create({
+    storage: localStorage,
+    core: CORE,
+    emptyRecord: SCHEMA.emptyRecord,
+    validDeptKeys: () => deptKeys()
+  });
 
-  /** 应用版本，显示在页脚，便于判断手机是否仍在用旧版 */
-  const APP_VERSION = '3.0.0';
+  /** 浏览器构建的回退版本；Android 运行时优先读取原生 BuildConfig.VERSION_NAME。 */
+  // 与当前 Android 发布线保持一致；原生桥接存在时以 BuildConfig.VERSION_NAME 为准。
+  const APP_VERSION = '3.0.0.8';
+
+  function appVersion() {
+    try {
+      return window.BingliAndroid && window.BingliAndroid.versionName
+        ? String(window.BingliAndroid.versionName())
+        : APP_VERSION;
+    } catch (e) { return APP_VERSION; }
+  }
 
   /** 当前正在编辑的病历 */
   let R = null;
@@ -27,6 +42,8 @@ const APP = (() => {
   /** 当前步骤索引 */
   let step = 0;
   let settings = { ...CORE.SETTINGS_DEFAULTS };
+  /** 设置页是独立工作台视图，不占用病历步骤，也不改变上次停留步骤 */
+  let settingsView = false;
   /** 存储异常提示（损坏 / 写满），显示在界面顶部 */
   let storageAlert = '';
   /** 其他标签页写了更新版本时的冲突状态；有值时禁止本页覆盖 */
@@ -50,18 +67,36 @@ const APP = (() => {
    * 系统回顾是既往史的补充追问，排在它后面才讲得通。
    */
   const STEPS = [
-    { key: 'basic', name: '基本情况', icon: '①' },
-    { key: 'hpi', name: '现病史', icon: '②' },
-    { key: 'pmh', name: '既往史', icon: '③' },
-    { key: 'ros', name: '系统回顾', icon: '④' },
-    { key: 'personal', name: '个人史', icon: '⑤' },
-    { key: 'marriage', name: '婚姻与生育史', icon: '⑥' },
-    { key: 'family', name: '家庭史', icon: '⑦' },
-    { key: 'pe', name: '体格检查', icon: '⑧' },
-    { key: 'aux', name: '辅助检查', icon: '⑨' },
-    { key: 'summary', name: '摘要与诊断', icon: '⑩' },
-    { key: 'output', name: '生成病历', icon: '✓' }
+    { key: 'basic', name: '基本情况' },
+    { key: 'hpi', name: '现病史' },
+    { key: 'pmh', name: '既往史' },
+    { key: 'ros', name: '系统回顾' },
+    { key: 'personal', name: '个人史' },
+    { key: 'marriage', name: '婚姻与生育史' },
+    { key: 'family', name: '家庭史' },
+    { key: 'pe', name: '体格检查' },
+    { key: 'aux', name: '辅助检查' },
+    { key: 'summary', name: '摘要与诊断' },
+    { key: 'output', name: '生成病历' }
   ];
+
+  // 目录使用同一套线性 SVG 语言，避免圈号字符在不同 WebView 字体中错位。
+  function stepIcon(key) {
+    const paths = {
+      basic: '<circle cx="12" cy="8" r="3"/><path d="M5 20c.7-3.1 3.1-5 7-5s6.3 1.9 7 5"/>',
+      hpi: '<path d="M7 3h8l3 3v15H7z"/><path d="M15 3v4h4M10 11h5M10 15h5"/>',
+      pmh: '<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>',
+      ros: '<path d="M7 5h10M7 12h10M7 19h10"/><circle cx="4" cy="5" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="19" r="1"/>',
+      personal: '<circle cx="12" cy="8" r="3"/><path d="M6 20c.5-3.5 2.5-5 6-5s5.5 1.5 6 5"/>',
+      marriage: '<path d="M12 20S5 15.8 5 10.2A3.7 3.7 0 0 1 12 8a3.7 3.7 0 0 1 7 2.2C19 15.8 12 20 12 20Z"/>',
+      family: '<circle cx="9" cy="8" r="2.5"/><circle cx="16" cy="9" r="2"/><path d="M4 19c.4-3 2-4.5 5-4.5s4.6 1.5 5 4.5M14 15c2.8-.3 4.6 1 5 4"/>',
+      pe: '<path d="M8 4v5a4 4 0 0 0 8 0V4M8 6H5M16 6h3M12 13v7M9 20h6"/>',
+      aux: '<path d="M9 3h6M10 3v5l-4.5 8.5A2.5 2.5 0 0 0 7.7 20h8.6a2.5 2.5 0 0 0 2.2-3.5L14 8V3M8 15h8"/>',
+      summary: '<rect x="4" y="4" width="16" height="16" rx="3"/><path d="m8 12 2.5 2.5L16 9"/>',
+      output: '<path d="M6 3h9l3 3v15H6zM15 3v4h4M9 14l2 2 4-4"/>'
+    };
+    return `<svg class="nav-svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${paths[key] || paths.basic}</svg>`;
+  }
 
   /* ===================== 字段填写等级（必填 / 建议 / 可留空） =====================
    *
@@ -144,11 +179,73 @@ const APP = (() => {
     return typeof navigator !== 'undefined' && navigator.locks
       && typeof navigator.locks.request === 'function';
   }
+  // 雷电 headless/部分 WebView 会暴露 navigator.locks，但不同页面的锁管理器
+  // 不一定共享。localStorage 的短租约锁作为第二道跨页面互斥，写入后立即回读
+  // 令牌，只有最后写入且读回自己的页面获得锁。
+  const STORAGE_LOCK_PREFIX = 'dabingli.lock.v1.';
+  let storageLockCounter = 0;
+  function storageLockKey(name) {
+    return STORAGE_LOCK_PREFIX + encodeURIComponent(String(name || 'lock'));
+  }
+  function withStorageLock(name, task) {
+    const key = storageLockKey(name);
+    const owner = SESSION_ID + ':' + (++storageLockCounter) + ':' + Date.now();
+    const started = Date.now();
+    const ttl = 5000;
+    return new Promise(resolve => {
+      const attempt = () => {
+        let held = null;
+        try { held = JSON.parse(localStorage.getItem(key) || 'null'); } catch (e) { held = null; }
+        const previousRevision = Number(held && held.lastRevision) || 0;
+        const now = Date.now();
+        if (!held || !held.owner || Number(held.expiresAt) <= now) {
+          try {
+            localStorage.setItem(key, JSON.stringify({ owner, expiresAt: now + ttl }));
+            const check = JSON.parse(localStorage.getItem(key) || 'null');
+            if (check && check.owner === owner) {
+              const finish = value => setTimeout(() => {
+                try {
+                  const current = JSON.parse(localStorage.getItem(key) || 'null');
+                  if (current && current.owner === owner) {
+                    const isRecord = String(name).indexOf('record:') === 0;
+                    localStorage.setItem(key, JSON.stringify({
+                      owner: '',
+                      expiresAt: Date.now() + 2000,
+                      lastRevision: isRecord && R && Number(R.meta && R.meta.revision) || 0
+                    }));
+                  }
+                } catch (e) { /* ignore release failures */ }
+                resolve(value);
+              }, 100);
+              Promise.resolve().then(() => task(previousRevision)).then(value => {
+                finish(value);
+              }, () => {
+                finish(false);
+              });
+              return;
+            }
+          } catch (e) {
+            resolve(false);
+            return;
+          }
+        }
+        if (Date.now() - started >= ttl * 2) { resolve(false); return; }
+        setTimeout(attempt, 15);
+      };
+      attempt();
+    });
+  }
   let saveQueue = Promise.resolve();
   let listQueue = Promise.resolve();
+  let saveTimer = null;
+  let saveDirty = false;
+  const SAVE_DEBOUNCE_MS = 450;
+  // 点「保存」时若浏览器提供 Web Locks，真正落盘会异步排队。
+  // 用这个状态避免用户连续点击并把「正在保存」与最终结果区分开。
+  let saveFeedbackBusy = false;
 
   function loadList() {
-    const res = CORE.loadList(localStorage);
+    const res = REPO.loadList();
     if (res.ok) {
       LIST = res.list;
       listSaveBlocked = false;
@@ -174,10 +271,10 @@ const APP = (() => {
     }
     if (!opts.replace) {
       // 写前合并：另一个标签页可能刚保存了别的病历
-      const stored = CORE.loadList(localStorage);
+      const stored = REPO.loadList();
       if (stored.ok) LIST = CORE.mergeListForWrite(stored.list, LIST);
     }
-    const ok = CORE.safeSet(localStorage, K.list, JSON.stringify(LIST));
+    const ok = REPO.writeList(LIST, opts);
     if (!ok) {
       // 保存失败必须让用户看见，不能假装已保存
       storageAlert = '保存失败：浏览器存储空间可能已满。请先导出病历，再删除不需要的记录。';
@@ -193,7 +290,7 @@ const APP = (() => {
   function saveListAwait(opts = {}) {
     if (!lockAvailable()) return saveListNow(opts);
     const run = listQueue
-      .then(() => navigator.locks.request('dabingli:list', () => saveListNow(opts)))
+      .then(() => withStorageLock('list', () => saveListNow(opts)))
       .catch(() => false);
     listQueue = run.then(() => {}, () => {});
     return run;
@@ -219,7 +316,18 @@ const APP = (() => {
     }
     if (!R.meta) R.meta = {};
     const expected = Number(R.meta.revision) || 0;
-    const res = CORE.saveCurrent(localStorage, R, expected);
+    // 某些 headless/WebView 页面对草稿槽的同步晚于锁槽；锁释放时留下的
+    // 修订号仍能阻止旧页面把同一病历静默写回旧版本。
+    try {
+      const marker = JSON.parse(localStorage.getItem(storageLockKey('record:' + R.id)) || 'null');
+      if (marker && Number(marker.lastRevision) > expected) {
+        remoteConflict = { remote: null, remoteRevision: Number(marker.lastRevision) };
+        storageAlert = '其他页面已保存了这份病历的更新版本（修订号 '
+          + marker.lastRevision + '）。为避免互相覆盖，本页已暂停保存。';
+        return false;
+      }
+    } catch (e) { /* ignore marker read failures */ }
+    const res = REPO.saveCurrent(R, expected);
     if (res.ok) {
       R.meta.revision = res.record.meta.revision;
       R.meta.updatedAt = res.record.meta.updatedAt;
@@ -255,6 +363,33 @@ const APP = (() => {
   }
 
   /**
+   * 文本输入走短防抖，避免每个按键都同步序列化并写入整份病历。
+   * 显式保存、切换病历和生命周期路径仍通过 flushPendingSave() 立即落盘。
+   */
+  function scheduleCurrentSave() {
+    saveDirty = true;
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      saveTimer = null;
+      if (!saveDirty) return;
+      saveDirty = false;
+      saveCurrent();
+    }, SAVE_DEBOUNCE_MS);
+    return true;
+  }
+
+  /** 取消等待中的防抖写入，并等待真正的保存结果。 */
+  function flushPendingSave() {
+    if (saveTimer) {
+      clearTimeout(saveTimer);
+      saveTimer = null;
+    }
+    if (!saveDirty) return true;
+    saveDirty = false;
+    return saveCurrentAwait();
+  }
+
+  /**
    * 需要知道「到底写成功没有」的路径用它：锁内重新读修订号再比较，
    * 保证两个标签页不会都基于同一个旧修订号写入。
    * 无 Web Locks 时同步返回布尔值，有锁时返回 Promise<boolean>。
@@ -264,7 +399,15 @@ const APP = (() => {
     const id = R.id;
     if (!lockAvailable()) return saveCurrentNow();
     const run = saveQueue.then(() =>
-      navigator.locks.request('dabingli:record:' + id, () => saveCurrentNow())
+      withStorageLock('record:' + id, previousRevision => {
+        if (previousRevision > (Number(R.meta && R.meta.revision) || 0)) {
+          remoteConflict = { remote: null, remoteRevision: previousRevision };
+          storageAlert = '其他页面已保存了这份病历的更新版本（修订号 '
+            + previousRevision + '）。为避免互相覆盖，本页已暂停保存。';
+          return false;
+        }
+        return saveCurrentNow();
+      })
     ).catch(() => false);
     saveQueue = run;
     return run;
@@ -277,7 +420,7 @@ const APP = (() => {
   }
 
   function loadCurrent() {
-    const res = CORE.loadCurrent(localStorage, SCHEMA.emptyRecord, deptKeys(), getSessionId());
+    const res = REPO.loadCurrent(getSessionId());
     if (res.ok) {
       if (res.record) { R = res.record; setSessionId(R.id); }
       currentSaveBlocked = false;
@@ -298,7 +441,7 @@ const APP = (() => {
   // 调用点会先弹 confirm 并把原始字符串给用户下载，所以这里不再二次确认。
   function discardCorruptCurrent() {
     if (!currentSaveBlocked) return false;
-    try { localStorage.removeItem(K.current); } catch (e) { /* 删不掉也不能把锁解开 */ }
+    REPO.removeCurrent();
     currentSaveBlocked = false;
     corruptCurrentRaw = '';
     R = newRecord();
@@ -309,7 +452,7 @@ const APP = (() => {
 
   function discardCorruptList() {
     if (!listSaveBlocked) return false;
-    try { localStorage.removeItem(K.list); } catch (e) { /* 同上 */ }
+    REPO.removeList();
     listSaveBlocked = false;
     corruptListRaw = '';
     LIST = [];
@@ -355,13 +498,13 @@ const APP = (() => {
   }
 
   function loadSettings() {
-    const raw = CORE.safeGetJSON(localStorage, K.settings);
+    const raw = REPO.loadSettings();
     settings = CORE.normalizeSettings(raw);
     applyFontScale();
   }
 
   function saveSettings() {
-    CORE.safeSet(localStorage, K.settings, JSON.stringify(settings));
+    REPO.saveSettings(settings);
     applyFontScale();
   }
 
@@ -558,7 +701,7 @@ const APP = (() => {
         ${t.hint ? `<div class="tpl-hint">${esc(t.hint)}</div>` : ''}
         ${t.source ? `<div class="tpl-source">${esc(t.source.label)}：${esc(t.source.note)}</div>` : ''}
         <div class="btn-row">
-          <button class="btn btn-mini" data-tpl="${esc(t.key)}" data-tplmode="example">作为学习范例填入</button>
+          <button class="btn btn-mini btn-template-example" data-tpl="${esc(t.key)}" data-tplmode="example">作为学习范例填入</button>
           <button class="btn btn-mini btn-ghost" data-tpl="${esc(t.key)}" data-tplmode="patient">查看患者录入提纲</button>
         </div>
       </div>`;
@@ -1344,19 +1487,19 @@ const APP = (() => {
     const rows = items.map((it, i) => `
       <div class="aux-item">
         <div class="aux-row">
-          <input type="text" data-aux="name" data-idx="${i}" value="${esc(it.name || '')}"
+          <input type="text" data-aux="name" data-field-path="auxiliary.items.${i}.name" data-idx="${i}" value="${esc(it.name || '')}"
             placeholder="检查项目，如：血常规">
-          <input type="text" data-aux="result" data-idx="${i}" value="${esc(it.result || '')}"
+          <input type="text" data-aux="result" data-field-path="auxiliary.items.${i}.result" data-idx="${i}" value="${esc(it.result || '')}"
             placeholder="结果">
           <button type="button" class="btn-del" data-auxdel="${i}">×</button>
         </div>
         <div class="row2">
-          <input type="date" data-aux="date" data-idx="${i}" value="${esc(it.date || '')}"
+          <input type="date" data-aux="date" data-field-path="auxiliary.items.${i}.date" data-idx="${i}" value="${esc(it.date || '')}"
             title="检查日期：填了会按日期升序排列">
-          <input type="text" data-aux="hospital" data-idx="${i}" value="${esc(it.hospital || '')}"
+          <input type="text" data-aux="hospital" data-field-path="auxiliary.items.${i}.hospital" data-idx="${i}" value="${esc(it.hospital || '')}"
             placeholder="检查机构（外院必填）">
         </div>
-        <input type="text" data-aux="no" data-idx="${i}" value="${esc(it.no || '')}"
+        <input type="text" data-aux="no" data-field-path="auxiliary.items.${i}.no" data-idx="${i}" value="${esc(it.no || '')}"
           placeholder="检查号（外院填写）">
       </div>
     `).join('');
@@ -1510,7 +1653,7 @@ const APP = (() => {
     const diagHtml = diagList.map((d, i) => `
       <div class="diag-row">
         <span class="diag-no">${i + 1}.</span>
-        <input type="text" data-diag="${i}" value="${esc(d)}">
+        <input type="text" data-diag="${i}" data-field-path="diagnosis.confirmed.${i}" value="${esc(d)}">
         <button type="button" class="btn-del" data-diagdel="${i}">×</button>
       </div>
     `).join('');
@@ -1519,7 +1662,7 @@ const APP = (() => {
       <div class="hint-card">
         <div class="hint-name">${esc(h.name)}</div>
         <div class="hint-text">${esc(h.hint)}</div>
-        <div class="hint-note">💡 ${esc(h.note)}</div>
+        <div class="hint-note"><span class="hint-icon" aria-hidden="true">i</span>${esc(h.note)}</div>
         <div class="hint-matched">依据：${h.matched.map(m => esc(friendlyKey(m))).join('、')}</div>
         <button class="btn btn-mini" data-addhint="${esc(h.name)}">加入诊断</button>
       </div>
@@ -1728,8 +1871,8 @@ const APP = (() => {
   /**
    * 出院记录录入区（评分表第 6-7 页 15 分）。
    *
-   * 六项小标题与评分表逐条对应；出院诊断留空时自动继承「初步诊断」，
-   * 住院天数由入院日期与出院日期推算。
+   * 六项小标题与评分表逐条对应；出院诊断必须单独填写并确认，
+   * 不从「初步诊断」静默继承；住院天数由入院日期与出院日期推算。
    */
   function renderDischarge() {
     const d = R.discharge || {};
@@ -1738,7 +1881,7 @@ const APP = (() => {
     const rows = list.map((s, i) => `
       <div class="diag-row">
         <span class="diag-no">${i + 1}.</span>
-        <input type="text" data-arrstr="discharge.diagnoses" data-idx="${i}" value="${esc(s || '')}"
+        <input type="text" data-arrstr="discharge.diagnoses" data-field-path="discharge.diagnoses.${i}" data-idx="${i}" value="${esc(s || '')}"
           placeholder="出院诊断">
         <button type="button" class="btn-del" data-arrstrdel="discharge.diagnoses" data-idx="${i}">×</button>
       </div>
@@ -1919,14 +2062,7 @@ const APP = (() => {
 
       <div class="card">
         <div class="card-title">生成结果</div>
-        <div class="hint">复制或下载前，请逐项核对模板、默认查体和生命体征是否与患者实际情况一致。</div>
-        <details class="optional-details output-options">
-          <summary>输出选项</summary>
-          ${seg('系统回顾详略', 'settings.rosMode', [
-            { value: 'detail', text: '逐系统写出（推荐）' },
-            { value: 'brief', text: '只写阳性' }
-          ])}
-        </details>
+        <div class="hint">复制或下载前，请逐项核对模板、默认查体和生命体征是否与患者实际情况一致。文书显示选项可在「设置」中统一调整。</div>
         <div class="view-tabs">${viewBtns}</div>
         ${OUT_VIEW === 'firstCourse' ? `
           <label class="field">
@@ -2269,7 +2405,7 @@ const APP = (() => {
       const stateHtml = st === 'none' ? ''
         : `<span class="nav-state st-${st}">${stateText}</span>`;
       return `<button type="button" class="nav-row${cur}" data-navstep="${esc(s.key)}">
-        <span class="nav-icon">${esc(s.icon)}</span>
+        <span class="nav-icon">${stepIcon(s.key)}</span>
         <span class="nav-name">${esc(s.name)}</span>
         ${stateHtml}
       </button>`;
@@ -2305,8 +2441,10 @@ const APP = (() => {
       const i = STEPS.findIndex(s => s.key === stepKey);
       if (i >= 0 && i !== step) { step = i; render(); }
     }
-    const sel = `[data-path="${path}"],[data-diag],[data-aux]`;
-    const el = document.querySelector(`[data-path="${path}"]`) || document.querySelector(sel);
+    // 数组字段必须精确定位到对应行；旧实现的兜底选择器会把
+    // diagnosis.confirmed.2 / auxiliary.items.2.result 都跳到第一行。
+    const exact = document.querySelector(`[data-path="${path}"],[data-field-path="${path}"]`);
+    const el = exact || document.querySelector(`[data-field-path^="${path}."]`);
     if (el) {
       if (el.tagName === 'DETAILS') el.open = true;
       if (el.scrollIntoView) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
@@ -2428,13 +2566,99 @@ const APP = (() => {
 
   let GENERATED = null;
 
+  function settingsSeg(label, current, options, hint) {
+    const btns = options.map(o => `
+      <button type="button" class="seg-btn${current === o.value ? ' on' : ''}"
+        data-setting-seg="rosMode" data-val="${esc(o.value)}">${esc(o.text)}</button>
+    `).join('');
+    return `<div class="settings-field">
+      <div class="field-label">${esc(label)}</div>
+      <div class="seg">${btns}</div>
+      ${hint ? `<div class="hint">${esc(hint)}</div>` : ''}
+    </div>`;
+  }
+
+  function renderSettingsPage() {
+    const percent = Math.round((Number(settings.fontScale) || 1) * 100);
+    const isAndroid = !!(window.BingliAndroid);
+    return `
+      <div class="settings-page">
+        <div class="settings-intro">
+          <div class="settings-intro-head">
+            <div>
+              <div class="settings-eyebrow">工作台设置</div>
+              <h2>设置</h2>
+            </div>
+            <button type="button" class="btn btn-ghost settings-back" data-settings-action="back">返回病历</button>
+          </div>
+          <p>把显示、文书和数据操作集中在这里。设置只影响本机工作台，不会直接改写已经保存的病历事实。</p>
+        </div>
+
+        <section class="card settings-card" aria-labelledby="settings-reading-title">
+          <div class="card-title" id="settings-reading-title">显示与文书</div>
+          <div class="settings-row">
+            <div>
+              <div class="settings-label">字号</div>
+              <div class="hint">调整录入页、提醒和文书预览的字号，当前 ${percent}%</div>
+            </div>
+            <div class="settings-scale" role="group" aria-label="调整字号">
+              <button type="button" class="btn btn-ghost btn-mini" data-setting-font="down" aria-label="减小字号">A−</button>
+              <span class="settings-scale-value" aria-live="polite">${percent}%</span>
+              <button type="button" class="btn btn-ghost btn-mini" data-setting-font="up" aria-label="增大字号">A＋</button>
+            </div>
+          </div>
+          <div class="settings-row settings-row-stack">
+            ${settingsSeg('系统回顾详略', settings.rosMode, [
+              { value: 'detail', text: '逐系统写出' },
+              { value: 'brief', text: '只写阳性' }
+            ], '只影响生成病历时的系统回顾段落；未问过的项目仍不会被自动写成阴性。')}
+          </div>
+          <div class="settings-note">主题颜色跟随设备的浅色 / 深色模式。</div>
+        </section>
+
+        <section class="card settings-card" aria-labelledby="settings-data-title">
+          <div class="card-title" id="settings-data-title">病历与数据</div>
+          <div class="settings-actions">
+            <button type="button" class="btn" data-settings-action="openList">管理病历</button>
+            <button type="button" class="btn btn-ghost" data-settings-action="exportBackup">导出全部备份</button>
+            <button type="button" class="btn btn-ghost" data-settings-action="exportCurrentBackup">导出当前病历</button>
+          </div>
+          <div class="settings-note settings-note-warn">病历保存在本机浏览器存储中，备份文件未加密。更换设备或清理数据前，请先导出并妥善保管备份。</div>
+        </section>
+
+        <section class="card settings-card" aria-labelledby="settings-app-title">
+          <div class="card-title" id="settings-app-title">应用</div>
+          <div class="settings-info-row"><span>版本</span><b>${esc(appVersion())}</b></div>
+          <div class="settings-info-row"><span>运行环境</span><span>${isAndroid ? 'Android 本机应用' : '浏览器 / WebView'}</span></div>
+          <div class="settings-actions">
+            ${isAndroid ? '<button type="button" class="btn btn-ghost" data-settings-action="checkUpdates">检查更新</button>' : ''}
+            ${isAndroid ? '<button type="button" class="btn btn-ghost" data-settings-action="openAi">AI 助手</button>' : ''}
+            <button type="button" class="btn btn-ghost" data-settings-action="resetFont">恢复默认字号</button>
+          </div>
+          <div class="settings-note">AI 建议仍需逐项人工核对；本页面不会自动生成诊断或处方。</div>
+        </section>
+      </div>`;
+  }
+
+  function openSettings() {
+    settingsView = true;
+    render();
+  }
+
+  function closeSettings() {
+    settingsView = false;
+    render();
+  }
+
   function render() {
     // 同步 segmented 设置
     if (settings.rosMode) R.__rosMode = settings.rosMode;
 
-    const cur = STEPS[step];
+    const cur = settingsView ? null : STEPS[step];
     let body = '';
-    switch (cur.key) {
+    if (settingsView) {
+      body = renderSettingsPage();
+    } else switch (cur.key) {
       case 'basic': body = renderBasic(); break;
       case 'hpi': body = renderHpi(); break;
       case 'ros': body = renderRos(); break;
@@ -2451,7 +2675,7 @@ const APP = (() => {
     // 存储异常必须让用户看到，不能静默
     const banner = storageAlert
       ? `<div class="storage-alert" id="storageAlert">
-           <div class="alert-msg">⚠️ ${esc(storageAlert)}</div>
+           <div class="alert-msg"><span class="alert-icon" aria-hidden="true">!</span>${esc(storageAlert)}</div>
            <div class="alert-btns">
              ${currentSaveBlocked ? '<button type="button" class="alert-act" data-export-corrupt="current">导出原始损坏数据</button>' : ''}
              ${currentSaveBlocked ? '<button type="button" class="alert-act" data-discard-corrupt="current">新建空白病历</button>' : ''}
@@ -2466,23 +2690,27 @@ const APP = (() => {
     $('#content').innerHTML = banner + body;
 
     // 步骤条
-    $('#stepTitle').textContent = cur.name;
-    $('#stepNum').textContent = `${step + 1}/${STEPS.length}`;
-    $('#progressBar').style.width = ((step + 1) / STEPS.length * 100) + '%';
+    document.body.classList.toggle('settings-view', settingsView);
+    document.body.classList.toggle('large-font', Number(settings.fontScale) > 1.05);
+    $('#stepTitle').textContent = settingsView ? '设置' : cur.name;
+    $('#stepNum').textContent = settingsView ? '' : `${step + 1}/${STEPS.length}`;
+    $('#progressBar').style.width = settingsView ? '0%' : ((step + 1) / STEPS.length * 100) + '%';
+    $('#stepBar').setAttribute('aria-label', settingsView ? '设置' : '打开步骤导航');
 
     // 底部导航：首步禁用「上一步」，末步「下一步」变为保存
     const prevBtn = $('#btnPrev');
     const nextBtn = $('#btnNext');
     if (prevBtn) {
-      prevBtn.disabled = step === 0;
-      prevBtn.textContent = step === 0 ? '已是第一步' : '上一步';
+      prevBtn.disabled = settingsView ? false : step === 0;
+      prevBtn.textContent = settingsView ? '返回病历' : (step === 0 ? '已是第一步' : '上一步');
     }
     if (nextBtn) {
+      nextBtn.hidden = settingsView;
       nextBtn.textContent = step === STEPS.length - 1 ? '保存病历' : '下一步';
     }
 
     // 系统回顾详情区
-    if (cur.key === 'ros') {
+    if (!settingsView && cur.key === 'ros') {
       SCHEMA.ROS.forEach(sys => {
         const box = document.querySelector(`[data-ros-detail="${sys.key}"]`);
         if (box) box.innerHTML = renderRosDetail(sys.key);
@@ -2490,12 +2718,12 @@ const APP = (() => {
     }
 
     // 实时预览
-    updateLivePreviews();
+    if (!settingsView) updateLivePreviews();
 
     // 记住停在哪一步。刷新、切走再回来都会回到原处，
     // 不必每次都从「基本情况」重新点 7 下。
     // 生成页不记——它只是输出，回到编辑流程更有用。
-    if (cur.key !== 'output' && settings.lastStep !== cur.key) {
+    if (!settingsView && cur.key !== 'output' && settings.lastStep !== cur.key) {
       settings.lastStep = cur.key;
       saveSettings();
     }
@@ -2664,6 +2892,22 @@ const APP = (() => {
     return (g && g.items) || [];
   }
 
+  // 文书动作与 DOM 委托解耦：这里注入状态、生成器和渲染能力，动作模块本身不碰 DOM。
+  const ACTIONS = ACTION_HANDLERS.create({
+    getRecord: () => R,
+    generator: GENERATOR,
+    saveCurrent,
+    render,
+    toast,
+    snapshot,
+    ensureSoap,
+    ensureDischarge,
+    soapSegDraft: SOAP_SEG_DRAFT,
+    setPath,
+    markDocumentGenerated: CORE.markDocumentGenerated,
+    markDocumentReviewed: CORE.markDocumentReviewed
+  });
+
   function bindEvents() {
     // 输入事件（委托）
     document.addEventListener('input', e => {
@@ -2688,7 +2932,7 @@ const APP = (() => {
         } else if (t.dataset.path === 'discharge.admitCondition') {
           CORE.markDocumentManual(R, 'discharge', 'admitCondition');
         }
-        saveCurrent();
+        scheduleCurrentSave();
         updateLivePreviews();
         // 查体项：只刷新这一个条目的「已填 / 系统默认 / 需填」标记，
         // 不整页重绘（否则输入框会失焦、光标跳到开头）。
@@ -2704,18 +2948,18 @@ const APP = (() => {
         // 旧存档里这一项可能没有 date/hospital/no，缺什么补什么（只补空壳，不填值）。
         R.auxiliary.items[idx] = R.auxiliary.items[idx] || { name: '', result: '', date: '', hospital: '', no: '' };
         R.auxiliary.items[idx][t.dataset.aux] = t.value;
-        saveCurrent();
+        scheduleCurrentSave();
       }
       if (t.dataset.diag !== undefined) {
         R.diagnosis.confirmed[parseInt(t.dataset.diag, 10)] = t.value;
-        saveCurrent();
+        scheduleCurrentSave();
       }
       // 首次病程录 / 出院记录里的「数组对象」行（诊断依据、鉴别诊断、诊疗计划）
       if (t.dataset.arr) {
         const list = getPath(R, t.dataset.arr);
         if (Array.isArray(list) && list[parseInt(t.dataset.idx, 10)]) {
           list[parseInt(t.dataset.idx, 10)][t.dataset.field] = t.value;
-          saveCurrent();
+          scheduleCurrentSave();
         }
       }
       // 出院诊断（字符串数组）
@@ -2728,13 +2972,13 @@ const APP = (() => {
             R.discharge.diagnosesConfirmed = false;
             CORE.markDocumentManual(R, 'discharge', 'diagnoses');
           }
-          saveCurrent();
+          scheduleCurrentSave();
         }
       }
       // 首次病程录记录时间：写入当前病历，切换病历不沿用上一份
       if (t.dataset.fcdate !== undefined) {
         R.soap.recordTime = t.value;
-        saveCurrent();
+        scheduleCurrentSave();
         const pre = document.getElementById('outputText');
         if (pre) pre.textContent = GENERATOR.buildFirstCourseRecord(R, fcStamp() ? { date: fcStamp() } : {});
       }
@@ -2742,9 +2986,51 @@ const APP = (() => {
 
     // 点击事件（委托）
     document.addEventListener('click', e => {
-      const t = e.target.closest('[data-seg],[data-check],[data-ros],[data-rosneg],[data-pequick],[data-pecheck],[data-pall],[data-act],[data-addhint],[data-auxdel],[data-diagdel],[data-jump],[data-dismiss-alert],[data-export-corrupt],[data-discard-corrupt],[data-view],[data-checkjump],[data-arrdel],[data-arrstrdel],[data-focusadd],[data-focusdel],[data-tpl]');
+      const t = e.target.closest('[data-seg],[data-setting-seg],[data-setting-font],[data-settings-action],[data-check],[data-ros],[data-rosneg],[data-pequick],[data-pecheck],[data-pall],[data-act],[data-addhint],[data-auxdel],[data-diagdel],[data-jump],[data-dismiss-alert],[data-export-corrupt],[data-discard-corrupt],[data-view],[data-checkjump],[data-arrdel],[data-arrstrdel],[data-focusadd],[data-focusdel],[data-tpl]');
       if (!t) return;
       const ds = t.dataset;
+
+      if (ds.settingsAction) {
+        switch (ds.settingsAction) {
+          case 'back': closeSettings(); break;
+          case 'openList': openList(); break;
+          case 'exportBackup': exportBackup(); break;
+          case 'exportCurrentBackup': exportCurrentBackup(); break;
+          case 'resetFont':
+            settings.fontScale = CORE.SETTINGS_DEFAULTS.fontScale;
+            saveSettings();
+            render();
+            toast('已恢复默认字号');
+            break;
+          case 'checkUpdates':
+            if (window.BingliAndroid && window.BingliAndroid.checkUpdates) window.BingliAndroid.checkUpdates();
+            else toast('当前环境不支持检查更新');
+            break;
+          case 'openAi':
+            if (typeof AI_ASSIST !== 'undefined' && AI_ASSIST.open) AI_ASSIST.open();
+            else toast('当前环境未启用 AI 助手');
+            break;
+        }
+        return;
+      }
+
+      if (ds.settingFont) {
+        const current = Number(settings.fontScale) || 1;
+        const next = ds.settingFont === 'reset'
+          ? CORE.SETTINGS_DEFAULTS.fontScale
+          : current + (ds.settingFont === 'up' ? 0.1 : -0.1);
+        settings.fontScale = Math.max(0.8, Math.min(1.4, Math.round(next * 10) / 10));
+        saveSettings();
+        render();
+        return;
+      }
+
+      if (ds.settingSeg === 'rosMode') {
+        settings.rosMode = ds.val === 'brief' ? 'brief' : 'detail';
+        saveSettings();
+        render();
+        return;
+      }
 
       // 套用模板病例
       if (ds.tpl !== undefined) {
@@ -2987,11 +3273,15 @@ const APP = (() => {
         // 用户得重新滚回去，体验上等于「点了没反应」。整页重绘还会重置所有
         // <details> 的展开状态、让正在编辑的 textarea 失焦。
         // 状态判定与计数都只在 DOM 上已存在的节点里改，够用。
+        const scrollTop = window.scrollY;
         $$(`[data-pe-group="${ds.pgroup}"]`).forEach(item => {
           const ta = item.querySelector('.pe-text');
           if (ta) refreshPeBadge(ta);
         });
         refreshPeCount(ds.pgroup);
+        // 添加「系统默认」角标会改变卡片高度；恢复点击前的视口位置，
+        // 防止浏览器的滚动锚定把整组按钮向下推离手指所在位置。
+        window.scrollTo({ top: scrollTop, behavior: 'instant' });
         return;
       }
 
@@ -3075,46 +3365,13 @@ const APP = (() => {
   }
 
   function handleAction(act, el) {
+    if (ACTIONS.handle(act, el)) return;
     switch (act) {
-      case 'draftHpi': {
-        R.hpi = GENERATOR.draftHPI(R);
-        saveCurrent();
-        render();
-        toast('已生成现病史初稿，请补充修改');
-        break;
-      }
-      case 'draftSummary': {
-        snapshot('生成摘要');
-        R.summary = '';  // 先清空，让它自动生成
-        const draft = GENERATOR.draftSummary(R);
-        R.summary = draft;
-        CORE.markDocumentGenerated(R, 'summary');
-        saveCurrent();
-        render();
-        toast('已生成摘要初稿，请核对');
-        break;
-      }
-      case 'updateSummary': {
-        snapshot('更新摘要');
-        R.summary = GENERATOR.draftSummary(R);
-        CORE.markDocumentGenerated(R, 'summary');
-        saveCurrent();
-        render();
-        toast('已采用最新草稿；旧摘要仍可通过撤销恢复');
-        break;
-      }
       case 'resolveMarriage': {
         CORE.resolveMarriage(R, String(el.dataset.value || ''));
         saveCurrent();
         render();
         toast('婚姻状态已统一，之后只维护这一个字段');
-        break;
-      }
-      case 'keepSummary': {
-        CORE.markDocumentReviewed(R, 'summary');
-        saveCurrent();
-        render();
-        toast('已按当前文字标记核对；资料再变化时会重新提示');
         break;
       }
       case 'undoDoc': {
@@ -3279,55 +3536,6 @@ const APP = (() => {
         toast('已保留为副本；原病历的新版本仍在病历列表中');
         break;
       }
-      case 'draftSoap': {
-        snapshot('生成首次病程录');
-        const soap = ensureSoap();
-        // 四段各自用生成器里对外的兜底草稿函数，避免把成品文本再切回来。
-        // 只补空白段，已有手写内容一律不动。
-        const fillSeg = (seg, key, text) => {
-          if (String(soap[key] || '').trim()) return;
-          if (!text) return;
-          soap[key] = text;
-          CORE.markDocumentGenerated(R, 'firstCourse', seg);
-        };
-        fillSeg('s', 'summary', GENERATOR.draftCaseSummary(R) || '');
-        fillSeg('oPe', 'pe', GENERATOR.draftObjectivePE(R) || '');
-        fillSeg('oAux', 'aux', GENERATOR.draftObjectiveAux(R) || '');
-        fillSeg('basis', 'basis', GENERATOR.buildBasisSection(R) || '');
-        if (!soap.a.basisDetail.length && typeof GENERATOR.draftBasisDetail === 'function') {
-          soap.a.basisDetail = GENERATOR.draftBasisDetail(R) || [];
-        }
-        saveCurrent();
-        render();
-        toast('已补全空白段落，已有手写内容未改动');
-        break;
-      }
-      case 'updateSoapSeg': {
-        const seg = String(el.dataset.seg || '');
-        if (!SOAP_SEG_DRAFT[seg]) return;
-        const soap = ensureSoap();
-        snapshot('更新 SOAP ' + seg);
-        if (seg === 'basis') {
-          soap.a.basisDetail = GENERATOR.draftBasisDetail(R, { fresh: true });
-          soap.a.basis = '';
-        } else {
-          const path = { s: 'soap.s.summary', oPe: 'soap.o.pe', oAux: 'soap.o.aux' }[seg];
-          CORE.setPath(R, path, SOAP_SEG_DRAFT[seg](R) || '');
-        }
-        CORE.markDocumentGenerated(R, 'firstCourse', seg);
-        saveCurrent();
-        render();
-        toast('已更新该段，其他段落未改动');
-        break;
-      }
-      case 'reviewSoapSeg': {
-        const seg = String(el.dataset.seg || '');
-        CORE.markDocumentReviewed(R, 'firstCourse', seg);
-        saveCurrent();
-        render();
-        toast('已按当前文字标记核对');
-        break;
-      }
       case 'addSoapBasis': {
         ensureSoap().a.basisDetail.push({ diagnosis: '', history: '', pe: '', aux: '' });
         saveCurrent();
@@ -3370,26 +3578,6 @@ const APP = (() => {
         saveCurrent();
         render();
         toast('已带入，请核对后点「确认出院诊断」');
-        break;
-      }
-      case 'confirmDischargeDx': {
-        const d = ensureDischarge();
-        const list = (d.diagnoses || []).map(x => String(x || '').trim()).filter(Boolean);
-        if (!list.length) { toast('出院诊断还没有内容'); return; }
-        d.diagnosesConfirmed = true;
-        CORE.markDocumentReviewed(R, 'discharge', 'diagnoses');
-        saveCurrent();
-        render();
-        toast('出院诊断已确认；初步诊断再变化时会提示差异');
-        break;
-      }
-      case 'updateAdmitCondition': {
-        snapshot('更新入院情况');
-        R.discharge.admitCondition = GENERATOR.draftAdmitCondition(R) || '';
-        CORE.markDocumentGenerated(R, 'discharge', 'admitCondition');
-        saveCurrent();
-        render();
-        toast('已按当前资料重写入院情况；旧文字可通过撤销恢复');
         break;
       }
       case 'copyText': {
@@ -3567,7 +3755,7 @@ const APP = (() => {
 
   /** 打开病历：优先读该 id 的最新草稿，草稿缺失/损坏时才退回列表快照 */
   function recordForOpen(id, fallback) {
-    const draft = CORE.loadCurrent(localStorage, SCHEMA.emptyRecord, deptKeys(), id);
+    const draft = REPO.loadCurrent(id);
     if (draft.ok && draft.record) return draft.record;
     if (fallback) {
       try {
@@ -3583,6 +3771,11 @@ const APP = (() => {
     const previous = R;
     const go = saved => {
       if (!saved) return false;
+      // 冲突状态绑定在旧病历 ID 上；切换到另一份记录后不能继续阻塞新记录的保存。
+      if (remoteConflict && (!next || remoteConflict.remote?.id !== next.id)) {
+        remoteConflict = null;
+        if (String(storageAlert).includes('其他页面已保存了这份病历')) storageAlert = '';
+      }
       R = next;
       setSessionId(next.id);
       step = 0;
@@ -3591,7 +3784,7 @@ const APP = (() => {
     // 先落盘上一份（有锁时等锁内比较完成），避免切换后只留下下一份。
     // 内容没改过就不写：无意义的修订号自增会让另一个标签页的正常编辑变成冲突。
     if (!previous) return go(true);
-    if (CORE.draftMatches(localStorage, previous)) return go(true);
+    if (REPO.draftMatches(previous)) return go(true);
     return afterSave(saveCurrentAwait(), go);
   }
 
@@ -3678,6 +3871,10 @@ const APP = (() => {
   }
 
   function saveToLibrary() {
+    return afterSave(flushPendingSave(), saveToLibraryNow);
+  }
+
+  function saveToLibraryNow() {
     if (!R) return false;
     loadList();
     // 已知损坏时不写任何槽，避免覆盖原始数据。
@@ -3858,9 +4055,9 @@ const APP = (() => {
   function showModal(title, bodyHtml, setup) {
     const wrap = document.createElement('div');
     wrap.className = 'modal-mask';
-    wrap.innerHTML = `<div class="modal">
-      <div class="modal-title">${esc(title)}</div>
-      ${bodyHtml}
+    wrap.innerHTML = `<div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div class="modal-title" id="modalTitle">${esc(title)}</div>
+      <div class="modal-body">${bodyHtml}</div>
     </div>`;
     document.body.appendChild(wrap);
     wrap.addEventListener('click', async ev => {
@@ -3895,6 +4092,7 @@ const APP = (() => {
 
     // 顶部按钮
     $('#btnPrev').addEventListener('click', () => {
+      if (settingsView) { closeSettings(); return; }
       if (step > 0) { step--; render(); }
     });
     $('#btnNext').addEventListener('click', () => {
@@ -3903,30 +4101,29 @@ const APP = (() => {
     });
     $('#btnSave').addEventListener('click', saveWithFeedback);
     $('#btnList').addEventListener('click', openList);
+    $('#btnSettings').addEventListener('click', openSettings);
     // 整条 stepbar 都可以点开目录：手机上「目录 ▾」这几个字太小，
     // 手指落点低一两毫米就点空了，把标题行整条做成热区。
     // 只绑 stepBar 一处——btnNav 在它里面，再单独绑一次会冒泡成弹两层。
     $('#stepBar').addEventListener('click', openNav);
+    $('#stepBar').addEventListener('keydown', ev => {
+      if (ev.key === 'Enter' || ev.key === ' ') {
+        ev.preventDefault();
+        openNav();
+      }
+    });
     $('#btnExport').addEventListener('click', () => {
       step = STEPS.length - 1;
       render();
     });
 
-    // 版本号：手机端要能判断自己是不是还在用旧版
-    const ver = document.getElementById('appVer');
-    if (ver) ver.textContent = 'v' + (window.BingliAndroid && window.BingliAndroid.versionName
-      ? window.BingliAndroid.versionName() : APP_VERSION);
-    const updateButton = document.getElementById('btnUpdate');
-    if (updateButton && window.BingliAndroid && window.BingliAndroid.checkUpdates) {
-      updateButton.hidden = false;
-      updateButton.addEventListener('click', () => window.BingliAndroid.checkUpdates());
-    }
-
     // 自动保存
-    setInterval(() => { saveCurrent(); }, 10000);
+    // The periodic checkpoint also covers programmatic edits made by callers
+    // that do not pass through the DOM input handler (tests, AI and imports).
+    setInterval(() => { flushPendingSave(); saveCurrent(); }, 10000);
 
     // 防误关：尝试保存一次
-    window.addEventListener('beforeunload', () => { saveCurrent(); });
+    window.addEventListener('beforeunload', () => { flushPendingSave(); });
 
     // 多标签页：只关心「同一份病历」的草稿键；不同病历各写各的槽位。
     window.addEventListener('storage', ev => {
@@ -3954,13 +4151,27 @@ const APP = (() => {
 
   /** 保存并给出真实反馈（失败时绝不能提示"已保存"） */
   function saveWithFeedback() {
-    const ok = saveToLibrary();
-    if (ok) toast('已保存到本机');
-    else {
-      toast('保存失败，请查看页面顶部提示');
-      render();
-    }
-    return ok;
+    if (saveFeedbackBusy) return false;
+    saveFeedbackBusy = true;
+    const buttons = $$('[data-save-action]');
+    const oldLabels = buttons.map(btn => btn.textContent);
+    buttons.forEach(btn => { btn.disabled = true; btn.textContent = '保存中…'; });
+    const finish = ok => {
+      saveFeedbackBusy = false;
+      buttons.forEach((btn, i) => {
+        btn.disabled = false;
+        btn.textContent = oldLabels[i] || '保存病历';
+      });
+      if (ok) toast('已保存到本机');
+      else {
+        toast('保存失败，请查看页面顶部提示');
+        render();
+      }
+      return ok;
+    };
+    // 无 Web Locks 的环境（测试和旧 WebView）保持同步返回布尔值；
+    // 有锁时等待真正的 Promise 结果，绝不提前显示「已保存」。
+    return afterSave(saveToLibrary(), finish);
   }
 
   return {
@@ -4002,10 +4213,13 @@ const APP = (() => {
         return afterSave(switchRecord(next), ok => { if (ok) render(); return ok; });
       },
       openList,
+      openSettings,
+      closeSettings,
       gotoStep,
       stepIndexOf,
       getStepKey: () => (STEPS[step] || {}).key,
       getSettings: () => settings,
+      isSettingsView: () => settingsView,
       // 模板病例：供测试直接调用（界面走 data-tpl 点击）
       applyTemplate,
       templatesOf: dept => (typeof TEMPLATES !== 'undefined' ? TEMPLATES.listByDept(dept) : []),
@@ -4020,7 +4234,7 @@ const APP = (() => {
       openNav,
       navRowsHtml: () => navRowsHtml(),
       // 存储写入锁：测试要能直接触发自动保存、普通保存，并读到锁状态
-      saveCurrent, saveCurrentAwait, saveWithFeedback, saveList,
+      saveCurrent, saveCurrentAwait, flushPendingSave, saveWithFeedback, saveList,
       currentSaveBlocked: () => currentSaveBlocked,
       listSaveBlocked: () => listSaveBlocked,
       corruptCurrentRaw: () => corruptCurrentRaw,

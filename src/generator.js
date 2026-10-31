@@ -945,14 +945,18 @@ const GENERATOR = (() => {
     // 一份只有「孕2产1，流产1次」的老病历会被改写成「0-0-1-0」，信息反而丢了。
     // 所以只由 fullTerm/premature/alive 这三个「新字段」触发，它们的出现即代表用户在用四项式。
     const triggers = ['fullTerm', 'premature', 'alive'];
-    const hasQuad = triggers.some(k => String(c[k] || '').trim() !== '');
+    const nonEmpty = k => String(c[k] == null ? '' : c[k]).trim() !== '';
+    const hasQuad = triggers.some(nonEmpty)
+      // 新版四项式的「流产/人流数」是独立输入框。只有它一个值时，
+      // 也必须落地为 0-0-流产-0，不能让用户填了却在文书中消失。
+      || (nonEmpty('abortion') && !nonEmpty('gravida') && !nonEmpty('para'));
     if (hasQuad) {
-      const n = k => String(c[k] || '').trim() || '0';
+      const n = k => String(c[k] == null ? '' : c[k]).trim() || '0';
       parts.push(`${n('fullTerm')}-${n('premature')}-${n('abortion')}-${n('alive')}`);
-    } else if (c.gravida) {
+    } else if (nonEmpty('gravida') || nonEmpty('para') || nonEmpty('abortion')) {
       // 旧存档兼容：没填四项式时仍按「孕X产Y」写，不能因为升级把已有内容丢了。
-      parts.push(`孕${c.gravida}产${c.para || '0'}`);
-      if (c.abortion) parts.push(`流产${c.abortion}次`);
+      parts.push(`孕${nonEmpty('gravida') ? String(c.gravida).trim() : '0'}产${nonEmpty('para') ? String(c.para).trim() : '0'}`);
+      if (nonEmpty('abortion')) parts.push(`流产${String(c.abortion).trim()}次`);
     }
     if (c.details) parts.push(stripTail(c.details));
     if (c.lastBirth) parts.push(`末次分娩${stripTail(c.lastBirth)}`);

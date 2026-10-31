@@ -30,7 +30,9 @@ async function main() {
   let original;
   try {
     original = await ev('return JSON.parse(JSON.stringify(APP.getRecord()));');
-    check('native AI bridge and assistant entry available', await ev('return !!BingliAndroid.aiSettings && !document.querySelector("#btnAI").hidden;'));
+    await ev('APP._test.openSettings();');
+    check('native AI bridge and assistant entry available from settings', await ev('return !!BingliAndroid.aiSettings && !!document.querySelector("[data-settings-action=\\"openAi\\"]");'));
+    await ev('APP._test.closeSettings();');
     console.log('Native config (no key exposed):', await ev('return JSON.parse(BingliAndroid.aiStatus());'));
     await ev(`window.__nativeAI = window.BingliAndroid;
       window.BingliAndroid = {aiStatus:()=>JSON.stringify({configured:true,model:'deepseek-flash'}),aiSettings:()=>{},aiRequest:(id,payload)=>{window.__wire={id,payload}},aiCancel:id=>{window.__canceled=id}};

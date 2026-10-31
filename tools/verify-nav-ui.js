@@ -48,7 +48,8 @@ cdp._id = 0;
 
   const proc = spawn(chrome, [
     `--remote-debugging-port=${PORT}`,
-    '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
+    '--headless=new', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage',
+    '--no-first-run', '--no-default-browser-check',
     '--user-data-dir=' + path.join(require('node:os').tmpdir(), 'dsh-nav-' + Date.now()),
     'about:blank'
   ], { stdio: 'ignore' });

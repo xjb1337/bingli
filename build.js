@@ -2,7 +2,7 @@
  * 内联成单独的 HTML 文件。
  *
  * 内联顺序即运行期依赖顺序，不可随意调整：
- *   AGE → SCHEMA → CORE → TEMPLATE_DATA → TEMPLATES → DEPTH → GENERATOR → HINTS → APP
+ *   AGE → SCHEMA → CORE → REPOSITORY → TEMPLATE_DATA → TEMPLATES → DEPTH → GENERATOR → HINTS → ACTIONS → APP
  * AGE（年龄解析）零依赖，放在最前面，供 schema/core/generator/hints/app 共用。
  * TEMPLATE_DATA 是纯数据，必须在 TEMPLATES（读它的逻辑）之前。
  * DEPTH（问诊深度自查）只读记录、不依赖别的模块，位置宽松。
@@ -29,11 +29,13 @@ function main() {
   const age = stripModule(read('age.js'));
   const schema = stripModule(read('schema.js'));
   const core = stripModule(read('core.js'));
+  const repository = stripModule(read('record-repository.js'));
   const tplData = stripModule(read('template-data.js'));
   const templates = stripModule(read('templates.js'));
   const depth = stripModule(read('depth.js'));
   const generator = stripModule(read('generator.js'));
   const hints = stripModule(read('hints.js'));
+  const actionHandlers = stripModule(read('action-handlers.js'));
   const app = read('app.js');
   const aiCore = stripModule(read('ai-core.js'));
   const ai = read('ai.js');
@@ -45,11 +47,13 @@ function main() {
     .replace('/*__AGE__*/', () => age)
     .replace('/*__SCHEMA__*/', () => schema)
     .replace('/*__CORE__*/', () => core)
+    .replace('/*__REPOSITORY__*/', () => repository)
     .replace('/*__TPL_DATA__*/', () => tplData)
     .replace('/*__TEMPLATES__*/', () => templates)
     .replace('/*__DEPTH__*/', () => depth)
     .replace('/*__GENERATOR__*/', () => generator)
     .replace('/*__HINTS__*/', () => hints)
+    .replace('/*__ACTION_HANDLERS__*/', () => actionHandlers)
     .replace('/*__APP__*/', () => app)
     .replace('/*__AI_CORE__*/', () => aiCore)
     .replace('/*__AI__*/', () => ai);

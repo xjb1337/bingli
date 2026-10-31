@@ -39,7 +39,7 @@ async function main() {
   const chrome = spawn(findChrome(), [
     '--headless=new', `--remote-debugging-port=${PORT}`,
     `--user-data-dir=${PROFILE}`, '--no-first-run', '--no-default-browser-check',
-    '--disable-gpu', '--window-size=412,915',
+    '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--window-size=412,915',
     'file:///' + DIST.replace(/\\/g, '/'),
   ], { stdio: 'ignore' });
 
@@ -120,13 +120,15 @@ async function main() {
       APP._test.render();
       const card = document.getElementById('tplCard');
       card.open = true;
-      const btns = [...document.querySelectorAll('[data-tpl]')];
+      const btns = [...card.querySelectorAll('[data-tpl]')];
+      const groups = [...card.querySelectorAll('.tpl-item-group')];
+      const keys = [...new Set(btns.map(b => b.dataset.tpl))];
       return {
-        count: btns.length,
-        keys: btns.map(b => b.dataset.tpl),
-        names: btns.map(b => b.querySelector('.tpl-name').textContent.trim()),
+        count: groups.length,
+        keys,
+        names: groups.map(g => g.querySelector('.tpl-name').textContent.trim()),
         countTag: (card.querySelector('.tpl-count') || {}).textContent || '',
-        onlyDigestive: btns.every(b => APP._test.templatesOf('digestive').some(t => t.key === b.dataset.tpl)),
+        onlyDigestive: keys.every(k => APP._test.templatesOf('digestive').some(t => t.key === k)),
       };
     })()`);
     check('切到消化内科后列出 6 个病种模板，且都是本科室的',
@@ -138,12 +140,12 @@ async function main() {
       const r = APP.getRecord();
       r.basic.department = 'cardiology';
       APP._test.render();
-      const btns = Array.from(document.querySelectorAll('[data-tpl]'));
-      const keys = btns.map(b => b.dataset.tpl);
+      const btns = Array.from(document.querySelectorAll('#tplCard [data-tpl]'));
+      const keys = [...new Set(btns.map(b => b.dataset.tpl))];
       const own = APP._test.templatesOf('cardiology').map(t => t.key);
       const digest = APP._test.templatesOf('digestive').map(t => t.key);
       const out = {
-        count: btns.length,
+        count: keys.length,
         // 列出来的每一份都必须是心内科自己的
         allOwn: keys.every(k => own.includes(k)),
         // 一份消化内科的模板都不许出现在这里
@@ -262,12 +264,13 @@ async function main() {
     await sleep(400);
     const surgeryCard = await evaluate(`(() => {
       const card = document.getElementById('tplCard');
-      const btns = [...document.querySelectorAll('[data-tpl]')];
+      const groups = [...card.querySelectorAll('.tpl-item-group')];
       const lung = document.querySelector('[data-tpl="lungNodule"]');
+      const lungGroup = lung && lung.closest('.tpl-item-group');
       return {
-        count: btns.length,
-        lungName: lung && lung.querySelector('.tpl-name').textContent.trim(),
-        source: lung && lung.querySelector('.tpl-source') && lung.querySelector('.tpl-source').textContent.trim(),
+        count: groups.length,
+        lungName: lungGroup && lungGroup.querySelector('.tpl-name').textContent.trim(),
+        source: lungGroup && lungGroup.querySelector('.tpl-source') && lungGroup.querySelector('.tpl-source').textContent.trim(),
         scrollW: document.documentElement.scrollWidth,
         clientW: document.documentElement.clientWidth,
         cardRight: card && Math.round(card.getBoundingClientRect().right),
@@ -346,7 +349,7 @@ async function main() {
     const layout = await evaluate(`(() => {
       const card = document.getElementById('tplCard');
       if (card) card.open = true;
-      const btns = [...document.querySelectorAll('.tpl-item')];
+      const btns = [...card.querySelectorAll('[data-tpl]')];
       const h = btns.map(b => Math.round(b.getBoundingClientRect().height));
       const w = btns.map(b => Math.round(b.getBoundingClientRect().width));
       return {

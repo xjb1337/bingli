@@ -3,32 +3,6 @@
  * 设计目标：手机上单手操作、点选为主、字号可读
  * =========================================================== */
 
-:root {
-  --fs-scale: 1;
-  --blue: #1557b0;
-  --blue-dark: #0b3d91;
-  --blue-light: #e8f0fe;
-  --red: #b3261e;
-  --red-light: #fce8e6;
-  --green: #15662e;
-  /* 得分三档配色：达标绿 / 待补黄 / 缺失红。
-     单独抽成变量，深色模式只需覆盖这几个值，卡片样式不必跟着改。 */
-  --score-ok: #15662e;
-  --score-ok-bg: #e6f4ea;
-  --score-warn: #9c4500;
-  --score-warn-bg: #fef7e0;
-  --score-bad: #c5221f;
-  --score-bad-bg: #fce8e6;
-  --gray-1: #f8f9fa;
-  --gray-2: #e8eaed;
-  --gray-3: #dadce0;
-  --gray-4: #63686d;
-  --gray-5: #5f6368;
-  --gray-6: #202124;
-  --radius: 10px;
-  --shadow: 0 1px 3px rgba(0,0,0,.08);
-}
-
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
 html, body {
@@ -343,7 +317,7 @@ main {
   margin-top: 4px;
 }
 
-.muted { color: var(--gray-4); }
+.muted { color: var(--gray-5); }
 
 /* ---------------- 表单 ---------------- */
 
@@ -504,7 +478,7 @@ select {
 
 .btn-ghost {
   background: #fff;
-  color: var(--blue);
+  color: var(--blue-dark);
 }
 
 .btn-ghost:active { background: var(--blue-light); }
@@ -967,6 +941,20 @@ select {
   line-height: 1.5;
   margin-bottom: 6px;
 }
+.hint-icon, .alert-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-right: 6px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  vertical-align: -2px;
+}
 
 .hint-matched {
   font-size: calc(11px * var(--fs-scale));
@@ -1062,7 +1050,7 @@ footer .btn { flex: 1; }
 footer .btn:disabled {
   background: var(--gray-2);
   border-color: var(--gray-2);
-  color: var(--gray-4);
+  color: var(--gray-5);
   cursor: not-allowed;
 }
 
@@ -1186,11 +1174,16 @@ footer .btn:disabled {
 }
 
 .nav-icon {
-  width: 22px;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   text-align: center;
   color: var(--gray-4);
-  font-size: calc(13px * var(--fs-scale));
 }
+
+.nav-svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 
 .nav-row.cur .nav-icon { color: var(--blue); }
 
@@ -1295,6 +1288,8 @@ footer .btn:disabled {
   align-items: stretch;
   gap: 8px;
 }
+.storage-alert .alert-msg { display: flex; align-items: flex-start; gap: 2px; }
+.storage-alert .alert-icon { flex: 0 0 18px; margin-top: 2px; }
 
 /* 文案和按钮各占一行：412px 屏上四个按钮横着放进同一行会挤成一团，
    换行后每个按钮仍然要够到 44px 的点击高度 */
@@ -1759,7 +1754,8 @@ footer .btn:disabled {
   padding: 8px 10px;
   border-radius: 8px;
   border: 1px solid var(--line);
-  background: var(--bg-soft, #f8f9fb);
+  background: var(--surface-soft, #f8f9fb);
+  color: var(--gray-6);
   font-size: calc(13px * var(--fs-scale));
 }
 .doc-state-title { font-weight: 600; line-height: 1.5; }
@@ -1811,9 +1807,19 @@ footer .btn:disabled {
 
 /* Clinical notebook: shared visual language for web and the offline Android shell. */
 :root {
+  --fs-scale: 1;
   --blue: #17695e;
   --blue-dark: #104e46;
   --blue-light: #e6f1eb;
+  --red: #b3261e;
+  --red-light: #fce8e6;
+  --green: #15662e;
+  --score-ok: #15662e;
+  --score-ok-bg: #e6f4ea;
+  --score-warn: #9c4500;
+  --score-warn-bg: #fef7e0;
+  --score-bad: #c5221f;
+  --score-bad-bg: #fce8e6;
   --gray-1: #f3f7f4;
   --gray-2: #e5ece7;
   --gray-3: #cfdbd2;
@@ -1968,12 +1974,6 @@ footer {
 }
 footer .btn { min-height: 48px; width: 100%; min-width: 0; white-space: nowrap; font-size: calc(14px * var(--fs-scale)); }
 footer .btn:disabled { opacity: .6; }
-.footer-meta { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; min-height: 20px; color: var(--text-soft); font-size: 10px; }
-.workspace-label { display: flex; align-items: center; gap: 6px; margin-right: auto; }
-.workspace-label i { width: 5px; height: 5px; background: #7c9a7d; border-radius: 50%; }
-.footer-meta .app-ver { display: inline; width: auto; margin: 0; font-size: 10px; color: var(--text-soft); }
-.update-link { min-height: 36px; min-width: 64px; border: 0; color: var(--blue); background: transparent; padding: 5px 0 5px 8px; font-size: 11px; cursor: pointer; }
-.update-link[hidden] { display: none; }
 @keyframes notebook-enter { from { opacity: .6; transform: translateY(5px); } to { opacity: 1; transform: none; } }
 #content > .card { animation: notebook-enter .22s ease-out; }
 @media (max-width: 900px) { .stepbar { margin-left: 20px; margin-right: 20px; } }
@@ -1982,7 +1982,7 @@ footer .btn:disabled { opacity: .6; }
   .brand-mark { width: 36px; height: 36px; flex-basis: 36px; margin-right: 7px; }
   .topbar h1 { font-size: calc(16px * var(--fs-scale)); letter-spacing: .01em; }
   .brand-caption { font-size: 9px; letter-spacing: .10em; }
-  .topbar .btn-icon { min-width: 40px; padding: 6px; }
+  .topbar .btn-icon { min-width: 44px; padding: 6px 5px; }
   .stepbar { margin: 0 16px 10px; }
   main { padding: 16px 16px 138px; }
   .card { padding: 18px; margin-bottom: 14px; border-radius: 16px; }
@@ -1997,7 +1997,7 @@ footer .btn:disabled { opacity: .6; }
   .brand-mark { width: 31px; height: 31px; flex-basis: 31px; margin-right: 5px; }
   .topbar h1 { font-size: 14px; }
   .brand-caption { font-size: 8px; }
-  .topbar .btn-icon { min-width: 36px; padding: 5px; }
+  .topbar .btn-icon { min-width: 44px; padding: 5px; }
   .card { padding: 15px; }
 }
 @media (prefers-reduced-motion: reduce) { #content > .card { animation: none; } }
@@ -2017,7 +2017,6 @@ footer .btn:disabled { opacity: .6; }
 }
 
 /* DeepSeek assistant: constrained sheet, native key settings, readable comparisons. */
-.footer-meta { flex-wrap: wrap; gap: 4px 8px; }
 .ai-mask { position: fixed; inset: 0; z-index: 3000; background: rgba(15,38,31,.5); display: flex; align-items: flex-end; justify-content: center; }
 .ai-sheet { box-sizing: border-box; width: min(100%, 760px); max-height: 92dvh; max-height: 92vh; overflow-y: auto; overscroll-behavior: contain; padding: 22px 20px max(24px, env(safe-area-inset-bottom)); border-radius: 24px 24px 0 0; color: var(--gray-6); background: var(--surface, #fff); box-shadow: 0 -8px 40px #102f2420; }
 .ai-heading, .ai-settings-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -2026,6 +2025,10 @@ footer .btn:disabled { opacity: .6; }
 .ai-eyebrow { color: var(--blue); font-size: 10px; letter-spacing: 1px; }
 .ai-note { padding: 12px; background: var(--blue-bg, #edf5ed); border-radius: 12px; line-height: 1.65; }
 .ai-settings-row { margin: 12px 0 18px; flex-wrap: wrap; font-size: 12px; }
+.ai-onboarding { margin: 0 0 18px; padding: 14px 15px; border: 1px solid var(--blue); border-radius: 14px; background: var(--blue-light); color: var(--gray-6); }
+.ai-onboarding strong { color: var(--blue-dark); }
+.ai-onboarding ol { margin: 8px 0; padding-left: 22px; line-height: 1.7; }
+.ai-onboarding p { margin: 0; font-size: 12px; color: var(--text-soft); line-height: 1.6; }
 .ai-sheet label { display: block; margin: 12px 0 7px; }
 .ai-sheet select, .ai-sheet textarea { box-sizing: border-box; width: 100%; min-height: 44px; background: var(--surface, #fff); color: inherit; border: 1px solid var(--line); border-radius: 10px; padding: 11px; font: inherit; }
 .ai-sheet textarea { min-height: 120px; resize: vertical; }
@@ -2040,4 +2043,56 @@ footer .btn:disabled { opacity: .6; }
 .ai-sheet button { min-height: 44px; }
 .ai-sheet [hidden] { display: none !important; }
 #aiStatus { line-height: 1.65; overflow-wrap: anywhere; }
-@media (max-width: 480px) { .ai-compare { grid-template-columns: 1fr; } .ai-sheet { padding-left: 16px; padding-right: 16px; } .footer-meta .workspace-label { font-size: 9px; } }
+@media (max-width: 480px) { .ai-compare { grid-template-columns: 1fr; } .ai-sheet { padding-left: 16px; padding-right: 16px; } }
+
+/* Long outlines must scroll inside the viewport on Android WebView. */
+.modal-title { flex-shrink: 0; }
+.modal-body { display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto; overscroll-behavior-y: contain; -webkit-overflow-scrolling: touch; }
+.modal-body > * { flex-shrink: 0; }
+.modal { max-height: 85dvh; }
+.btn.btn-template-example { background: #17695e; color: #fff; border-color: #17695e; }
+.btn.btn-template-example:active { background: #104d45; }
+.outline-list { padding-left: 22px; line-height: 1.8; }
+
+/* 独立设置页：录入页只承载病历内容，显示与数据操作集中到这里。 */
+body.settings-view .stepbar,
+body.settings-view .progress,
+body.settings-view footer { display: none; }
+/* Android 15/16 enforces edge-to-edge for targetSdk 35. The WebView still
+   lays out content behind the navigation bar, so an independent settings
+   page must reserve a comfortable bottom reach area even though its fixed
+   editor footer is hidden. */
+body.settings-view main {
+  padding-top: 12px;
+  padding-bottom: max(96px, calc(32px + env(safe-area-inset-bottom)));
+}
+body.settings-view #btnSettings { background: var(--blue-light); color: var(--blue-dark); }
+body.large-font .topbar .btn-icon span { display: none; }
+.settings-page { width: min(100%, 820px); margin: 0 auto; }
+.settings-intro { padding: 4px 4px 12px; }
+.settings-intro-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.settings-eyebrow { color: var(--blue); font-size: 10px; letter-spacing: .12em; font-weight: 700; }
+.settings-intro h2 { margin: 4px 0 5px; color: var(--gray-6); font-size: calc(23px * var(--fs-scale)); }
+.settings-intro p { margin: 0; max-width: 680px; color: var(--text-soft); line-height: 1.55; font-size: calc(13px * var(--fs-scale)); }
+.settings-back { flex: 0 0 auto; min-height: 40px; padding: 8px 13px; }
+.settings-card { padding: 17px; }
+.settings-row { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 13px 0; border-bottom: 1px solid var(--line); }
+.settings-row:last-child { border-bottom: 0; }
+.settings-row-stack { display: block; }
+.settings-label { color: var(--gray-6); font-size: calc(14px * var(--fs-scale)); font-weight: 700; }
+.settings-field .field-label { margin-bottom: 9px; }
+.settings-scale { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.settings-scale-value { min-width: 48px; text-align: center; color: var(--gray-6); font-weight: 700; }
+.settings-note { margin-top: 14px; color: var(--text-soft); font-size: calc(12px * var(--fs-scale)); line-height: 1.7; }
+.settings-note-warn { padding: 12px; border-radius: 10px; background: var(--yellow-light, #fff7df); color: var(--brown, #79531d); }
+.settings-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.settings-actions .btn { min-height: 44px; }
+.settings-info-row { display: flex; justify-content: space-between; gap: 16px; padding: 10px 0; color: var(--text-soft); border-bottom: 1px solid var(--line); }
+.settings-info-row b { color: var(--gray-6); }
+@media (max-width: 520px) {
+  .settings-row { align-items: flex-start; flex-direction: column; gap: 10px; }
+  .settings-scale { align-self: stretch; justify-content: flex-end; }
+  .settings-actions .btn { flex: 1 1 140px; }
+  .settings-intro-head { align-items: center; }
+  .settings-back { min-height: 38px; }
+}

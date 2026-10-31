@@ -68,7 +68,8 @@ function partial(area, detail) { PASSED.push({ area, detail, tone: 'warn' }); }
 
   const proc = spawn(chromePath, [
     `--remote-debugging-port=${PORT}`,
-    '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
+    '--headless=new', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage',
+    '--no-first-run', '--no-default-browser-check',
     '--hide-scrollbars',
     '--user-data-dir=' + path.join(os.tmpdir(), 'dsh-audit-' + Date.now()),
     'about:blank'

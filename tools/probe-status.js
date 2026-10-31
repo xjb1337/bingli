@@ -16,7 +16,8 @@ async function main() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'st-'));
   const chrome = spawn(CHROME, [
     '--headless=new', `--remote-debugging-port=${PORT}`, `--user-data-dir=${dir}`,
-    '--no-first-run', '--disable-gpu', '--window-size=412,1500', '--hide-scrollbars', 'about:blank'
+    '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage',
+    '--window-size=412,1500', '--hide-scrollbars', 'about:blank'
   ], { stdio: 'ignore' });
   await sleep(2500);
 

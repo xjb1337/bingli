@@ -44,7 +44,7 @@ async function main() {
   const chrome = spawn(findChrome(), [
     '--headless=new', `--remote-debugging-port=${PORT}`,
     `--user-data-dir=${PROFILE}`, '--no-first-run', '--no-default-browser-check',
-    '--disable-gpu', '--window-size=412,915',
+    '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--window-size=412,915',
     'file:///' + DIST.replace(/\\/g, '/'),
   ], { stdio: 'ignore' });
 

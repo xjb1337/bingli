@@ -12,7 +12,12 @@ final class AISettings {
     static void show(Activity activity, AIKeyStore vault, DeepSeekClient client) {
         LinearLayout layout = new LinearLayout(activity); layout.setOrientation(LinearLayout.VERTICAL);
         int pad = (int)(20 * activity.getResources().getDisplayMetrics().density); layout.setPadding(pad, pad / 2, pad, pad / 2);
-        TextView intro = new TextView(activity); intro.setText("使用你自己的 DeepSeek API Key。密钥在本机加密保存，不进入病历备份。连接测试只发送固定测试文字。\n服务地址：https://api.deepseek.com\n留空密钥可保留原设置。"); layout.addView(intro);
+        TextView intro = new TextView(activity);
+        String guide = vault.hasKey()
+            ? "使用你自己的 DeepSeek API Key。密钥在本机加密保存，不进入病历备份。连接测试只发送固定测试文字。"
+            : "首次添加 API Key\n1. 打开 DeepSeek 开放平台并登录账号。\n2. 进入 API Keys，创建一个新的密钥并复制。\n3. 粘贴到下面的输入框，选择模型，点击「保存并测试连接」。\n\n密钥只保存在本机加密存储中，不会写入病历备份。服务地址：https://api.deepseek.com";
+        intro.setText(guide + "\n留空密钥可保留原设置。");
+        layout.addView(intro);
         EditText input = new EditText(activity); input.setSingleLine(true); input.setHint(vault.hasKey() ? "已有密钥；输入新密钥可替换" : "输入 DeepSeek API Key");
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         input.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS); layout.addView(input);

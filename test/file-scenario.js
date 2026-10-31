@@ -17,6 +17,7 @@ async function main() {
   const chrome = spawn(CHROME, [
     '--headless=new', `--remote-debugging-port=${PORT}`, `--user-data-dir=${userDir}`,
     '--no-first-run', '--no-default-browser-check', '--disable-gpu',
+    '--no-sandbox', '--disable-dev-shm-usage',
     '--window-size=412,915', '--hide-scrollbars', 'about:blank'
   ], { stdio: 'ignore' });
 
@@ -27,7 +28,9 @@ async function main() {
     try { targets = await fetch(`http://127.0.0.1:${PORT}/json/list`).then(r => r.json()); if (targets?.length) break; } catch (e) {}
     await sleep(500);
   }
+  if (!targets) throw new Error('无法连接 Chrome');
   const page = targets.find(t => t.type === 'page');
+  if (!page) throw new Error('Chrome 没有页面目标');
   const ws = new WebSocket(page.webSocketDebuggerUrl);
   let id = 0; const pending = new Map();
   const errors = [];

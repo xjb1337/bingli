@@ -29,6 +29,8 @@ async function main() {
     '--no-first-run',
     '--no-default-browser-check',
     '--disable-gpu',
+    '--no-sandbox',
+    '--disable-dev-shm-usage',
     '--window-size=430,932',
     '--hide-scrollbars',
     'about:blank'
