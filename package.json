@@ -5,7 +5,10 @@
   "description": "大病历生成器 Android App：离线填写、病历生成与安全更新",
   "scripts": {
     "build": "node build.js",
+    "dev:web": "npm run build:domain && npm run dev -w apps/web",
+    "build:web": "npm run build:domain && npm run build -w apps/web",
     "test": "node --test tests/*.test.cjs",
+    "test:web": "npm run build:domain && npm run test -w apps/web",
     "test:core": "node --test tests/core.test.cjs",
     "test:ui": "node --test tests/app.test.cjs",
     "sweep": "node tools/sweep-abnormal.js",
@@ -27,13 +30,18 @@
     "e2e:psychiatry": "node tools/verify-psychiatry-ui.js",
     "test:psychiatry": "node --test tests/psychiatry.test.cjs",
     "build:domain": "node scripts/build-domain.cjs",
-    "typecheck": "node scripts/typecheck-domain.cjs",
+    "typecheck": "node scripts/typecheck-domain.cjs && npm run build:domain && tsc --noEmit -p apps/web",
     "test:domain": "node scripts/build-domain.cjs && node --test packages/domain/test/*.test.cjs"
   },
   "engines": {
     "node": ">=22"
   },
   "workspaces": [
-    "packages/domain"
-  ]
+    "packages/domain",
+    "apps/web"
+  ],
+  "allowScripts": {
+    "esbuild@0.25.12": true,
+    "esbuild@0.21.5": true
+  }
 }

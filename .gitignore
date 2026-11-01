@@ -52,4 +52,5 @@ android/.signing/
 
 # 生成的 domain 产物
 packages/domain/dist/
+apps/web/dist/
 node_modules/
