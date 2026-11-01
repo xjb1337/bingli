@@ -25,9 +25,15 @@
     "audit:fields": "node tools/check-field-reach.js",
     "audit:top1": "node tools/check-top1.js",
     "e2e:psychiatry": "node tools/verify-psychiatry-ui.js",
-    "test:psychiatry": "node --test tests/psychiatry.test.cjs"
+    "test:psychiatry": "node --test tests/psychiatry.test.cjs",
+    "build:domain": "node scripts/build-domain.cjs",
+    "typecheck": "node scripts/typecheck-domain.cjs",
+    "test:domain": "node scripts/build-domain.cjs && node --test packages/domain/test/*.test.cjs"
   },
   "engines": {
     "node": ">=22"
-  }
+  },
+  "workspaces": [
+    "packages/domain"
+  ]
 }

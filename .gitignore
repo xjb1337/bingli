@@ -49,3 +49,7 @@ android/.signing/
 # Retired standalone web outputs
 /index.html
 /dist/*.html
+
+# 生成的 domain 产物
+packages/domain/dist/
+node_modules/

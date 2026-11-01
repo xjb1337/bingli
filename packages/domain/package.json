@@ -1,0 +1,7 @@
+{
+  "name": "@dabingli/domain",
+  "version": "3.0.0.8",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts"
+}

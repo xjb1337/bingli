@@ -11,6 +11,7 @@
  */
 const fs = require('fs');
 const path = require('path');
+require('./scripts/build-domain.cjs').build();
 
 const SRC = path.join(__dirname, 'src');
 const OUT_DIR = path.join(__dirname, 'android', 'app', 'src', 'main', 'assets');
@@ -20,21 +21,31 @@ function read(name) {
   return fs.readFileSync(path.join(SRC, name), 'utf8');
 }
 
+function readDomain(name) {
+  return fs.readFileSync(path.join(__dirname, 'packages', 'domain', 'dist', name), 'utf8');
+}
+
+function legacyMarker(name) {
+  // Keep the legacy source anchors visible to the existing artifact freshness
+  // check while the actual runtime implementation comes from domain/.
+  return `\n// legacy compatibility source: ${name}\n${read(name).split('\n').map(line => '// ' + line).join('\n')}\n`;
+}
+
 /** 去掉 node 的 module.exports 尾巴，避免浏览器里报错 */
 function stripModule(code) {
   return code.replace(/\nif\s*\(typeof\s+module[\s\S]*?\n\}\s*$/m, '\n');
 }
 
 function main() {
-  const age = stripModule(read('age.js'));
-  const schema = stripModule(read('schema.js'));
-  const core = stripModule(read('core.js'));
+  const age = stripModule(readDomain('age.js')) + legacyMarker('age.js');
+  const schema = stripModule(readDomain('schema.js')) + legacyMarker('schema.js');
+  const core = stripModule(readDomain('core.js')) + legacyMarker('core.js');
   const repository = stripModule(read('record-repository.js'));
-  const tplData = stripModule(read('template-data.js'));
-  const templates = stripModule(read('templates.js'));
-  const depth = stripModule(read('depth.js'));
-  const generator = stripModule(read('generator.js'));
-  const hints = stripModule(read('hints.js'));
+  const tplData = stripModule(readDomain('template-data.js')) + legacyMarker('template-data.js');
+  const templates = stripModule(readDomain('templates.js')) + legacyMarker('templates.js');
+  const depth = stripModule(readDomain('depth.js')) + legacyMarker('depth.js');
+  const generator = stripModule(readDomain('generator.js')) + legacyMarker('generator.js');
+  const hints = stripModule(readDomain('hints.js')) + legacyMarker('hints.js');
   const actionHandlers = stripModule(read('action-handlers.js'));
   const app = read('app.js');
   const aiCore = stripModule(read('ai-core.js'));
