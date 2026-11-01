@@ -6,7 +6,7 @@
 
 支持 Android 8.0 及以上，安装后可离线填写。应用启动时每天检查更新，也可点底部“检查更新”；下载校验后由系统安装器确认覆盖安装，保留本机病历。网页浏览器的资料需要先导出 JSON，再在 APK 中导入。
 
-APK 由 GitHub Actions 自动构建并使用固定证书签名；密钥保存在仓库 Secrets，不进入公开源码。发布与雷电验收记录见 [Android 交付记录](docs/ANDROID_RELEASE_2026-10-30.md)。
+APK 只在人工触发并经过 `release` 环境审批后由 GitHub Actions 构建，使用固定证书签名；密钥保存在仓库 Secrets，不进入公开源码。发布权限、Secrets 与回滚见 [Android 发布流程](docs/RELEASE.md)，真机升级验收见 [升级验收清单](docs/UPGRADE_ACCEPTANCE.md)，历史记录见 [Android 交付记录](docs/ANDROID_RELEASE_2026-10-30.md)。
 
 
 项目同时交付 Android App 和 GitHub Pages 网页版，均支持离线填写、保存、导入导出和病历生成。网页版首次加载后由 Service Worker 缓存全部资源；可选的 DeepSeek 辅助功能需要联网和你自己的 API Key。
@@ -442,7 +442,7 @@ $env:JAVA_HOME='C:\Program Files\Java\jdk-17'
 
 `node build.js` 直接生成 `android/app/src/main/assets/index.html`，供 APK 打包及内部界面回归使用；它是忽略提交的 App 资源，不再生成根目录网页或独立 HTML 分发文件。`src/` 是 App 内置界面与病历逻辑，仍需保留。
 
-推送 main 后由 `.github/workflows/release.yml` 检查、签名并发布 APK 和 `update.json`。继续使用原包名、签名和存储源，覆盖升级保留 App 本机病历。网页版由独立的 `.github/workflows/pages.yml` 手动发布，不使用 APK 的 Service Worker 或存储。
+APK 由 `.github/workflows/release.yml` 手动发布：运行时必须输入 `RELEASE`，并通过 `release` Environment 人工审批；普通 push/PR 不会构建 APK。发布流程会在签名后检查包名、固定证书、严格递增的 versionCode，并发布 APK 和 `update.json`。继续使用原包名、签名和存储源，覆盖升级保留 App 本机病历。网页版由独立的 `.github/workflows/pages.yml` 手动发布，不使用 APK 的 Service Worker 或存储。
 
 ### 生成的病历结构
 
