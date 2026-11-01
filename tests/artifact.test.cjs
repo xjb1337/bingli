@@ -15,6 +15,8 @@ const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..');
 const SRC = path.join(ROOT, 'src');
+const DOMAIN_SRC = path.join(ROOT, 'packages', 'domain', 'src');
+const DOMAIN_DIST = path.join(ROOT, 'packages', 'domain', 'dist');
 const DIST = path.join(ROOT, 'android', 'app', 'src', 'main', 'assets', 'index.html');
 
 const readSrc = name => fs.readFileSync(path.join(SRC, name), 'utf8');
@@ -66,6 +68,30 @@ for (const [file, globalName] of MODULES) {
   });
 }
 
+const DOMAIN_MODULES = [
+  ['quality/diagnostics', 'DIAGNOSTICS'],
+  ['generator/document-ir', 'DOCUMENT_IR']
+];
+
+for (const [rel, globalName] of DOMAIN_MODULES) {
+  test(`产物中的 domain ${rel} 与已构建源码一致（未过期的构建）`, () => {
+    const sourcePath = path.join(DOMAIN_SRC, `${rel}.ts`);
+    const distPath = path.join(DOMAIN_DIST, `${rel}.js`);
+    assert.ok(fs.existsSync(distPath), `缺少 domain 构建产物 ${rel}.js，请先运行 node build.js`);
+    const source = stripModule(fs.readFileSync(sourcePath, 'utf8')).trim();
+    const built = stripModule(fs.readFileSync(distPath, 'utf8')).trim();
+    assert.equal(built, source, `${rel} 的 dist 产物已过期，请先运行 node build.js`);
+
+    const html = distHtml();
+    const missing = built.split('\n').map(line => line.trim())
+      .filter(line => line.length > 20 && !html.includes(line));
+    assert.deepEqual(
+      missing.slice(0, 3), [],
+      `产物中的 ${globalName} 有 ${missing.length} 行缺少，可能忘记执行 node build.js`
+    );
+  });
+}
+
 test('产物中的 app.js 与源码一致', () => {
   const html = distHtml();
   const expected = readSrc('app.js');
@@ -81,7 +107,8 @@ test('产物中的样式与源码一致', () => {
   const html = distHtml();
   const expected = readSrc('style.css');
   // 样式比对：抽查若干规则块
-  const probes = ['.storage-alert', '.chip-sym.on', '.pe-special', '.jump-btn.has-pos'];
+  const probes = ['.storage-alert', '.chip-sym.on', '.pe-special', '.jump-btn.has-pos',
+    '.tpl-verify', '.dl-path'];
   for (const p of probes) {
     assert.ok(expected.includes(p), `源码样式中缺少 ${p}（测试本身过期了）`);
     assert.ok(html.includes(p), `产物样式中缺少 ${p}，可能忘记重新构建`);
@@ -90,30 +117,36 @@ test('产物中的样式与源码一致', () => {
 
 /* ======================= 结构完整性 ======================= */
 
-test('产物中九个模块按正确顺序内联', () => {
+test('产物中核心模块按正确顺序内联', () => {
   const html = distHtml();
   const iSchema = html.indexOf('const SCHEMA =');
   const iCore = html.indexOf('const RECORD_CORE =');
   const iTplData = html.indexOf('var TEMPLATE_DATA =');
   const iTpl = html.indexOf('var TEMPLATES =');
+  const iDiagnostics = html.indexOf('var DIAGNOSTICS =');
   const iDepth = html.indexOf('var DEPTH =');
+  const iDocIr = html.indexOf('const DOCUMENT_IR =');
   const iGen = html.indexOf('const GENERATOR =');
   const iHints = html.indexOf('const HINTS =');
   const iActions = html.indexOf('const ACTION_HANDLERS =');
   const iApp = html.indexOf('const APP =');
 
   for (const [name, idx] of [['SCHEMA', iSchema], ['CORE', iCore], ['TEMPLATE_DATA', iTplData],
-    ['TEMPLATES', iTpl], ['DEPTH', iDepth], ['GENERATOR', iGen],
+    ['TEMPLATES', iTpl], ['DIAGNOSTICS', iDiagnostics], ['DEPTH', iDepth],
+    ['DOC_IR', iDocIr], ['GENERATOR', iGen],
     ['HINTS', iHints], ['ACTION_HANDLERS', iActions], ['APP', iApp]]) {
     assert.ok(idx > 0, `产物中缺少 ${name} 模块`);
   }
-  // 依赖顺序：schema → core → 模板数据 → 模板逻辑 → depth → generator → hints → actions → app
+  // 依赖顺序：schema → core → 模板数据 → 模板逻辑 → diagnostics → depth → doc IR → generator → hints → actions → app
   assert.ok(iSchema < iCore, 'SCHEMA 应在 CORE 之前');
   assert.ok(iCore < iTplData, 'CORE 应在 TEMPLATE_DATA 之前');
   // templates.js 读 TEMPLATE_DATA，顺序反了会静默拿到空数组
   assert.ok(iTplData < iTpl, 'TEMPLATE_DATA 应在 TEMPLATES 之前');
-  assert.ok(iTpl < iDepth, 'TEMPLATES 应在 DEPTH 之前');
+  assert.ok(iTpl < iDiagnostics, 'TEMPLATES 应在 DIAGNOSTICS 之前');
+  assert.ok(iDiagnostics < iDepth, 'DIAGNOSTICS 应在 DEPTH 之前');
   assert.ok(iDepth < iGen, 'DEPTH 应在 GENERATOR 之前');
+  assert.ok(iDepth < iDocIr, 'DEPTH 应在 DOC_IR 之前');
+  assert.ok(iDocIr < iGen, 'DOC_IR 应在 GENERATOR 之前');
   assert.ok(iGen < iHints, 'GENERATOR 应在 HINTS 之前');
   assert.ok(iHints < iActions, 'HINTS 应在 ACTION_HANDLERS 之前');
   assert.ok(iActions < iApp, 'ACTION_HANDLERS 应在 APP 之前');
@@ -121,7 +154,7 @@ test('产物中九个模块按正确顺序内联', () => {
 
 test('产物里没有残留的模板占位符', () => {
   const html = distHtml();
-  assert.doesNotMatch(html, /\/\*__(CSS|SCHEMA|CORE|TPL_DATA|TEMPLATES|DEPTH|GENERATOR|HINTS|APP)__\*\//);
+  assert.doesNotMatch(html, /\/\*__(CSS|SCHEMA|CORE|TPL_DATA|TEMPLATES|DIAGNOSTICS|DEPTH|DOC_IR|GENERATOR|HINTS|APP)__\*\//);
 });
 
 test('产物里没有 Node 专用的 module.exports', () => {

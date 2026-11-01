@@ -2,10 +2,12 @@
  * 内联成单独的 HTML 文件。
  *
  * 内联顺序即运行期依赖顺序，不可随意调整：
- *   AGE → SCHEMA → CORE → REPOSITORY → TEMPLATE_DATA → TEMPLATES → DEPTH → GENERATOR → HINTS → ACTIONS → APP
+ *   AGE → SCHEMA → CORE → REPOSITORY → TEMPLATE_DATA → TEMPLATES → DIAGNOSTICS → DEPTH → DOC_IR → GENERATOR → HINTS → ACTIONS → APP
  * AGE（年龄解析）零依赖，放在最前面，供 schema/core/generator/hints/app 共用。
  * TEMPLATE_DATA 是纯数据，必须在 TEMPLATES（读它的逻辑）之前。
  * DEPTH（问诊深度自查）只读记录、不依赖别的模块，位置宽松。
+ * DIAGNOSTICS 只提供结构化提醒协议；DEPTH/GENERATOR 必须排在它之后。
+ * DOC_IR 是文档中间表示，GENERATOR 必须排在它之后。
  *
  * 用法：node build.js
  */
@@ -43,7 +45,9 @@ function main() {
   const repository = stripModule(read('record-repository.js'));
   const tplData = stripModule(readDomain('template-data.js')) + legacyMarker('template-data.js');
   const templates = stripModule(readDomain('templates.js')) + legacyMarker('templates.js');
+  const diagnostics = stripModule(readDomain('quality/diagnostics.js'));
   const depth = stripModule(readDomain('depth.js')) + legacyMarker('depth.js');
+  const documentIr = stripModule(readDomain('generator/document-ir.js'));
   const generator = stripModule(readDomain('generator.js')) + legacyMarker('generator.js');
   const hints = stripModule(readDomain('hints.js')) + legacyMarker('hints.js');
   const actionHandlers = stripModule(read('action-handlers.js'));
@@ -61,7 +65,9 @@ function main() {
     .replace('/*__REPOSITORY__*/', () => repository)
     .replace('/*__TPL_DATA__*/', () => tplData)
     .replace('/*__TEMPLATES__*/', () => templates)
+    .replace('/*__DIAGNOSTICS__*/', () => diagnostics)
     .replace('/*__DEPTH__*/', () => depth)
+    .replace('/*__DOC_IR__*/', () => documentIr)
     .replace('/*__GENERATOR__*/', () => generator)
     .replace('/*__HINTS__*/', () => hints)
     .replace('/*__ACTION_HANDLERS__*/', () => actionHandlers)

@@ -872,6 +872,16 @@ select {
   overflow-wrap: anywhere;
 }
 
+.tpl-verify {
+  margin: 4px 0 0;
+  font-size: calc(11px * var(--fs-scale));
+  line-height: 1.5;
+  color: var(--score-warn);
+  overflow-wrap: anywhere;
+}
+
+.tpl-verify.is-verified { color: var(--green); }
+
 /* ---------------- 辅助检查 ---------------- */
 
 .aux-row {
@@ -1383,10 +1393,33 @@ footer .btn:disabled {
 .dl-meta {
   margin-top: 4px;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   font-size: calc(11px * var(--fs-scale));
   color: var(--gray-5);
+  min-width: 0;
+}
+
+.dl-code,
+.dl-path,
+.dl-evidence {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.dl-code,
+.dl-path {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  color: var(--gray-6);
+}
+
+.dl-path {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--gray-2);
 }
 
 /* 行内「去补」按钮：不占满整行，也不低于 44px 触摸下限 */

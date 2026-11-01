@@ -2,7 +2,8 @@
  * 在 Node 环境中显式搭好，保证被测代码与线上一致。
  *
  * 线上 index.html 的脚本顺序：
- *   AGE → SCHEMA → CORE → REPOSITORY → TEMPLATE_DATA → TEMPLATES → DEPTH → GENERATOR → HINTS → ACTIONS → APP
+ *   AGE → SCHEMA → CORE → REPOSITORY → TEMPLATE_DATA → TEMPLATES → DIAGNOSTICS
+ *     → DEPTH → DOC_IR → GENERATOR → HINTS → ACTIONS → APP
  * 这里照搬同样的顺序与全局名。
  */
 const path = require('node:path');
@@ -16,8 +17,12 @@ function bootGlobals() {
   // templates.js 读 TEMPLATE_DATA，所以数据要先挂上全局
   globalThis.TEMPLATE_DATA = require(path.join(__dirname, '..', 'src', 'template-data.js'));
   globalThis.TEMPLATES = require(path.join(__dirname, '..', 'src', 'templates.js'));
-  // depth.js 零依赖，先挂上供生成页的深度自查卡片调用
+  // depth/generator 共用同一套诊断协议；浏览器构建按同一顺序内联。
+  globalThis.DIAGNOSTICS = require(path.join(__dirname, '..', 'packages', 'domain', 'dist', 'quality', 'diagnostics.js'));
+  // depth.js 只读记录，先挂上供生成页的深度自查卡片调用
   globalThis.DEPTH = require(path.join(__dirname, '..', 'src', 'depth.js'));
+  globalThis.DOCUMENT_IR = require(path.join(__dirname, '..', 'packages', 'domain', 'dist', 'generator', 'document-ir.js'));
+  globalThis.DOC_IR = globalThis.DOCUMENT_IR;
   globalThis.GENERATOR = require(path.join(__dirname, '..', 'src', 'generator.js'));
   globalThis.HINTS = require(path.join(__dirname, '..', 'src', 'hints.js'));
   return {
@@ -25,7 +30,9 @@ function bootGlobals() {
     SCHEMA: globalThis.SCHEMA,
     CORE: globalThis.RECORD_CORE,
     TEMPLATES: globalThis.TEMPLATES,
+    DIAGNOSTICS: globalThis.DIAGNOSTICS,
     DEPTH: globalThis.DEPTH,
+    DOCUMENT_IR: globalThis.DOCUMENT_IR,
     GENERATOR: globalThis.GENERATOR,
     HINTS: globalThis.HINTS
   };

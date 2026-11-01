@@ -80,6 +80,14 @@ export function BasicStep({ record, update, replaceRecord, errors, notify }: Ste
                   <div>
                     <h4>{template.name}</h4>
                     {template.hint ? <p>{template.hint}</p> : null}
+                    {template.source ? (
+                      <p className="muted">
+                        来源：{template.source.label}。{template.source.note}
+                      </p>
+                    ) : null}
+                    <p className={`template-verification${template.verified ? ' is-verified' : ''}`}>
+                      {template.verificationLabel ?? '待医院模板核对'}
+                    </p>
                   </div>
                   <div className="button-row compact">
                     <button type="button" className="button primary" onClick={() => applyTemplate(template.key, 'example')}>

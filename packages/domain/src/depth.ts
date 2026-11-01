@@ -28,6 +28,172 @@
 var DEPTH = (function () {
   'use strict';
 
+  // Browser builds inline diagnostics before DEPTH; CommonJS tests load the
+  // same module directly. Keeping this optional preserves the minimal harness.
+  var QUALITY = (typeof DIAGNOSTICS !== 'undefined' && DIAGNOSTICS)
+    ? DIAGNOSTICS
+    : (typeof require === 'function' ? require('./quality/diagnostics.js') : null);
+
+  var SEVERITY_BY_LEVEL = { high: 'error', mid: 'warning', low: 'info' };
+
+  var RULE_META = {
+    'neg-symptom': {
+      code: 'DEPTH_NEGATIVE_MISSING',
+      path: 'hpi.negativeDiscriminating',
+      action: '补阴性鉴别病史',
+      evidence: function (r) {
+        var h = r.hpi || {};
+        return [h.onset, h.symptoms, h.evolution, h.accompanying, h.treatment].filter(isText).join('，');
+      }
+    },
+    'chronic-meds': {
+      code: 'DEPTH_CHRONIC_MEDS',
+      path: 'pmh.longTermMeds',
+      action: '补长期用药',
+      evidence: function (r) {
+        var p = r.pmh || {};
+        return Object.keys(p.diseaseChecks || {}).filter(function (k) { return p.diseaseChecks[k]; }).join('、');
+      }
+    },
+    'chronic-control': {
+      code: 'DEPTH_CHRONIC_CONTROL',
+      path: 'pmh.longTermMeds',
+      action: '补控制情况',
+      evidence: function (r) { return t((r.pmh || {}).longTermMeds); }
+    },
+    'surgery-detail': {
+      code: 'DEPTH_SURGERY_DETAIL',
+      path: 'pmh.surgery',
+      action: '补手术年份和机构',
+      evidence: function (r) { return t((r.pmh || {}).surgery); }
+    },
+    antithrombotic: {
+      code: 'DEPTH_ANTITHROMBOTIC',
+      path: 'pmh.longTermMeds',
+      action: '核对抗栓药物',
+      evidence: function (r) {
+        var p = r.pmh || {};
+        return [t(p.diseaseDetail), t(p.diseaseOther), t(p.longTermMeds), t(p.relatedHistory)].filter(isText).join('，');
+      }
+    },
+    'duration-mismatch': {
+      code: 'DEPTH_DURATION_MISMATCH',
+      path: 'basic.chiefComplaint',
+      action: '核对病程时长',
+      evidence: function (r) {
+        var b = r.basic || {};
+        var h = r.hpi || {};
+        return [t(b.chiefComplaint), t(h.onset)].filter(isText).join('；');
+      }
+    },
+    'onset-trace': {
+      code: 'DEPTH_ONSET_TRACE',
+      path: 'hpi.onset',
+      action: '补完整病程',
+      evidence: function (r) {
+        var h = r.hpi || {};
+        return [h.onset, h.cause, h.symptoms, h.evolution].filter(isText).join('，');
+      }
+    },
+    'ambiguous-date': {
+      code: 'DEPTH_AMBIGUOUS_DATE',
+      path: 'hpi.onset',
+      action: '写明具体日期',
+      evidence: function (r) {
+        var h = r.hpi || {};
+        return [h.onset, h.symptoms, h.evolution, h.treatment].filter(isText).join('，');
+      }
+    },
+    'aux-hospital': {
+      code: 'DEPTH_AUX_HOSPITAL',
+      path: 'auxiliary.items',
+      action: '补检查机构',
+      evidence: function (r) {
+        return (((r.auxiliary || {}).items) || []).filter(function (it) { return it && isText(it.name); })
+          .map(function (it) { return t(it.name); }).join('、');
+      }
+    },
+    menstrual: {
+      code: 'DEPTH_MENSTRUAL',
+      path: 'menstruation.lmp',
+      action: '询问月经史',
+      evidence: function (r) { return t((r.basic || {}).chiefComplaint); }
+    },
+    'pediatric-personal': {
+      code: 'DEPTH_PEDIATRIC_PERSONAL',
+      path: 'personal.birth',
+      action: '补出生喂养史',
+      evidence: function (r) { return t((r.basic || {}).age); }
+    },
+    'allergy-missed': {
+      code: 'DEPTH_ALLERGY_MISSED',
+      path: 'pmh.allergy',
+      action: '询问过敏史',
+      evidence: function (r) {
+        var p = r.pmh || {};
+        return [p.health, p.diseaseDetail, p.infection, p.surgery, p.longTermMeds].filter(isText).join('，');
+      }
+    },
+    'infection-missed': {
+      code: 'DEPTH_INFECTION_MISSED',
+      path: 'pmh.infection',
+      action: '询问传染病史',
+      evidence: function (r) {
+        var p = r.pmh || {};
+        return [p.health, p.diseaseDetail, p.allergy, p.surgery, p.longTermMeds].filter(isText).join('，');
+      }
+    }
+  };
+
+  function ruleMeta(id, r) {
+    if (Object.prototype.hasOwnProperty.call(RULE_META, id)) return RULE_META[id];
+    if (id.indexOf('sym:') === 0) {
+      return {
+        code: 'DEPTH_SYMPTOM_QUANTIFICATION',
+        path: 'hpi.symptoms',
+        action: '补症状量化',
+        evidence: function () {
+          var h = r.hpi || {};
+          return [h.onset, h.cause, h.symptoms, h.relief, h.evolution, h.accompanying]
+            .filter(isText).join('，');
+        }
+      };
+    }
+    if (id.indexOf('aux-grade:') === 0) {
+      return {
+        code: 'DEPTH_AUX_GRADE',
+        path: 'auxiliary.items',
+        action: '抄录检查分级',
+        evidence: function () {
+          return (((r.auxiliary || {}).items) || []).filter(function (it) { return it && isText(it.name); })
+            .map(function (it) { return t(it.name); }).join('、');
+        }
+      };
+    }
+    return {
+      code: 'DEPTH_INTERNAL',
+      path: 'record',
+      action: '忽略该提醒',
+      evidence: function () { return ''; }
+    };
+  }
+
+  function typedRule(item, r) {
+    var meta = ruleMeta(item.id, r || {});
+    var evidenceText = t(meta.evidence ? meta.evidence(r || {}) : '') || t(item.message);
+    var input = {
+      code: meta.code,
+      severity: SEVERITY_BY_LEVEL[item.level] || 'info',
+      document: 'record',
+      path: meta.path,
+      message: item.message,
+      action: meta.action,
+      evidence: evidenceText ? [{ path: meta.path, text: evidenceText }] : []
+    };
+    var protocol = QUALITY && QUALITY.create ? QUALITY.create(input) : input;
+    return Object.assign({}, item, protocol);
+  }
+
   // ---------- 基础工具 ----------
 
   function isText(v) {
@@ -292,7 +458,7 @@ var DEPTH = (function () {
   function checkNegative(r) {
     var out = [];
     var h = r.hpi || {};
-    if (t(h.negativeDiscriminating)) return out;
+    if (t(h.negativeDiscriminating) || t(h.negativePertinent)) return out;
 
     var narrative = [h.onset, h.symptoms, h.evolution, h.accompanying, h.treatment]
       .filter(isText).join('，');
@@ -662,15 +828,15 @@ var DEPTH = (function () {
       checkMissedHistory
     ].forEach(function (fn) {
       try {
-        all = all.concat(fn(r) || []);
+        all = all.concat((fn(r) || []).map(function (item) { return typedRule(item, r); }));
       } catch (e) {
         // 单条规则出错不能把整页搞崩：深度自查是提示，不是病历正文
-        all.push({
+        all.push(typedRule({
           id: 'internal',
           level: 'low',
           section: '自查',
           message: '这一项自查没能跑完（' + (e && e.message ? e.message : '未知错误') + '），请忽略。'
-        });
+        }, r));
       }
     });
 
@@ -695,6 +861,14 @@ var DEPTH = (function () {
     count: count,
     LABEL: LABEL,
     SYMPTOMS: SYMPTOMS,
+    DIAGNOSTIC_CODES: [
+      'DEPTH_SYMPTOM_QUANTIFICATION', 'DEPTH_NEGATIVE_MISSING',
+      'DEPTH_CHRONIC_MEDS', 'DEPTH_CHRONIC_CONTROL', 'DEPTH_SURGERY_DETAIL',
+      'DEPTH_ANTITHROMBOTIC', 'DEPTH_DURATION_MISMATCH', 'DEPTH_ONSET_TRACE',
+      'DEPTH_AMBIGUOUS_DATE', 'DEPTH_AUX_HOSPITAL', 'DEPTH_AUX_GRADE',
+      'DEPTH_MENSTRUAL', 'DEPTH_PEDIATRIC_PERSONAL', 'DEPTH_ALLERGY_MISSED',
+      'DEPTH_INFECTION_MISSED', 'DEPTH_INTERNAL'
+    ],
     // 供测试用
     _internals: {
       splitClauses: splitClauses,

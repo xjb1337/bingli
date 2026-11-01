@@ -89,6 +89,16 @@ export function HpiStep({ record, update, errors, notify }: StepComponentProps) 
               error={errors['hpi.cause']}
             />
             <FieldRenderer
+              path="hpi.aggravating"
+              label="加重因素"
+              value={stringAt(record, 'hpi.aggravating')}
+              onChange={update}
+              kind="textarea"
+              rows={2}
+              placeholder="如：进食后腹痛加重"
+              error={errors['hpi.aggravating']}
+            />
+            <FieldRenderer
               path="hpi.relief"
               label="缓解因素"
               value={stringAt(record, 'hpi.relief')}

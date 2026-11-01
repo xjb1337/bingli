@@ -167,8 +167,10 @@ test('A09 肯定与否定同时存在时两个事实都保留', () => {
   r.hpi.symptoms = '无胸痛';
   r.hpi.negativeDiscriminating = '胸痛';
   const { sections } = GENERATOR.generate(r);
-  assert.match(sections['现病史'], /无胸痛/);
-  assert.match(sections['现病史'], /胸痛/);
+  assert.match(sections['现病史'], /无胸痛，胸痛/);
+  assert.equal((sections['现病史'].match(/无胸痛/g) || []).length, 1);
+  assert.equal((sections['现病史'].match(/胸痛/g) || []).length, 2,
+    '“胸痛”在“无胸痛”和独立阳性事实中各出现一次，不能被极性盲去重吞掉');
 });
 
 test('A09 左右侧与时间进展不被当成重复', () => {

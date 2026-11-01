@@ -700,6 +700,7 @@ const APP = (() => {
         ${aliases}
         ${t.hint ? `<div class="tpl-hint">${esc(t.hint)}</div>` : ''}
         ${t.source ? `<div class="tpl-source">${esc(t.source.label)}：${esc(t.source.note)}</div>` : ''}
+        <div class="tpl-verify${t.verified ? ' is-verified' : ''}">${esc(t.verificationLabel || '待医院模板核对')}</div>
         <div class="btn-row">
           <button class="btn btn-mini btn-template-example" data-tpl="${esc(t.key)}" data-tplmode="example">作为学习范例填入</button>
           <button class="btn btn-mini btn-ghost" data-tpl="${esc(t.key)}" data-tplmode="patient">查看患者录入提纲</button>
@@ -800,7 +801,7 @@ const APP = (() => {
 
   function renderHpi() {
     const h = R.hpi || {};
-    const hasDetails = ['cause', 'relief', 'evolution', 'accompanying', 'negativeDiscriminating', 'extra']
+    const hasDetails = ['cause', 'aggravating', 'relief', 'evolution', 'accompanying', 'negativeDiscriminating', 'extra']
       .some(k => String(h[k] || '').trim());
     return `
       <div class="card">
@@ -829,6 +830,7 @@ const APP = (() => {
         <details class="optional-details"${hasDetails ? ' open' : ''}>
           <summary>补充诱因、进展和伴随症状</summary>
           ${input('发病诱因', 'hpi.cause', { placeholder: '如：受凉后 / 无明显诱因' })}
+          ${textarea('加重因素', 'hpi.aggravating', { rows: 2, placeholder: '如：进食后腹痛加重' })}
           ${textarea('缓解因素', 'hpi.relief', { rows: 2, placeholder: '如：休息后腹痛稍缓解' })}
           ${textarea('病情进展', 'hpi.evolution', { rows: 2, placeholder: '如：症状逐渐加重' })}
           ${textarea('伴随症状', 'hpi.accompanying', { rows: 2, placeholder: '如：伴胸痛；无咯血' })}
@@ -2258,14 +2260,28 @@ const APP = (() => {
     const D = typeof DEPTH !== 'undefined' ? DEPTH : null;
     if (!D) return '';
     const list = D.check(R) || [];
-    const html = list.length ? list.map(f => `
+    const html = list.length ? list.map(f => {
+      const evidencePaths = Array.from(new Set((f.evidence || [])
+        .map(item => item && item.path).filter(Boolean)));
+      const location = evidencePaths.join('、');
+      const jump = f.path
+        ? `<button class="btn btn-ghost btn-jump dl-jump" data-act="jumpPath" data-path="${esc(f.path)}">定位</button>`
+        : (depthStep(f.section) ? `<button class="btn btn-ghost btn-jump dl-jump" data-checkjump="${esc(depthStep(f.section))}">去补</button>` : '');
+      return `
       <div class="depth-line lv-${f.level}">
         <span class="dl-tag">${esc(f.label)}</span>
         <div class="dl-body">
           <div class="dl-msg">${esc(f.message)}</div>
-          <div class="dl-meta">${esc(f.section)}${depthStep(f.section) ? `<button class="btn btn-ghost btn-jump dl-jump" data-checkjump="${esc(depthStep(f.section))}">去补</button>` : ''}</div>
+          <div class="dl-meta">
+            <span class="dl-code">${esc(f.code || '')}</span>
+            <span class="dl-path">${esc(f.path || '')}</span>
+            <span>${esc(f.section)}</span>
+            ${location ? `<span class="dl-evidence">证据：${esc(location)}</span>` : ''}
+            ${jump}
+          </div>
         </div>
-      </div>`).join('') : '<div class="hint">当前规则未发现需要补充的追问，仍请人工核对。</div>';
+      </div>`;
+    }).join('') : '<div class="hint">当前规则未发现需要补充的追问，仍请人工核对。</div>';
     return `
       <div class="depth-card">
         <div class="section-title">问诊补充提示</div>

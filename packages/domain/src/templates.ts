@@ -17,6 +17,31 @@
 
 var TEMPLATES = (function () {
   const DATA = (typeof TEMPLATE_DATA !== 'undefined' ? TEMPLATE_DATA : []);
+  const DEFAULT_SOURCE = {
+    kind: 'textbook-template',
+    label: '教学模板',
+    note: '依据《诊断学》常见病典型表现整理，尚未与医院正式病历模板核对。'
+  };
+
+  /**
+   * 模板事实的来源与核对状态必须随模板一起流动。医院模板尚未提供，所以
+   * 默认一律标为未核对；即使院内范例有截图来源，也仍需按正式模板复核。
+   * source 原对象保持原样，避免把核对状态混进来源说明里。
+   */
+  function normalizeTemplate(template) {
+    const source = template.source && typeof template.source === 'object'
+      ? Object.assign({}, template.source)
+      : Object.assign({}, DEFAULT_SOURCE);
+    const verified = template.verified === true;
+    return Object.assign({}, template, {
+      source,
+      verified,
+      verificationStatus: verified ? 'verified' : 'unverified',
+      verificationLabel: verified ? '已核对' : '待医院模板核对'
+    });
+  }
+
+  const NORMALIZED = DATA.map(normalizeTemplate);
 
   /**
    * 某个科室有哪些模板。general（通用/全科）返回空数组——
@@ -26,16 +51,16 @@ var TEMPLATES = (function () {
     const k = String(deptKey || '');
     if (!k || k === 'general') return [];
     // 所有模板都挂在具体科室下；不跨科室给，免得学生拿消化科的模板套儿科病历
-    return DATA.filter(t => t.dept === k);
+    return NORMALIZED.filter(t => t.dept === k);
   }
 
   function get(key) {
     const k = String(key || '');
-    return DATA.find(t => t.key === k) || null;
+    return NORMALIZED.find(t => t.key === k) || null;
   }
 
   function all() {
-    return DATA.slice();
+    return NORMALIZED.slice();
   }
 
   /** 科室的中文名，用于界面文案与提示 */

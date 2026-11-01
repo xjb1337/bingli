@@ -7,6 +7,32 @@
 const GENERATOR = (() => {
   'use strict';
 
+  // Browser builds inline document-ir/diagnostics before this module; Node tests
+  // load the same files through CommonJS. Keeping this optional preserves the
+  // byte-for-byte legacy generator when those helpers are unavailable in a
+  // minimal harness.
+  const IR_API = (typeof DOCUMENT_IR !== 'undefined' && DOCUMENT_IR)
+    ? DOCUMENT_IR
+    : (typeof require === 'function' ? require('./generator/document-ir.js') : null);
+  const QUALITY = (typeof DIAGNOSTICS !== 'undefined' && DIAGNOSTICS)
+    ? DIAGNOSTICS
+    : (typeof require === 'function' ? require('./quality/diagnostics.js') : null);
+
+  function diagnostic(input) {
+    if (QUALITY && QUALITY.create) return QUALITY.create(input);
+    const paths = [input.path].filter(Boolean);
+    return {
+      code: input.code,
+      severity: input.severity || 'warning',
+      path: input.path || 'record',
+      paths,
+      message: input.message,
+      document: input.document,
+      action: input.action,
+      evidence: Array.isArray(input.evidence) ? input.evidence : []
+    };
+  }
+
   /* ---------------------------- 文本工具 ---------------------------- */
 
   const stripTail = s => String(s || '').trim().replace(/[，,；;。\s]+$/g, '');
@@ -82,14 +108,34 @@ const GENERATOR = (() => {
     if (!t) return '';
     const existing = squash(seg.join(''));
     if (!existing) return t;
-    if (existing.includes(squash(t))) return '';
+    const NEG_HEAD = /^(无|未|否认|没有|未见)/;
+    const NEG_ANY = /(无|未|否认|没有|未见)/;
+    const previous = [];
+    seg.forEach(part => {
+      String(part || '').split(/[。；;]/).forEach(sentence => {
+        let negScope = '';
+        sentence.split(/[、，,]/).forEach(piece => {
+          const clause = piece.trim();
+          if (!clause) return;
+          const head = (clause.match(NEG_HEAD) || [''])[0];
+          if (head) negScope = head;
+          else if (/(出现|伴有|伴|存在|诉|有|患者)/.test(clause)) negScope = '';
+          previous.push({ core: squash(clause.replace(NEG_HEAD, '')), neg: !!(head || negScope) });
+        });
+      });
+    });
+    // An exact text match is only a duplicate when its polarity matches. A bare
+    // positive "胸痛" after "无胸痛" is a new, clinically meaningful fact.
+    if (existing.includes(squash(t))) {
+      const tNeg = NEG_HEAD.test(t);
+      const tCore = squash(t.replace(NEG_HEAD, ''));
+      if (tNeg || previous.some(p => !p.neg && p.core.includes(tCore))) return '';
+    }
     // 含分号的复合句不拆：拆开会丢掉分句之间的语义关系
     if (/[；;]/.test(t)) return t;
     const clauses = t.split(/[、，,]/).map(s => s.trim()).filter(Boolean);
     if (clauses.length < 2) return t;
 
-    const NEG_HEAD = /^(无|未|否认|没有|未见)/;
-    const NEG_ANY = /(无|未|否认|没有|未见)/;
     const effective = [];      // [{ core, neg, text, standAlone }]
     let prevNeg = '';
     clauses.forEach(c => {
@@ -105,20 +151,6 @@ const GENERATOR = (() => {
 
     // 只删除极性也相同的重复项。仅比较症状名会把「出现视物模糊」后的
     // 「无视物模糊」当作重复而丢掉，掩盖需要人工核对的矛盾。
-    const previous = [];
-    seg.forEach(part => {
-      String(part || '').split(/[。；;]/).forEach(sentence => {
-        let negScope = '';
-        sentence.split(/[、，,]/).forEach(piece => {
-          const clause = piece.trim();
-          if (!clause) return;
-          const head = (clause.match(NEG_HEAD) || [''])[0];
-          if (head) negScope = head;
-          else if (/(出现|伴有|伴|存在|诉|有|患者)/.test(clause)) negScope = '';
-          previous.push({ core: squash(clause.replace(NEG_HEAD, '')), neg: !!(head || negScope) });
-        });
-      });
-    });
     const kept = effective.filter(e => {
       if (e.standAlone) return !existing.includes(squash(e.text));
       const core = squash(e.core);
@@ -156,6 +188,25 @@ const GENERATOR = (() => {
     if (/[。；;]/.test(t) || /(出现|发生|诱发|起病|引起)/.test(t)) return t;
     if (/后$/.test(t)) return `${t}起病`;
     return t;
+  }
+
+  /**
+   * 有鉴别意义的阴性病史。negativeDiscriminating 是旧字段，
+   * negativePertinent 是 PR5 的新结构字段；两者都保留，取并集并按原顺序输出。
+   * 旧字段仍然优先，保证既有病历的文字不变。
+   */
+  function negativeHistoryText(h) {
+    const source = h || {};
+    const seen = new Set();
+    return [source.negativeDiscriminating, source.negativePertinent]
+      .map(stripTail)
+      .filter(value => {
+        const key = squash(value);
+        if (!key || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .join('，');
   }
 
   /** 传入的是整份病历（带 basic）还是只有 basic，两种调用方式都兼容 */
@@ -388,7 +439,12 @@ const GENERATOR = (() => {
   function buildHPI(r) {
     const h = r.hpi || {};
     if (h.mode === 'manual') {
-      return h.manual ? joinSentences([h.manual]) : '';
+      const manual = stripTail(h.manual);
+      if (!manual) return '';
+      const units = IR_API && IR_API.assembleClinicalNarrative
+        ? IR_API.assembleClinicalNarrative([manual])
+        : joinClauses([manual]);
+      return units.length ? joinSentences(units) : '';
     }
     const seg = [];
     const causeText = normalizeCause(h.cause);
@@ -402,6 +458,10 @@ const GENERATOR = (() => {
 
     if (stripTail(h.symptoms)) seg.push(stripTail(h.symptoms));
 
+    // 加重因素与缓解因素分开记录：两者不是同一事实，不能互相覆盖。
+    const aggravating = mergeIntoHistory(seg, h.aggravating);
+    if (aggravating) seg.push(aggravating);
+
     // 缓解因素（评分表第6页现病史明确列出；第2页未列，属加分项）
     const relief = mergeIntoHistory(seg, h.relief);
     if (relief) seg.push(relief);
@@ -410,8 +470,8 @@ const GENERATOR = (() => {
     if (stripTail(h.accompanying)) seg.push(stripTail(h.accompanying));
 
     // 具有鉴别诊断意义的阴性病史（第2页 5 分、第6页现病史）
-    const neg = mergeIntoHistory(seg, h.negativeDiscriminating);
-    if (neg) seg.push(neg);
+    const negative = mergeIntoHistory(seg, negativeHistoryText(h));
+    if (negative) seg.push(negative);
 
     if (stripTail(h.treatment)) seg.push(stripTail(h.treatment));
 
@@ -434,7 +494,9 @@ const GENERATOR = (() => {
     // 处理：整段病史主体只有一个裸时间短语时，把这句丢掉（不写残句）。
     let bodySeg = seg;
     if (seg.length === 1 && isBareOnsetPhrase(seg[0])) bodySeg = [];
-    const sentences = joinClauses(bodySeg);
+    const sentences = IR_API && IR_API.assembleClinicalNarrative
+      ? IR_API.assembleClinicalNarrative(bodySeg)
+      : joinClauses(bodySeg);
     const tail = [];
     if (gc) tail.push(gc);
     if (other) tail.push(`另有${other}，需继续治疗`);
@@ -515,22 +577,33 @@ const GENERATOR = (() => {
       const store = (r.ros || {})[sys.key] || {};
       const positives = [];
       const negatives = [];
+      const entries = [];
       let asked = false;
       sys.symptoms.forEach(sym => {
         const v = store[sym.key] || {};
-        if (v.checked) {
+        const state = typeof SCHEMA.rosFactState === 'function'
+          ? SCHEMA.rosFactState(v)
+          : (v.checked ? 'asked_positive' : (v.negative ? 'asked_negative' : 'not_asked'));
+        const path = `ros.${sys.key}.${sym.key}`;
+        if (state === 'asked_positive') {
           asked = true;
           let s = sym.label;
           if (v.time) s += v.time;
           if (v.detail) s += '，' + v.detail;
           positives.push(s);
-        } else if (v.negative) {
+          entries.push({ symptomKey: sym.key, label: sym.label, text: s, state, path });
+        } else if (state === 'asked_negative') {
           asked = true;
           negatives.push(sym.label);
+          entries.push({ symptomKey: sym.key, label: sym.label, text: `无${sym.label}`, state, path });
+        } else if (state !== 'not_asked') {
+          // default_normal_pending_review / manual_text 不是 ROS 三态中的可输出事实；
+          // 保留状态供质控使用，但不凭空生成“无…”或阳性症状。
+          entries.push({ symptomKey: sym.key, label: sym.label, text: '', state, path });
         }
         // 既没勾阳性、也没标阴性 = 没问过 → 既不进 positives 也不进 negatives
       });
-      res.push({ key: sys.key, name: sys.name, positives, negatives, asked });
+      res.push({ key: sys.key, name: sys.name, positives, negatives, entries, asked });
     });
     return res;
   }
@@ -1081,6 +1154,40 @@ const GENERATOR = (() => {
     return { raw, num };
   }
 
+  const VITAL_TEXT_KEYS = ['temperature', 'pulse', 'respiration', 'sbp', 'dbp', 'height', 'weight', 'headCirc', 'chestCirc', 'abdCirc'];
+
+  /**
+   * 生命体征的唯一结构化快照。查体、摘要、SOAP 和一致性检查都从这里取值，
+   * 避免四套解析器对同一输入得出不同结果。
+   */
+  function vitalSnapshot(vitals) {
+    const out = {};
+    VITAL_TEXT_KEYS.forEach(key => {
+      const hit = vitalNum(vitals || {}, key);
+      if (hit) out[key] = hit;
+    });
+    return out;
+  }
+
+  /** 摘要 / O 段共用的异常生命体征短语。 */
+  function abnormalVitalFindings(r) {
+    const vitals = vitalSnapshot((r.pe || {}).vitals || {});
+    const parts = [];
+    if (vitals.temperature && vitals.temperature.num >= 37.3) {
+      parts.push(`T ${vitals.temperature.raw}℃`);
+    }
+    if (vitals.pulse && (vitals.pulse.num > 100 || vitals.pulse.num < 60)) {
+      parts.push(`P ${vitals.pulse.raw}次/分`);
+    }
+    if (vitals.respiration && (vitals.respiration.num > 20 || vitals.respiration.num < 12)) {
+      parts.push(`R ${vitals.respiration.raw}次/分`);
+    }
+    if (vitals.sbp && (vitals.sbp.num >= 140 || vitals.sbp.num < 90)) {
+      parts.push(`BP ${vitals.sbp.raw}/${vitals.dbp ? vitals.dbp.raw : '—'}mmHg`);
+    }
+    return parts;
+  }
+
   /**
    * 生命体征行。
    *
@@ -1093,6 +1200,7 @@ const GENERATOR = (() => {
    */
   function buildVitals(r) {
     const v = (r.pe || {}).vitals || {};
+    const snapshot = vitalSnapshot(v);
     // 缺项统一写成「／」，与一般项目、既往史的占位符保持同一个字符（全角斜杠）。
     const val = k => vitalValue(v[k]) || PH;
     /**
@@ -1108,8 +1216,7 @@ const GENERATOR = (() => {
      * 离谱的数字他多半看不见。
      */
     const safe = k => {
-      const hit = vitalNum(v, k);
-      return hit ? hit.raw : PH;
+      return snapshot[k] ? snapshot[k].raw : PH;
     };
     const parts = [
       `T ${safe('temperature')}℃`,
@@ -1143,6 +1250,22 @@ const GENERATOR = (() => {
       return d[item.key] || item.default || '';
     }
     return String(raw).trim();
+  }
+
+  /**
+   * 查体项真正可以写入病历的文字。与 peValue 的区别是尊重事实状态：
+   * 显式阳性但没写具体所见时返回空串，绝不拿模板默认正常描述补位。
+   */
+  function peOutputValue(r, groupKey, item) {
+    const store = ((r.pe || {})[groupKey]) || {};
+    const own = stripTail(store[item.key]);
+    const state = typeof SCHEMA.peFactState === 'function'
+      ? SCHEMA.peFactState(r, groupKey, item.key, item)
+      : (SCHEMA.peChecked(r, groupKey, item.key) ? 'asked_negative' : 'not_asked');
+    if (state === 'not_asked') return '';
+    if (state === 'asked_positive') return own;
+    if (state === 'asked_negative') return own || stripTail(SCHEMA.peNormalText(item));
+    return own || stripTail(peValue(r, groupKey, item)) || stripTail(SCHEMA.peNormalText(item));
   }
 
   /** 父项与细项存在明显相反描述时提醒核对；不推断哪一项才是事实。 */
@@ -1194,12 +1317,11 @@ const GENERATOR = (() => {
         );
       })
       .map(it => {
-        const own = stripTail(peValue(r, groupKey, it));
-        // 勾了却没写所见 → 用规范正常描述兜底；连正常描述都没有就跳过
-        const value = own || stripTail(SCHEMA.peNormalText(it));
+        // peOutputValue 已按事实状态处理：显式阳性无具体所见时为空，不回填正常描述。
+        const value = peOutputValue(r, groupKey, it);
         return { item: it, value };
       })
-      .filter(e => e.value);
+      .filter(e => e && e.value);
   }
 
   /**
@@ -1303,7 +1425,7 @@ const GENERATOR = (() => {
         return !subs.every(k => SCHEMA.peChecked(r, storeKey, k));
       });
       const vals = keepItems
-        .map(it => stripTail(peValue(r, storeKey, it)) || stripTail(SCHEMA.peNormalText(it)));
+        .map(it => peOutputValue(r, storeKey, it));
       // 教材「前面体格检查中的相应项目不必重复书写」：
       // 通用查体已写过的就别再写一遍。
       //
@@ -1327,7 +1449,7 @@ const GENERATOR = (() => {
         // 勾了，但这一科每一项的每个分句都已经在通用查体里写过一遍。
         // 教材对这种情形的处理办法是明写的：「只写见××科情况」。
         // 静默什么都不写会让学生以为勾选没生效，给一句指向比空着好。
-        if (checkedItems.length) out.push(`${sp.name}：见前述体格检查。`);
+        if (vals.some(Boolean)) out.push(`${sp.name}：见前述体格检查。`);
         return;
       }
       out.push(`${sp.name}：${own.join('。')}。`);
@@ -1392,6 +1514,15 @@ const GENERATOR = (() => {
    */
   function anyPEExamined(r) {
     const pe = (r || {}).pe || {};
+    const factStates = (r || {}).peFactStates || {};
+    const explicitExamined = Object.keys(factStates).some(groupKey => {
+      const group = factStates[groupKey];
+      return !!group && typeof group === 'object' && Object.keys(group).some(itemKey => {
+        const state = rawPeFactState(r, groupKey, itemKey);
+        return state && state !== 'not_asked';
+      });
+    });
+    if (explicitExamined) return true;
     const examined = Object.keys(pe)
       .filter(k => k !== 'vitals' && k !== 'checked')
       .some(k => {
@@ -1399,9 +1530,12 @@ const GENERATOR = (() => {
         if (!g || typeof g !== 'object') return false;
         return Object.keys(g).some(itemKey => {
           const v = g[itemKey];
-          if (v === true) return true;
           if (v === false || v === undefined || v === null) return false;
-          return String(v).trim() !== '';
+          if (v !== true && String(v).trim() === '') return false;
+          const state = typeof SCHEMA.peFactState === 'function'
+            ? SCHEMA.peFactState(r, k, itemKey)
+            : '';
+          return state !== 'not_asked';
         });
       });
     if (examined) return true;
@@ -1577,7 +1711,7 @@ const GENERATOR = (() => {
       sp.items.forEach(it => {
         // 没勾的专科项这次没查，不能参与阳性体征筛选
         if (!SCHEMA.peChecked(r, 'special_' + spKey, it.key)) return;
-        const val = stripTail(peValue(r, 'special_' + spKey, it)) || stripTail(SCHEMA.peNormalText(it));
+        const val = peOutputValue(r, 'special_' + spKey, it);
         if (!isPositiveFinding(it, val)) return;
         res.push({ group: sp.name, label: it.label, text: it.__positive, key: it.key });
       });
@@ -1707,7 +1841,7 @@ const GENERATOR = (() => {
     const out = sentences.filter(s => !skip.includes(core(s))).slice(0, 2);
 
     // 显式保留有鉴别意义的阴性：未被上面要点覆盖的项补成一句
-    const neg = stripTail(h.negativeDiscriminating);
+    const neg = negativeHistoryText(h);
     if (neg) {
       const covered = squash(out.join(''));
       const NEG = /^(无|未|否认|没有|未见)/;
@@ -1751,21 +1885,8 @@ const GENERATOR = (() => {
 
     // 3) 主要阳性体征（生命体征异常 + 查体异常）
     const abn = abnormalPE(r);
-    const v = (r.pe || {}).vitals || {};
-    const abnormalVitals = [];
-    // 一律走 vitalNum：它已经保证「完整数字 + 在可信范围内」。
-    // 这里只判断临床阈值，不再自己 parseFloat——两套解析必然写出互相矛盾的病历。
-    const t = vitalNum(v, 'temperature');
-    if (t && t.num >= 37.3) abnormalVitals.push(`T ${t.raw}℃`);
-    const p = vitalNum(v, 'pulse');
-    if (p && (p.num > 100 || p.num < 60)) abnormalVitals.push(`P ${p.raw}次/分`);
-    const rr = vitalNum(v, 'respiration');
-    if (rr && (rr.num > 20 || rr.num < 12)) abnormalVitals.push(`R ${rr.raw}次/分`);
-    const sbp = vitalNum(v, 'sbp'), dbp = vitalNum(v, 'dbp');
-    if (sbp && (sbp.num >= 140 || sbp.num < 90)) {
-      // 舒张压无效时不能把原始字符串抄进来，否则 T 380 的摘要里冒出「BP 152/999」
-      abnormalVitals.push(`BP ${sbp.raw}/${dbp ? dbp.raw : '—'}mmHg`);
-    }
+    // 一律走 vitalSnapshot：正文、摘要、O 段、诊断提示共用同一份有效值。
+    const abnormalVitals = abnormalVitalFindings(r);
     const peAll = abnormalVitals.concat(abn.map(a => a.text).filter(Boolean));
     // 心率去重：查体描述里已经写了「心率108次/分」时，不要再pushed一个「P 108次/分」
     const dedup = dedupeClauses(peAll.filter((txt, i) => {
@@ -1948,7 +2069,8 @@ const GENERATOR = (() => {
     if (keyPoints.length) seg.push(keyPoints.join('，'));
 
     // 关键阴性：有鉴别意义的阴性病史最能体现思路，必须保留
-    if (stripTail(h.negativeDiscriminating)) seg.push(stripTail(h.negativeDiscriminating));
+    const negative = negativeHistoryText(h);
+    if (negative) seg.push(negative);
 
     // 阳性体征与辅助检查各留一句，细节放到 O 段，避免 S/O 两段重复
     const abn = abnormalPE(r);
@@ -1964,19 +2086,8 @@ const GENERATOR = (() => {
   /** O 段：对诊断有意义的体格检查（只取阳性，阴性不进 O 段） */
   function draftObjectivePE(r) {
     const abn = abnormalPE(r);
-    const v = (r.pe || {}).vitals || {};
-    const parts = [];
-    // 与 buildVitals / draftSummary 同一口径（vitalNum），只保留临床阈值判断
-    const t = vitalNum(v, 'temperature');
-    if (t && t.num >= 37.3) parts.push(`T ${t.raw}℃`);
-    const p = vitalNum(v, 'pulse');
-    if (p && (p.num > 100 || p.num < 60)) parts.push(`P ${p.raw}次/分`);
-    const rr = vitalNum(v, 'respiration');
-    if (rr && (rr.num > 20 || rr.num < 12)) parts.push(`R ${rr.raw}次/分`);
-    const sbp = vitalNum(v, 'sbp'), dbp = vitalNum(v, 'dbp');
-    if (sbp && (sbp.num >= 140 || sbp.num < 90)) {
-      parts.push(`BP ${sbp.raw}/${dbp ? dbp.raw : '—'}mmHg`);
-    }
+    // 与 buildVitals / draftSummary 同一口径（vitalSnapshot）。
+    const parts = abnormalVitalFindings(r);
     const texts = dedupeClauses(parts.concat(abn.map(a => a.text).filter(Boolean)));
     // 缺陷B3（已复现）：一个查体项都没勾时，这里原本写「未见与诊断相关的阳性体征」，
     // 等于替学生下了阴性结论。没查过体就只留项目名（调用处已带「体格检查：」前缀，
@@ -2011,7 +2122,7 @@ const GENERATOR = (() => {
     if (!dx.length) return [];
     const hpiText = [
       stripTail((r.hpi || {}).onset), stripTail((r.hpi || {}).symptoms),
-      stripTail((r.hpi || {}).accompanying), stripTail((r.hpi || {}).negativeDiscriminating)
+      stripTail((r.hpi || {}).accompanying), negativeHistoryText(r.hpi || {})
     ].filter(Boolean).join('，');
     const abn = abnormalPE(r);
     const aux = auxItems(r);
@@ -2086,17 +2197,33 @@ const GENERATOR = (() => {
    *
    * @returns {string[]} 需要提醒用户的事项，没有则返回空数组
    */
-  function firstCourseSelfCheck(r) {
+  function firstCourseSelfCheckDiagnostics(r) {
     const out = [];
     const a = (((r.soap || {}).a) || {});
     if (!stripTail(a.diffNote)) {
       const check = diffRelatedToDiagnosis(r);
       if (check.unrelated.length) {
-        out.push(`${check.unrelated.join('、')} 与现有诊断的关联不明确，`
-          + '请结合病情核对是否保留。');
+        const diffs = Array.isArray(a.diff) ? a.diff : [];
+        out.push(diagnostic({
+          code: 'SOAP_DIFF_UNRELATED',
+          severity: 'warning',
+          document: 'firstCourse',
+          path: 'soap.a.diff',
+          action: '核对鉴别诊断',
+          message: `${check.unrelated.join('、')} 与现有诊断的关联不明确，请结合病情核对是否保留。`,
+          evidence: diffs.map((row, index) => ({
+            path: `soap.a.diff.${index}.diagnosis`,
+            text: stripTail(row && row.diagnosis)
+          })).filter(item => item.text)
+        }));
       }
     }
     return out;
+  }
+
+  /** 兼容旧界面：字符串数组；结构化入口见 firstCourseSelfCheckDiagnostics。 */
+  function firstCourseSelfCheck(r) {
+    return firstCourseSelfCheckDiagnostics(r).map(item => item.message);
   }
 
   /**
@@ -2106,7 +2233,7 @@ const GENERATOR = (() => {
    * @param {object} [opts] { date: 'YYYY-MM-DD HH:mm' } 只用于标题时间，不填则不写时间
    * @returns {string} 含「病历特点」「诊断依据」「鉴别诊断」「诊疗计划」四个小标题的纯文本
    */
-  function buildFirstCourseRecord(r, opts = {}) {
+  function firstCourseDocumentParts(r, opts = {}) {
     const rec = r || {};
     const soap = rec.soap || {};
     const s = soap.s || {};
@@ -2114,29 +2241,31 @@ const GENERATOR = (() => {
     const a = soap.a || {};
     const p = soap.p || {};
 
-    const lines = [];
+    const sections = [];
+    const add = (title, paragraphs) => sections.push({ title, heading: title, paragraphs });
     const stamp = stripTail(opts.date) || stripTail((((r || {}).soap || {}).recordTime) || '');
-    lines.push(stamp ? `【首次病程录】${stamp}` : '【首次病程录】');
+    const prefix = stamp ? `【首次病程录】${stamp}` : '【首次病程录】';
 
     /* ---------- 一、病历特点（S） ---------- */
-    lines.push('一、病历特点（S）');
     const summary = stripTail(s.summary) || draftCaseSummary(rec);
-    lines.push(ensureSentence(summary) || '（待补充：请概括现病史要点）');
+    const feature = [ensureSentence(summary) || '（待补充：请概括现病史要点）'];
     // 「与病史采集一致」这一项不写额外事实，只做一句自检说明
     const consistency = stripTail(s.consistency);
-    if (consistency) lines.push(ensureSentence(consistency));
+    if (consistency) feature.push(ensureSentence(consistency));
+    add('一、病历特点（S）', feature);
 
     /* ---------- 二、客观体检记录/检查结果（O） ---------- */
-    lines.push('二、客观记录（O）');
     const peText = deLabel(o.pe || draftObjectivePE(rec), ['查体', '体格检查']);
     const auxText = deLabel(o.aux || draftObjectiveAux(rec), ['辅助检查', '检查']);
-    lines.push(`1. 体格检查：${ensureSentence(peText)}`);
-    lines.push(`2. 辅助检查：${ensureSentence(auxText)}`);
+    add('二、客观记录（O）', [
+      `1. 体格检查：${ensureSentence(peText)}`,
+      `2. 辅助检查：${ensureSentence(auxText)}`
+    ]);
 
     /* ---------- 三、诊断依据（A） ---------- */
-    lines.push('三、诊断依据（A）');
+    const basisParagraphs = [];
     const basis = stripTail(a.basis);
-    if (basis) lines.push(ensureSentence(basis));
+    if (basis) basisParagraphs.push(ensureSentence(basis));
     const details = draftBasisDetail(rec);
     if (details.length) {
       details.forEach(d => {
@@ -2145,16 +2274,17 @@ const GENERATOR = (() => {
         if (stripTail(d.pe)) bits.push(`②体检：${stripTail(d.pe)}`);
         if (stripTail(d.aux)) bits.push(`③辅助检查：${stripTail(d.aux)}`);
         const body = bits.length ? bits.join('；') : '（待补充病史、体检、辅助检查三方面依据）';
-        lines.push(`· ${stripTail(d.diagnosis)}：${ensureSentence(body)}`);
+        basisParagraphs.push(`· ${stripTail(d.diagnosis)}：${ensureSentence(body)}`);
       });
     } else {
-      lines.push('· （待补充初步诊断，再逐条列出诊断依据）');
+      basisParagraphs.push('· （待补充初步诊断，再逐条列出诊断依据）');
     }
     const ranking = stripTail(a.ranking);
-    if (ranking) lines.push(`主次：${ensureSentence(ranking)}`);
+    if (ranking) basisParagraphs.push(`主次：${ensureSentence(ranking)}`);
+    add('三、诊断依据（A）', basisParagraphs);
 
     /* ---------- 四、鉴别诊断（A） ---------- */
-    lines.push('四、鉴别诊断（A）');
+    const diffParagraphs = [];
     const diffs = Array.isArray(a.diff) ? a.diff.filter(d => d && stripTail(d.diagnosis)) : [];
     if (diffs.length) {
       diffs.forEach(d => {
@@ -2163,24 +2293,25 @@ const GENERATOR = (() => {
         if (stripTail(d.against)) bits.push(`不支持点：${stripTail(d.against)}`);
         if (stripTail(d.points)) bits.push(`鉴别要点：${stripTail(d.points)}`);
         const tail = bits.length ? '：' + bits.join('；') : '';
-        lines.push(`· 需与${stripTail(d.diagnosis)}鉴别${ensureSentence(tail)}`);
+        diffParagraphs.push(`· 需与${stripTail(d.diagnosis)}鉴别${ensureSentence(tail)}`);
       });
     } else {
       // 没填鉴别诊断时用 HINTS 的「该鉴别什么」作提示，绝不自动写进病历正文
-      lines.push('· （待补充：结合主要诊断展开鉴别，可参考诊断参考提示中的候选疾病）');
+      diffParagraphs.push('· （待补充：结合主要诊断展开鉴别，可参考诊断参考提示中的候选疾病）');
     }
     const diffNote = stripTail(a.diffNote);
     if (diffNote) {
-      lines.push(ensureSentence(diffNote));
+      diffParagraphs.push(ensureSentence(diffNote));
     }
     // 注意：与诊断无关的鉴别诊断属于「自查提醒」，是给考生看的话，不是病历内容。
     // 它绝不能写进本函数的返回值——用户会整段复制进病历系统。
     // 需要的界面请调用 firstCourseSelfCheck(rec) 单独取用。
+    add('四、鉴别诊断（A）', diffParagraphs);
 
     /* ---------- 五、诊疗计划（P） ---------- */
-    lines.push('五、诊疗计划（P）');
+    const planParagraphs = [];
     const principle = stripTail(p.principle);
-    if (principle) lines.push(ensureSentence(principle));
+    if (principle) planParagraphs.push(ensureSentence(principle));
     const plans = Array.isArray(p.perDiagnosis) ? p.perDiagnosis.filter(x => x && stripTail(x.diagnosis)) : [];
     if (plans.length) {
       plans.forEach(x => {
@@ -2188,15 +2319,26 @@ const GENERATOR = (() => {
         if (stripTail(x.exam)) bits.push(`检查：${stripTail(x.exam)}`);
         if (stripTail(x.treatment)) bits.push(`治疗：${stripTail(x.treatment)}`);
         const body = bits.length ? bits.join('；') : '（待补充具体检查与治疗措施）';
-        lines.push(`· ${stripTail(x.diagnosis)}：${ensureSentence(body)}`);
+        planParagraphs.push(`· ${stripTail(x.diagnosis)}：${ensureSentence(body)}`);
       });
     } else {
-      lines.push('· （待补充：按诊断逐条列出拟完善检查与治疗措施）');
+      planParagraphs.push('· （待补充：按诊断逐条列出拟完善检查与治疗措施）');
     }
     const individual = stripTail(p.individual);
-    if (individual) lines.push(`个体化：${ensureSentence(individual)}`);
+    if (individual) planParagraphs.push(`个体化：${ensureSentence(individual)}`);
+    add('五、诊疗计划（P）', planParagraphs);
 
-    return lines.join('\n') + '\n';
+    return { prefix, sections };
+  }
+
+  function buildFirstCourseRecord(r, opts = {}) {
+    const parts = firstCourseDocumentParts(r, opts);
+    if (IR_API && IR_API.documentFromSections) {
+      return IR_API.documentFromSections('firstCourse', '首次病程录', parts.sections, [], parts.prefix).text;
+    }
+    return [parts.prefix].concat(parts.sections.map(item =>
+      [item.heading].concat(item.paragraphs).join('\n'))).join('\n') + '\n';
+
   }
 
   /* ===================================================================
@@ -2271,13 +2413,13 @@ const GENERATOR = (() => {
     return seg.length ? joinSentences(seg) : '';
   }
 
-  function buildDischargeRecord(r) {
+  function dischargeDocumentParts(r) {
     const rec = r || {};
     const b = rec.basic || {};
     const d = rec.discharge || {};
     const advice = d.advice || {};
-    const lines = [];
-    lines.push('【出院记录】');
+    const sections = [];
+    const add = (title, paragraphs) => sections.push({ title, heading: title, paragraphs });
 
     /* ---------- 一般情况 ---------- */
     const general = [];
@@ -2290,43 +2432,46 @@ const GENERATOR = (() => {
     if (disDate) general.push(`出院日期：${disDate}`);
     const days = hospitalDays(b.admitDate, d.dischargeDate);
     if (days) general.push(`住院天数：${days}天`);
-    lines.push('一、一般情况');
-    lines.push(general.length ? joinSentences([general.join('，')]) : '（待补充姓名、性别、年龄、入院及出院日期）');
+    add('一、一般情况', [general.length ? joinSentences([general.join('，')]) : '（待补充姓名、性别、年龄、入院及出院日期）']);
 
     /* ---------- 入院情况 ---------- */
-    lines.push('二、入院情况');
     const admit = stripTail(d.admitCondition) || draftAdmitCondition(rec);
-    lines.push(admit ? ensureSentence(admit) : '（待补充：入院时主要症状、体征与入院诊断）');
+    add('二、入院情况', [admit ? ensureSentence(admit) : '（待补充：入院时主要症状、体征与入院诊断）']);
 
     /* ---------- 诊疗经过 ---------- */
-    lines.push('三、诊疗经过');
-    lines.push(d.course ? ensureSentence(d.course) : '（待补充：住院期间病情变化、检查结果、治疗经过及效果）');
+    add('三、诊疗经过', [d.course ? ensureSentence(d.course) : '（待补充：住院期间病情变化、检查结果、治疗经过及效果）']);
 
     /* ---------- 出院情况 ---------- */
-    lines.push('四、出院情况');
-    lines.push(d.dischargeStatus ? ensureSentence(d.dischargeStatus) : '（待补充：出院时主要症状、体征、辅助检查结果）');
+    add('四、出院情况', [d.dischargeStatus ? ensureSentence(d.dischargeStatus) : '（待补充：出院时主要症状、体征、辅助检查结果）']);
 
     /* ---------- 出院诊断 ---------- */
-    lines.push('五、出院诊断');
     // 出院诊断必须单独确认：留空时保留待填状态，不再静默沿用初步诊断。
     // 回退看起来"省事"，实际会把尚未复核的「肺炎？」写成出院诊断，
     // 而两者含义并不相同（出院诊断是最终结论）。
     const outDx = (Array.isArray(d.diagnoses) ? d.diagnoses : [])
       .map(s => stripTail(s)).filter(Boolean);
-    lines.push(outDx.length
+    add('五、出院诊断', [outDx.length
       ? outDx.map((s, i) => `${i + 1}. ${s}`).join('\n')
-      : '（待补充：出院诊断未填写；如与初步诊断一致，请使用「从初步诊断带入」后核对确认）');
+      : '（待补充：出院诊断未填写；如与初步诊断一致，请使用「从初步诊断带入」后核对确认）']);
 
     /* ---------- 出院医嘱 ---------- */
-    lines.push('六、出院医嘱');
     const orders = [];
     if (stripTail(advice.drug)) orders.push(`药物治疗：${stripTail(advice.drug)}`);
     if (stripTail(advice.nonDrug)) orders.push(`非药物治疗：${stripTail(advice.nonDrug)}`);
     if (stripTail(advice.lifestyle)) orders.push(`生活指导：${stripTail(advice.lifestyle)}`);
     if (stripTail(advice.followUp)) orders.push(`复诊时间：${stripTail(advice.followUp)}`);
-    lines.push(orders.length ? joinSentences(orders) : '（待补充：药物、非药物治疗、生活指导、复诊时间）');
+    add('六、出院医嘱', [orders.length ? joinSentences(orders) : '（待补充：药物、非药物治疗、生活指导、复诊时间）']);
 
-    return lines.join('\n') + '\n';
+    return { prefix: '【出院记录】', sections };
+  }
+
+  function buildDischargeRecord(r) {
+    const parts = dischargeDocumentParts(r);
+    if (IR_API && IR_API.documentFromSections) {
+      return IR_API.documentFromSections('discharge', '出院记录', parts.sections, [], parts.prefix).text;
+    }
+    return [parts.prefix].concat(parts.sections.map(item =>
+      [item.heading].concat(item.paragraphs).join('\n'))).join('\n') + '\n';
   }
 
   /* ---------------------------- 组装全文 ---------------------------- */
@@ -2428,8 +2573,8 @@ const GENERATOR = (() => {
    */
   /** 病史类字段的固定遍历顺序：先出现的保留，后出现的跨字段重复去掉 */
   const HISTORY_FIELD_PATHS = [
-    'hpi.onset', 'hpi.cause', 'hpi.symptoms', 'hpi.relief', 'hpi.evolution',
-    'hpi.accompanying', 'hpi.negativeDiscriminating', 'hpi.treatment',
+    'hpi.onset', 'hpi.cause', 'hpi.symptoms', 'hpi.aggravating', 'hpi.relief', 'hpi.evolution',
+    'hpi.accompanying', 'hpi.negativeDiscriminating', 'hpi.negativePertinent', 'hpi.treatment',
     'hpi.generalCondition', 'hpi.extra',
     'pmh.health', 'pmh.diseaseDetail', 'pmh.longTermMeds', 'pmh.infection',
     'pmh.surgery', 'pmh.trauma', 'pmh.transfusion', 'pmh.poisoning',
@@ -2744,6 +2889,242 @@ const GENERATOR = (() => {
     }
   }
 
+  function rawPeFactState(record, groupKey, itemKey) {
+    const all = (record || {}).peFactStates || {};
+    const group = all[groupKey];
+    if (!group || typeof group !== 'object') return '';
+    const raw = group[itemKey];
+    const value = raw && typeof raw === 'object' ? (raw.state || raw.status) : raw;
+    return typeof SCHEMA.normalizeFactState === 'function'
+      ? SCHEMA.normalizeFactState(value)
+      : '';
+  }
+
+  const HPI_DIAGNOSTIC_FIELDS = [
+    ['onset', '起病情况'],
+    ['cause', '发病诱因'],
+    ['symptoms', '主要症状特点'],
+    ['aggravating', '加重因素'],
+    ['relief', '缓解因素'],
+    ['evolution', '病情进展'],
+    ['accompanying', '伴随症状'],
+    ['negativeDiscriminating', '阴性鉴别病史'],
+    ['negativePertinent', '阴性鉴别病史'],
+    ['treatment', '诊治经过'],
+    ['generalCondition', '一般情况'],
+    ['extra', '补充内容']
+  ];
+
+  /** 现病史的结构化质量提醒：残句、否定范围和有定位的重复片段。 */
+  function hpiQualityDiagnostics(r) {
+    const h = (r || {}).hpi || {};
+    const out = [];
+    const seen = new Map();
+    const fields = h.mode === 'manual'
+      ? [['manual', '现病史原文']]
+      : HPI_DIAGNOSTIC_FIELDS;
+    fields.forEach(([key, label]) => {
+      const value = stripTail(h[key]);
+      if (!value) return;
+      const path = `hpi.${key}`;
+      value.split(/[。；;]/).map(stripTail).filter(Boolean).forEach(unit => {
+        const bare = IR_API && IR_API.isBareTimeFragment
+          ? IR_API.isBareTimeFragment(unit)
+          : isBareOnsetPhrase(unit);
+        if (bare) {
+          out.push(diagnostic({
+            code: 'HPI_BARE_TIME_FRAGMENT',
+            severity: 'warning',
+            document: 'record',
+            path,
+            action: '补成完整病史句',
+            message: `【现病史】${label}只写了「${unit}」，没有症状或谓语；生成时会省略这个时间残句，请补成完整描述。`,
+            evidence: [{ path, text: unit }]
+          }));
+        }
+
+        const normalized = IR_API && IR_API.normalizeNegationScope
+          ? IR_API.normalizeNegationScope(unit)
+          : unit;
+        if (normalized !== stripTail(unit)) {
+          out.push(diagnostic({
+            code: 'HPI_NEGATION_SCOPE',
+            severity: 'warning',
+            document: 'record',
+            path,
+            action: '核对否定词范围',
+            message: `【现病史】${label}的「${unit}」否定作用范围有歧义；生成时按「${normalized}」拆开阴性项和阳性变化，请核对原意。`,
+            evidence: [{ path, text: unit }]
+          }));
+        }
+
+        const keyText = squash(unit);
+        if (!keyText) return;
+        const previous = seen.get(keyText);
+        if (previous && previous.path !== path) {
+          out.push(diagnostic({
+            code: 'HPI_DUPLICATE_FRAGMENT',
+            severity: 'warning',
+            document: 'record',
+            path,
+            action: '删除重复片段',
+            message: `【现病史】「${unit}」同时写在 ${previous.path} 和 ${path}，生成时只保留首次出现，请核对是否应删除一处。`,
+            evidence: [
+              { path: previous.path, text: previous.text },
+              { path, text: unit }
+            ]
+          }));
+        } else if (!previous) {
+          seen.set(keyText, { path, text: unit });
+        }
+      });
+    });
+    return out;
+  }
+
+  /** 返回 ROS/查体事实状态自身的问题；这些提醒可直接携带精确字段路径。 */
+  function factStateDiagnostics(r) {
+    const out = [];
+    const ros = r.ros || {};
+    Object.keys(ros).forEach(sysKey => {
+      const store = ros[sysKey];
+      if (!store || typeof store !== 'object') return;
+      Object.keys(store).forEach(symKey => {
+        const entry = store[symKey] || {};
+        const explicit = typeof SCHEMA.normalizeFactState === 'function'
+          ? SCHEMA.normalizeFactState(entry.status || entry.factState)
+          : '';
+        if (!explicit) return;
+        const conflict =
+          (explicit === 'not_asked' && !!(entry.checked || entry.negative)) ||
+          (explicit === 'asked_positive' && entry.negative === true) ||
+          (explicit === 'asked_negative' && entry.checked === true);
+        if (!conflict) return;
+        out.push(diagnostic({
+          code: 'ROS_FACT_STATE_CONFLICT',
+          severity: 'warning',
+          document: 'record',
+          path: `ros.${sysKey}.${symKey}.status`,
+          action: '核对症状状态',
+          message: `【系统回顾】${sysKey}.${symKey} 的事实状态与旧勾选值冲突，生成时以显式状态“${explicit}”为准。`,
+          evidence: [{ path: `ros.${sysKey}.${symKey}`, text: JSON.stringify(entry) }]
+        }));
+      });
+    });
+
+    const deptKey = (r.basic || {}).department || 'general';
+    const dept = SCHEMA.DEPARTMENTS.find(d => d.key === deptKey) || SCHEMA.DEPARTMENTS[0];
+    const groups = SCHEMA.PE_COMMON.map(group => ({ groupKey: group.key, items: group.items }));
+    (dept.special || []).forEach(spKey => {
+      const sp = SCHEMA.PE_SPECIAL[spKey];
+      if (sp) groups.push({ groupKey: 'special_' + spKey, items: sp.items });
+    });
+    groups.forEach(group => {
+      const store = (r.pe || {})[group.groupKey] || {};
+      group.items.forEach(item => {
+        const explicit = rawPeFactState(r, group.groupKey, item.key);
+        const path = `peFactStates.${group.groupKey}.${item.key}`;
+        const hasValue = typeof SCHEMA.peItemFilled === 'function'
+          ? SCHEMA.peItemFilled(store, item)
+          : !!stripTail(store[item.key]);
+        const checked = !!((r.pe || {}).checked && (r.pe.checked[group.groupKey] || {})[item.key]);
+        if (explicit === 'not_asked' && (hasValue || checked)) {
+          out.push(diagnostic({
+            code: 'PE_FACT_STATE_CONFLICT',
+            severity: 'warning',
+            document: 'record',
+            path,
+            action: '核对查体状态',
+            message: `【体格检查】${group.groupKey}.${item.key} 标为“未查”，但仍保留勾选或文字；生成时以“未查”为准，不会写入正常描述。`,
+            evidence: [{ path: `pe.${group.groupKey}.${item.key}`, text: String(store[item.key] || '') }]
+          }));
+        }
+        if (explicit === 'asked_positive' && !hasValue) {
+          out.push(diagnostic({
+            code: 'PE_POSITIVE_DETAIL_MISSING',
+            severity: 'warning',
+            document: 'record',
+            path: `pe.${group.groupKey}.${item.key}`,
+            action: '补阳性体征描述',
+            message: `【体格检查】${group.groupKey}.${item.key} 已标记为阳性，但未填写具体所见；不会用正常描述代替。`,
+            evidence: [{ path, text: explicit }]
+          }));
+        }
+      });
+    });
+    return out;
+  }
+
+  /** 同一生命体征在正文、查体、摘要和 SOAP 中的数值必须一致。 */
+  function vitalConsistencyDiagnostics(r) {
+    const vitals = vitalSnapshot((r.pe || {}).vitals || {});
+    if (!Object.keys(vitals).length) return [];
+    const soap = r.soap || {};
+    const contexts = [
+      { document: 'record', path: 'pe.vitals', label: '生命体征', text: buildVitals(r) },
+      { document: 'record', path: 'pe', label: '查体', text: buildPE(r) },
+      { document: 'record', path: 'summary', label: '摘要', text: buildSummary(r) },
+      { document: 'firstCourse', path: 'soap.o.pe', label: 'SOAP', text: stripTail((soap.o || {}).pe) || draftObjectivePE(r) }
+    ];
+    const scalarPatterns = {
+      temperature: /(?:T|体温)\s*([0-9]+(?:\.[0-9]+)?)\s*℃/g,
+      pulse: /(?:P|脉搏|心率)\s*([0-9]+(?:\.[0-9]+)?)\s*次\/分/g,
+      respiration: /(?:R|呼吸)\s*([0-9]+(?:\.[0-9]+)?)\s*次\/分/g
+    };
+    const bloodPressure = /(?:BP|血压)\s*([0-9]+(?:\.[0-9]+)?)\s*\/\s*([0-9]+(?:\.[0-9]+)?)/g;
+    const out = [];
+    contexts.forEach(context => {
+      if (!context.text) return;
+      Object.keys(scalarPatterns).forEach(key => {
+        if (!vitals[key]) return;
+        const re = scalarPatterns[key];
+        re.lastIndex = 0;
+        const match = re.exec(context.text);
+        if (!match || Number(match[1]) === vitals[key].num) return;
+        out.push(diagnostic({
+          code: 'VITAL_CROSS_DOCUMENT_MISMATCH',
+          severity: 'warning',
+          document: context.document,
+          path: context.path,
+          action: '统一生命体征数值',
+          message: `【生命体征】${context.label}写的 ${match[1]} 与生命体征录入值 ${vitals[key].raw} 不一致，同一份病历前后数值应相同。`,
+          evidence: [
+            { path: `pe.vitals.${key}`, text: vitals[key].raw },
+            { path: context.path, text: match[0] }
+          ]
+        }));
+      });
+
+      if (!vitals.sbp && !vitals.dbp) return;
+      bloodPressure.lastIndex = 0;
+      const bp = bloodPressure.exec(context.text);
+      if (!bp) return;
+      const sbpMismatch = vitals.sbp && Number(bp[1]) !== vitals.sbp.num;
+      const dbpMismatch = vitals.dbp && Number(bp[2]) !== vitals.dbp.num;
+      if (!sbpMismatch && !dbpMismatch) return;
+      const expected = `${vitals.sbp ? vitals.sbp.raw : '—'}/${vitals.dbp ? vitals.dbp.raw : '—'}`;
+      out.push(diagnostic({
+        code: 'VITAL_CROSS_DOCUMENT_MISMATCH',
+        severity: 'warning',
+        document: context.document,
+        path: context.path,
+        action: '统一生命体征数值',
+        message: `【生命体征】${context.label}写的血压 ${bp[1]}/${bp[2]} 与生命体征录入值 ${expected} 不一致，同一份病历前后数值应相同。`,
+        evidence: [
+          { path: 'pe.vitals.sbp', text: vitals.sbp ? vitals.sbp.raw : '' },
+          { path: 'pe.vitals.dbp', text: vitals.dbp ? vitals.dbp.raw : '' },
+          { path: context.path, text: bp[0] }
+        ]
+      }));
+    });
+    return out;
+  }
+
+  function qualityDiagnostics(r) {
+    return hpiQualityDiagnostics(r)
+      .concat(factStateDiagnostics(r), vitalConsistencyDiagnostics(r));
+  }
+
   /** 日期必须是 YYYY-MM-DD 且真实存在；顺序上入院不晚于记录、出院不早于入院 */
   function checkDates(r, w) {
     const b = r.basic || {};
@@ -2819,8 +3200,8 @@ const GENERATOR = (() => {
   /** 只提示可能存在的冲突，保留原始录入供人工判断时间和语境。 */
   function checkRecordConsistency(r, w) {
     const h = r.hpi || {};
-    const history = [h.onset, h.symptoms, h.relief, h.evolution, h.accompanying,
-      h.negativeDiscriminating, h.treatment, h.extra].filter(Boolean).join('。');
+    const history = [h.onset, h.symptoms, h.aggravating, h.relief, h.evolution, h.accompanying,
+      negativeHistoryText(h), h.treatment, h.extra].filter(Boolean).join('。');
     const laterality = /([左右])(?:侧)?(?:上下|上|下|四)?肢(?:体)?[^，。；;]{0,8}(?:无力|乏力|瘫痪)/g;
     const sides = new Set();
     for (const match of history.matchAll(laterality)) {
@@ -2954,8 +3335,8 @@ const GENERATOR = (() => {
     }
 
     // 7) 病史重复：同栏重复只提示；跨栏完全重复生成时已去重，也提示来源
-    const fields = ['onset', 'cause', 'symptoms', 'relief', 'evolution', 'accompanying',
-      'negativeDiscriminating', 'treatment', 'generalCondition', 'extra'];
+    const fields = ['onset', 'cause', 'symptoms', 'aggravating', 'relief', 'evolution', 'accompanying',
+      'negativeDiscriminating', 'negativePertinent', 'treatment', 'generalCondition', 'extra'];
     const seenAcross = new Map();
     fields.forEach(key => {
       const text = stripTail((r.hpi || {})[key]);
@@ -3018,7 +3399,11 @@ const GENERATOR = (() => {
     // 已经不成立——现在没勾不等于阴性，没问过就是未问，一个字都不写。
     // 同时把「标阴性」这条路径也认进来（v.negative），否则用户全点阴性还会被反复提醒。
     const rosTouched = Object.keys(r.ros || {}).some(sysKey =>
-      Object.values(r.ros[sysKey] || {}).some(v => v && (v.checked || v.negative || v.detail || v.time))
+      Object.values(r.ros[sysKey] || {}).some(v => {
+        if (!v) return false;
+        const state = typeof SCHEMA.rosFactState === 'function' ? SCHEMA.rosFactState(v) : '';
+        return state === 'asked_positive' || state === 'asked_negative' || v.checked || v.negative || v.detail || v.time;
+      })
     );
     if (!rosTouched) {
       w.push('【系统回顾】尚未问诊。未点选的症状不会写进病历；过一遍问诊后，阳性点红、明确阴性的点「阴性」。');
@@ -3058,6 +3443,7 @@ const GENERATOR = (() => {
     checkDeptAge(r, w);
     checkRecordConsistency(r, w);
     checkNewConsistency(r, w);
+    qualityDiagnostics(r).forEach(item => w.push(item.message));
     if (!((r.diagnosis || {}).confirmed || []).length) w.push('【初步诊断】未填写，可参考"诊断提示"。');
     else warnDiagnosisOrder(r, w);
     if (!stripTail(r.summary || '')) {
@@ -3140,6 +3526,11 @@ const GENERATOR = (() => {
     [/【辅助检查】.*日期.*无法识别/, 'AUX_DATE_INVALID', 'record', ['auxiliary.items'], 'warning', '改成 YYYY-MM-DD'],
     [/【辅助检查】检查日期不是按时间先后/, 'AUX_DATE_ORDER', 'record', ['auxiliary.items'], 'warning', '按时间排序'],
     [/【初步诊断】未填写/, 'DIAGNOSIS_MISSING', 'record', ['diagnosis.confirmed'], 'error', '填写初步诊断'],
+    [/【初步诊断】.*待查类诊断.*注明/, 'DIAGNOSIS_PENDING_HINT', 'record', ['diagnosis.confirmed'], 'warning', '补待查诊断的候选病名'],
+    [/【初步诊断】第 1 条是待查类诊断/, 'DIAGNOSIS_ORDER', 'record', ['diagnosis.confirmed'], 'warning', '核对诊断主次顺序'],
+    [/【初步诊断】.*英文问号/, 'DIAGNOSIS_QUESTION_MARK_EN', 'record', ['diagnosis.confirmed'], 'warning', '改用中文问号'],
+    [/【初步诊断】.*问号不在病名末尾/, 'DIAGNOSIS_QUESTION_MARK_POSITION', 'record', ['diagnosis.confirmed'], 'warning', '把问号移到病名末尾'],
+    [/【初步诊断】末尾还没有医师签名/, 'DIAGNOSIS_SIGNATURE_MISSING', 'record', ['diagnosis.signature'], 'warning', '补医师签名'],
     [/【摘要】目前为自动生成的初稿/, 'SUMMARY_DRAFT', 'record', ['summary'], 'info', '核对并定稿'],
     [/【首次病程录】鉴别诊断未填写/, 'SOAP_DIFF_MISSING', 'firstCourse', ['soap.a.diff'], 'warning', '补鉴别诊断'],
     [/【首次病程录】诊疗计划/, 'SOAP_PLAN_MISSING', 'firstCourse', ['soap.p.perDiagnosis'], 'warning', '按诊断列计划'],
@@ -3154,9 +3545,19 @@ const GENERATOR = (() => {
 
   function warningMeta(message) {
     for (const [re, code, docKind, paths, severity, action] of WARNING_RULES) {
-      if (re.test(message)) return { code, severity, ['doc' + 'ument']: docKind, paths, action };
+      if (re.test(message)) {
+        return { code, severity, path: paths[0], paths, ['doc' + 'ument']: docKind, action };
+      }
     }
-    return { code: 'GENERAL', severity: 'info', ['doc' + 'ument']: 'record', paths: [], action: '' };
+    const sectionPath = {
+      '一般项目': 'basic', '主诉': 'basic.chiefComplaint', '现病史': 'hpi', '既往史': 'pmh',
+      '系统回顾': 'ros', '个人史': 'personal', '婚姻史': 'marriage', '月经史': 'menstruation',
+      '家庭史': 'family', '体格检查': 'pe', '辅助检查': 'auxiliary', '摘要': 'summary',
+      '诊断依据': 'soap.a.basis', '初步诊断': 'diagnosis', '首次病程录': 'soap', '出院记录': 'discharge'
+    };
+    const mark = String(message || '').match(/^【([^】]+)】/);
+    const path = (mark && sectionPath[mark[1]]) || 'record';
+    return { code: 'GENERAL_QUALITY', severity: 'info', path, paths: [path], ['doc' + 'ument']: 'record', action: '' };
   }
 
   /** 文书过期属于「资料变了、文字没跟上」，不在 validate 的缺项里重复刷屏 */
@@ -3165,39 +3566,330 @@ const GENERATOR = (() => {
     if (typeof RECORD_CORE === 'undefined' || !RECORD_CORE.documentState) return out;
     const summaryState = RECORD_CORE.documentState(r, 'summary');
     if (summaryState && /(^|-)stale$/.test(summaryState.state)) {
-      out.push({
-        code: 'DOC_STALE_SUMMARY', severity: 'warning', ['doc' + 'ument']: 'record', paths: ['summary'],
+      out.push(diagnostic({
+        code: 'DOC_STALE_SUMMARY', severity: 'warning', document: 'record', path: 'summary',
         message: `【摘要】原始资料已变化（${(summaryState.changed || []).join('、') || '资料'}），当前摘要可能过期，请比较后更新。`,
-        action: '查看摘要更新'
-      });
+        action: '查看摘要更新',
+        evidence: [{ path: 'summary', text: String((r.summary || '')).trim() }]
+      }));
     }
     ['s', 'oPe', 'oAux', 'basis'].forEach(seg => {
       const st = RECORD_CORE.documentState(r, 'firstCourse', seg);
       if (st && /(^|-)stale$/.test(st.state)) {
-        out.push({
-          code: 'DOC_STALE_SOAP', severity: 'warning', ['doc' + 'ument']: 'firstCourse', paths: [`soap.${seg === 's' ? 's.summary' : seg === 'oPe' ? 'o.pe' : seg === 'oAux' ? 'o.aux' : 'a.basis'}`],
+        const path = `soap.${seg === 's' ? 's.summary' : seg === 'oPe' ? 'o.pe' : seg === 'oAux' ? 'o.aux' : 'a.basis'}`;
+        out.push(diagnostic({
+          code: 'DOC_STALE_SOAP', severity: 'warning', document: 'firstCourse', path,
           message: `【首次病程录】${seg === 's' ? 'S 段' : seg === 'oPe' ? 'O 段体检' : seg === 'oAux' ? 'O 段辅助检查' : '诊断依据'}的原始资料已变化，当前文字可能过期。`,
-          action: '查看该段更新'
-        });
+          action: '查看该段更新',
+          evidence: [{ path, text: String(RECORD_CORE.getPath ? RECORD_CORE.getPath(r, path) || '' : '') }]
+        }));
       }
     });
     const dState = RECORD_CORE.documentState(r, 'discharge', 'admitCondition');
     if (dState && /(^|-)stale$/.test(dState.state)) {
-      out.push({
-        code: 'DOC_STALE_DISCHARGE', severity: 'warning', ['doc' + 'ument']: 'discharge', paths: ['discharge.admitCondition'],
+      out.push(diagnostic({
+        code: 'DOC_STALE_DISCHARGE', severity: 'warning', document: 'discharge', path: 'discharge.admitCondition',
         message: '【出院记录】入院情况是按较早的资料生成的，之后资料有变化；当前文字保留不改，请核对是否需要更新。',
-        action: '核对入院情况'
-      });
+        action: '核对入院情况',
+        evidence: [{ path: 'discharge.admitCondition', text: String((r.discharge || {}).admitCondition || '').trim() }]
+      }));
     }
     return out;
   }
 
   function validateStructured(r) {
-    const list = validate(r).map(message => {
+    const quality = qualityDiagnostics(r);
+    const qualityMessages = new Set(quality.map(item => item.message));
+    const list = validate(r).filter(message => !qualityMessages.has(message)).map(message => {
       const meta = warningMeta(message);
-      return { ...meta, message };
+      return diagnostic({ ...meta, message });
     });
-    return list.concat(staleDocumentWarnings(r));
+    return list.concat(staleDocumentWarnings(r), quality).map(item => diagnostic(item));
+  }
+
+  /* ------------------------ 文档中间表示（IR） ------------------------ */
+
+  const IR_FACT_SOURCE = {
+    manual: 'manual', template: 'template', legacy: 'legacy', generated: 'generated', ai: 'unknown'
+  };
+
+  function irFactSource(r, path, fallback) {
+    if (typeof RECORD_CORE === 'undefined' || !RECORD_CORE.fieldState) return fallback || 'manual';
+    const state = RECORD_CORE.fieldState(r, path) || {};
+    return IR_FACT_SOURCE[state.source] || fallback || 'manual';
+  }
+
+  function irFact(r, path, text, polarity, state, fallbackSource) {
+    const value = stripTail(text);
+    if (!value) return null;
+    const source = irFactSource(r, path, fallbackSource);
+    const fieldState = typeof RECORD_CORE !== 'undefined' && RECORD_CORE.fieldState
+      ? RECORD_CORE.fieldState(r, path) : {};
+    const fact = IR_API && IR_API.createFact ? IR_API.createFact({
+      path,
+      text: value,
+      polarity: polarity || (/^(?:无|未见|未出现|未诉|否认|没有|不伴|无明显|未曾|未)/.test(value) ? 'negative' : 'positive'),
+      state: state || 'manual_text',
+      source,
+      reviewed: !!(fieldState && fieldState.reviewed),
+      evidence: [{ path, text: value, source }]
+    }) : null;
+    return fact;
+  }
+
+  function addFacts(list, r, entries) {
+    entries.forEach(entry => {
+      if (!entry) return;
+      const fact = irFact(r, entry.path, entry.text, entry.polarity, entry.state, entry.source);
+      if (fact) list.push(fact);
+    });
+    return list;
+  }
+
+  function hpiFacts(r) {
+    const h = r.hpi || {};
+    const fields = [
+      ['onset', 'onset'], ['cause', 'cause'], ['symptoms', 'symptoms'],
+      ['aggravating', 'aggravating'], ['relief', 'relief'], ['evolution', 'evolution'],
+      ['accompanying', 'accompanying'], ['negativeDiscriminating', 'negativeDiscriminating'],
+      ['negativePertinent', 'negativePertinent'], ['treatment', 'treatment'],
+      ['generalCondition', 'generalCondition'], ['extra', 'extra']
+    ];
+    const facts = [];
+    fields.forEach(([key]) => addFacts(facts, r, [{ path: `hpi.${key}`, text: h[key] }]));
+    return facts;
+  }
+
+  function rosFacts(r) {
+    const facts = [];
+    collectROS(r).forEach(system => {
+      system.entries.forEach(entry => {
+        if (!entry.text || entry.state === 'not_asked') return;
+        facts.push(irFact(r, entry.path, entry.text,
+          entry.state === 'asked_negative' ? 'negative' : 'positive', entry.state));
+      });
+    });
+    return facts.filter(Boolean);
+  }
+
+  function peFacts(r) {
+    const facts = [];
+    const deptKey = (r.basic || {}).department || 'general';
+    const dept = SCHEMA.DEPARTMENTS.find(d => d.key === deptKey) || SCHEMA.DEPARTMENTS[0];
+    const groups = SCHEMA.PE_COMMON.map(group => ({ key: group.key, items: group.items }));
+    (dept.special || []).forEach(spKey => {
+      const sp = SCHEMA.PE_SPECIAL[spKey];
+      if (sp) groups.push({ key: 'special_' + spKey, items: sp.items });
+    });
+    groups.forEach(group => {
+      const store = (r.pe || {})[group.key] || {};
+      group.items.forEach(item => {
+        const state = typeof SCHEMA.peFactState === 'function'
+          ? SCHEMA.peFactState(r, group.key, item.key, item) : 'not_asked';
+        if (state === 'not_asked') return;
+        const own = stripTail(store[item.key]);
+        const normal = stripTail(SCHEMA.peNormalText(item));
+        const value = own || (state === 'asked_negative' ? normal : '');
+        if (!value) return;
+        facts.push(irFact(r, `pe.${group.key}.${item.key}`, value,
+          state === 'asked_negative' ? 'negative' : 'positive', state,
+          own ? 'manual' : 'generated'));
+      });
+    });
+    const vitals = vitalSnapshot((r.pe || {}).vitals || {});
+    Object.keys(vitals).forEach(key => {
+      const labels = {
+        temperature: ['T ', '℃'], pulse: ['P ', '次/分'], respiration: ['R ', '次/分'],
+        sbp: ['BP ', '/mmHg'], dbp: ['BP /', 'mmHg'], height: ['身高 ', 'cm'],
+        weight: ['体重 ', 'kg'], headCirc: ['头围 ', 'cm'], chestCirc: ['胸围 ', 'cm'], abdCirc: ['腹围 ', 'cm']
+      };
+      const pair = labels[key];
+      if (!pair) return;
+      const text = key === 'dbp' ? `BP ${vitals.sbp ? vitals.sbp.raw : PH}/${vitals.dbp.raw}mmHg`
+        : `${pair[0]}${vitals[key].raw}${pair[1]}`;
+      facts.push(irFact(r, `pe.vitals.${key}`, text, 'positive', 'manual_text'));
+    });
+    return facts.filter(Boolean);
+  }
+
+  function basicFacts(r) {
+    const b = r.basic || {};
+    const fields = ['name', 'gender', 'age', 'birthDate', 'department', 'bedNo', 'recordNo',
+      'nationality', 'nativePlace', 'birthPlace', 'marital', 'occupation', 'workUnit',
+      'address', 'phone', 'admitDate', 'admitTime', 'recordDate', 'recordTime', 'reliability', 'informant'];
+    const facts = [];
+    fields.forEach(key => addFacts(facts, r, [{ path: `basic.${key}`, text: b[key] }]));
+    addFacts(facts, r, [
+      { path: 'basic.chiefComplaint', text: b.chiefComplaint },
+      { path: 'basic.chiefComplaintDuration', text: stripTail(b.chiefComplaintDuration) ? buildChiefComplaint(r) : '' }
+    ]);
+    return facts;
+  }
+
+  function pmhFacts(r) {
+    const p = r.pmh || {};
+    const fields = ['health', 'diseaseDetail', 'diseaseOther', 'longTermMeds', 'infection', 'surgery',
+      'trauma', 'transfusion', 'poisoning', 'vaccine', 'allergy', 'allergenOther',
+      'allergyReaction', 'relatedHistory', 'otherTreatDiseases', 'special'];
+    const facts = [];
+    fields.forEach(key => addFacts(facts, r, [{ path: `pmh.${key}`, text: p[key] }]));
+    Object.keys(p.diseaseChecks || {}).forEach(key => {
+      if (p.diseaseChecks[key]) addFacts(facts, r, [{ path: `pmh.diseaseChecks.${key}`, text: key }]);
+    });
+    Object.keys(p.allergenChecks || {}).forEach(key => {
+      if (p.allergenChecks[key]) addFacts(facts, r, [{ path: `pmh.allergenChecks.${key}`, text: key, polarity: 'positive' }]);
+    });
+    return facts;
+  }
+
+  function personalFacts(r) {
+    const p = r.personal || {};
+    const fields = ['maternal', 'birth', 'feeding', 'growth', 'residence', 'travel', 'smoking',
+      'smokingAmount', 'drinking', 'drinkingAmount', 'drugs', 'environment', 'habits',
+      'sexualHistory', 'occupationEnv', 'premorbidPersonality', 'stressEvent'];
+    const facts = [];
+    fields.forEach(key => addFacts(facts, r, [{ path: `personal.${key}`, text: p[key] }]));
+    return facts;
+  }
+
+  function familyFacts(r) {
+    const f = r.family || {};
+    const fields = ['other', 'deceased', 'threeGeneration', 'similarDisease', 'infectionHistory'];
+    const facts = [];
+    fields.forEach(key => addFacts(facts, r, [{ path: `family.${key}`, text: f[key] }]));
+    Object.keys(f.diseaseChecks || {}).forEach(key => {
+      if (f.diseaseChecks[key]) addFacts(facts, r, [{ path: `family.diseaseChecks.${key}`, text: key, polarity: 'positive' }]);
+    });
+    return facts;
+  }
+
+  function auxiliaryFacts(r) {
+    const facts = [];
+    auxItems(r).forEach((item, index) => {
+      const text = [stripTail(item.name), stripTail(item.result)].filter(Boolean).join('：');
+      if (!text) return;
+      addFacts(facts, r, [
+        { path: `auxiliary.items.${index}.name`, text: item.name },
+        { path: `auxiliary.items.${index}.result`, text: item.result, polarity: 'positive' }
+      ]);
+    });
+    return facts;
+  }
+
+  function recordSectionFacts(r, title) {
+    if (title === '一般项目') return basicFacts(r);
+    if (title === '主诉') return basicFacts(r).filter(item => item.path.startsWith('basic.chiefComplaint'));
+    if (title === '现病史') return hpiFacts(r);
+    if (title === '既往史') return pmhFacts(r);
+    if (title === '系统回顾') return rosFacts(r);
+    if (title === '个人史') return personalFacts(r);
+    if (title === '婚姻史') return addFacts([], r, [
+      { path: 'marriage.status', text: r.marriage && r.marriage.status },
+      { path: 'marriage.age', text: r.marriage && r.marriage.age },
+      { path: 'marriage.spouseHealth', text: r.marriage && r.marriage.spouseHealth },
+      { path: 'marriage.sexLife', text: r.marriage && r.marriage.sexLife },
+      { path: 'marriage.relation', text: r.marriage && r.marriage.relation }
+    ]);
+    if (title === '月经与生育史') {
+      const facts = [];
+      ['applicable', 'age', 'cycle', 'duration', 'quantity', 'color', 'clot', 'leukorrhea', 'lmp', 'menopauseAge', 'dysmenorrhea', 'extra']
+        .forEach(key => addFacts(facts, r, [{ path: `menstruation.${key}`, text: (r.menstruation || {})[key] }]));
+      ['applicable', 'fullTerm', 'premature', 'abortion', 'alive', 'gravida', 'para', 'details', 'lastBirth', 'contraception']
+        .forEach(key => addFacts(facts, r, [{ path: `childbirth.${key}`, text: (r.childbirth || {})[key] }]));
+      return facts;
+    }
+    if (title === '家庭史') return familyFacts(r);
+    if (title === '体格检查') return peFacts(r);
+    if (title === '辅助检查') return auxiliaryFacts(r);
+    if (title === '摘要') {
+      const manual = stripTail(r.summary);
+      return addFacts([], r, [{ path: 'summary', text: manual || buildSummary(r), source: manual ? 'manual' : 'generated' }]);
+    }
+    if (title === '诊断依据') {
+      const facts = [];
+      const a = (r.soap || {}).a || {};
+      addFacts(facts, r, [{ path: 'soap.a.basis', text: a.basis }]);
+      (Array.isArray(a.basisDetail) ? a.basisDetail : []).forEach((row, index) => {
+        ['diagnosis', 'history', 'pe', 'aux'].forEach(key => addFacts(facts, r, [
+          { path: `soap.a.basisDetail.${index}.${key}`, text: row && row[key] }
+        ]));
+      });
+      return facts;
+    }
+    if (title === '初步诊断') {
+      const facts = [];
+      (diagnosisList(r) || []).forEach((name, index) => addFacts(facts, r, [
+        { path: `diagnosis.confirmed.${index}`, text: name, polarity: 'positive' }
+      ]));
+      if (stripTail((r.diagnosis || {}).signature)) {
+        addFacts(facts, r, [{ path: 'diagnosis.signature', text: r.diagnosis.signature }]);
+      }
+      return facts;
+    }
+    return [];
+  }
+
+  function firstCourseSectionFacts(r, title) {
+    const soap = r.soap || {};
+    const facts = [];
+    if (/病历特点/.test(title)) {
+      facts.push(...hpiFacts(r));
+    } else if (/客观记录/.test(title)) {
+      facts.push(...peFacts(r));
+      facts.push(...auxiliaryFacts(r));
+    } else if (/诊断依据/.test(title)) {
+      addFacts(facts, r, [{ path: 'soap.a.basis', text: (soap.a || {}).basis }]);
+      (Array.isArray((soap.a || {}).basisDetail) ? soap.a.basisDetail : []).forEach((row, index) => {
+        ['diagnosis', 'history', 'pe', 'aux'].forEach(key => addFacts(facts, r, [
+          { path: `soap.a.basisDetail.${index}.${key}`, text: row && row[key] }
+        ]));
+      });
+    } else if (/鉴别诊断/.test(title)) {
+      (Array.isArray((soap.a || {}).diff) ? soap.a.diff : []).forEach((row, index) => {
+        ['diagnosis', 'why', 'against', 'points'].forEach(key => addFacts(facts, r, [
+          { path: `soap.a.diff.${index}.${key}`, text: row && row[key] }
+        ]));
+      });
+      addFacts(facts, r, [{ path: 'soap.a.diffNote', text: (soap.a || {}).diffNote }]);
+    } else if (/诊疗计划/.test(title)) {
+      addFacts(facts, r, [{ path: 'soap.p.principle', text: (soap.p || {}).principle }]);
+      (Array.isArray((soap.p || {}).perDiagnosis) ? soap.p.perDiagnosis : []).forEach((row, index) => {
+        ['diagnosis', 'exam', 'treatment'].forEach(key => addFacts(facts, r, [
+          { path: `soap.p.perDiagnosis.${index}.${key}`, text: row && row[key] }
+        ]));
+      });
+      addFacts(facts, r, [{ path: 'soap.p.individual', text: (soap.p || {}).individual }]);
+    }
+    return facts;
+  }
+
+  function dischargeSectionFacts(r, title) {
+    const d = r.discharge || {};
+    const advice = d.advice || {};
+    if (/一般情况/.test(title)) return basicFacts(r).filter(item => /basic\.(name|gender|age|recordNo|admitDate)$/.test(item.path));
+    if (/入院情况/.test(title)) return addFacts([], r, [{ path: 'discharge.admitCondition', text: d.admitCondition }]);
+    if (/诊疗经过/.test(title)) return addFacts([], r, [{ path: 'discharge.course', text: d.course }]);
+    if (/出院情况/.test(title)) return addFacts([], r, [{ path: 'discharge.dischargeStatus', text: d.dischargeStatus }]);
+    if (/出院诊断/.test(title)) {
+      const facts = [];
+      (Array.isArray(d.diagnoses) ? d.diagnoses : []).forEach((name, index) => addFacts(facts, r, [
+        { path: `discharge.diagnoses.${index}`, text: name, polarity: 'positive' }
+      ]));
+      return facts;
+    }
+    if (/出院医嘱/.test(title)) return addFacts([], r, [
+      { path: 'discharge.advice.drug', text: advice.drug },
+      { path: 'discharge.advice.nonDrug', text: advice.nonDrug },
+      { path: 'discharge.advice.lifestyle', text: advice.lifestyle },
+      { path: 'discharge.advice.followUp', text: advice.followUp }
+    ]);
+    return [];
+  }
+
+  function relevantWarnings(r, kind, title) {
+    const all = validateStructured(r).filter(item => !item.document || item.document === kind);
+    if (!title) return all;
+    return all.filter(item => item.message.indexOf(`【${title}】`) === 0);
   }
 
   /**
@@ -3206,31 +3898,40 @@ const GENERATOR = (() => {
    * additive API for web, Android, and future HTML renderers.
    */
   function buildDocumentIR(r, kind = 'record', opts = {}) {
-    let text;
-    let title;
-    let warnings = [];
-    if (kind === 'firstCourse') {
-      text = buildFirstCourseRecord(r, opts);
-      title = '首次病程录';
-    } else if (kind === 'discharge') {
-      text = buildDischargeRecord(r, opts);
-      title = '出院记录';
-    } else {
-      const generated = generate(r, opts);
-      text = generated.text;
-      warnings = generated.warnings || [];
-      title = '大病历';
+    if (!IR_API) throw new Error('document IR module is unavailable');
+    const warnings = relevantWarnings(r, kind);
+    if (kind === 'firstCourse' || kind === 'discharge') {
+      const parts = kind === 'firstCourse'
+        ? firstCourseDocumentParts(r, opts)
+        : dischargeDocumentParts(r);
+      const factFn = kind === 'firstCourse' ? firstCourseSectionFacts : dischargeSectionFacts;
+      const sections = parts.sections.map((item) => ({
+        title: item.title,
+        heading: item.heading,
+        paragraphs: item.paragraphs,
+        facts: factFn(r, item.title),
+        warnings: relevantWarnings(r, kind, item.title)
+      }));
+      return IR_API.documentFromSections(
+        kind,
+        kind === 'firstCourse' ? '首次病程录' : '出院记录',
+        sections,
+        warnings,
+        parts.prefix
+      );
     }
-    const source = String(text || '');
-    const chunks = source.split(/\n(?=【[^】]+】)/).filter(Boolean);
-    const sections = chunks.map((chunk) => {
-      const m = chunk.match(/^【([^】]+)】\n?([\s\S]*)$/);
-      const sectionTitle = m ? m[1] : title;
-      const body = (m ? m[2] : chunk).trim();
-      return { title: sectionTitle, paragraphs: body ? body.split(/\n+/).map(x => x.trim()).filter(Boolean) : [], facts: [], warnings: [] };
+
+    const generated = generate(r, opts);
+    const sections = SECTION_ORDER.map((sectionTitle) => {
+      const body = generated.sections[sectionTitle] || PH;
+      return {
+        title: sectionTitle,
+        paragraphs: [body],
+        facts: recordSectionFacts(r, sectionTitle),
+        warnings: relevantWarnings(r, kind, sectionTitle)
+      };
     });
-    if (!sections.length) sections.push({ title, paragraphs: source.trim() ? [source.trim()] : [], facts: [], warnings: [] });
-    return { kind, title, sections, text: source, warnings };
+    return IR_API.documentFromSections(kind, '大病历', sections, warnings);
   }
 
   function buildDocumentBundle(r, opts = {}) {
@@ -3243,11 +3944,14 @@ const GENERATOR = (() => {
 
   return {
     generate, generatePlain, validate, validateStructured, buildDocumentIR, buildDocumentBundle,
+    qualityDiagnostics, vitalConsistencyDiagnostics, factStateDiagnostics, hpiQualityDiagnostics,
     buildBasicInfo, buildChiefComplaint, buildHPI, buildROS, buildPMH,
     buildPersonal, buildMarriage, buildMenstruation, buildChildbirth,
     buildMarriageChildbirth,
     buildFamily, buildPE, buildVitals, buildAuxiliary, buildSummary,
-    buildDiagnosis, draftSummary, draftHPI, abnormalPE, peValue, collectROS, firstCourseSelfCheck, diffRelatedToDiagnosis, buildMarriageHistory, buildMenstruationChildbirth, buildBasisSection, renderPEGroup,
+    buildDiagnosis, draftSummary, draftHPI, abnormalPE, peValue, collectROS,
+    firstCourseSelfCheck, firstCourseSelfCheckDiagnostics, diffRelatedToDiagnosis,
+    buildMarriageHistory, buildMenstruationChildbirth, buildBasisSection, renderPEGroup,
     // 查体项聚合（父项 / 子项去重）
     peEntries, buildFocusPE,
     // 首次病程录（SOAP）与出院记录

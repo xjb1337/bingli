@@ -17,6 +17,7 @@ import { createLocalStorageRepository } from '../repository';
 import fixtureV1 from '../../../../tests/fixtures/legacy/v1-record.json?raw';
 import fixtureV2 from '../../../../tests/fixtures/legacy/v2-record.json?raw';
 import fixtureV3 from '../../../../tests/fixtures/legacy/v3-record.json?raw';
+import appStyles from '../styles.css?raw';
 import goldenV1Record from '../../../../tests/golden/v1-respiratory/dabingli.txt?raw';
 import goldenV1FirstCourse from '../../../../tests/golden/v1-respiratory/first-course.txt?raw';
 import goldenV1Discharge from '../../../../tests/golden/v1-respiratory/discharge.txt?raw';
@@ -115,9 +116,28 @@ describe('step navigation and keyboard flow', () => {
     await user.type(screen.getByLabelText('发病诱因'), '受凉后');
     expect(details).toHaveAttribute('open');
 
+    await user.type(screen.getByLabelText('加重因素'), '夜间加重');
+    await user.type(screen.getByLabelText('缓解因素'), '饮水后缓解');
+    await user.type(screen.getByLabelText('有鉴别诊断意义的阴性病史'), '无胸痛、咯血');
+    expect(screen.getByLabelText('加重因素')).toHaveValue('夜间加重');
+    expect(screen.getByLabelText('缓解因素')).toHaveValue('饮水后缓解');
+    expect(screen.getByLabelText('有鉴别诊断意义的阴性病史')).toHaveValue('无胸痛、咯血');
+
     await user.click(screen.getByLabelText('发病诱因'));
     await user.keyboard('{Escape}');
     expect(details).not.toHaveAttribute('open');
+  });
+
+  it('shows template source and the unverified hospital-template status', async () => {
+    const user = userEvent.setup();
+    await renderApp();
+
+    await user.selectOptions(screen.getByLabelText('科室'), 'respiratory');
+    const summary = await screen.findByText('用模板开始（可选，6 个病种）');
+    await user.click(summary);
+
+    expect(screen.getAllByText('待医院模板核对').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/来源：教学模板/).length).toBeGreaterThan(0);
   });
 
   it('jumps directly to any step from the directory', async () => {
@@ -185,6 +205,43 @@ describe('step navigation and keyboard flow', () => {
     await waitFor(() => {
       expect(document.activeElement).toHaveAttribute('data-field-path', 'basic.name');
     });
+  });
+
+  it('shows depth diagnostic code, path, evidence and locates the exact field', async () => {
+    const user = userEvent.setup();
+    const record = SCHEMA.emptyRecord();
+    record.basic.name = '质控定位测试患者';
+    record.hpi.symptoms = '咳嗽3天';
+    const repository = createTestRepository();
+    await seedLibrary(repository, record);
+    await renderApp(repository);
+
+    const directory = screen.getByRole('complementary', { name: '步骤目录' });
+    await user.click(within(directory).getByRole('button', { name: /摘要与诊断/ }));
+    await user.click(screen.getByText('问诊补充提示'));
+
+    const code = await screen.findByText('DEPTH_SYMPTOM_QUANTIFICATION');
+    const row = code.closest('li');
+    if (!row) throw new Error('missing depth diagnostic row');
+    expect(within(row).getByText('hpi.symptoms')).toBeInTheDocument();
+    expect(row).toHaveTextContent('证据：hpi.symptoms');
+
+    await user.click(within(row).getByRole('button', { name: '定位' }));
+    expect(screen.getByRole('heading', { name: '现病史' })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(document.activeElement).toHaveAttribute('data-field-path', 'hpi.symptoms');
+    });
+  });
+});
+
+describe('PR5 quality UI contracts', () => {
+  it('keeps inputs and diagnostic actions touch-sized and wrap-safe at narrow widths', () => {
+    expect(appStyles).toMatch(/input,\s*select,\s*textarea\s*\{[^}]*min-height:\s*44px/s);
+    expect(appStyles).toMatch(/\.compact-button\s*\{[^}]*min-height:\s*44px/s);
+    expect(appStyles).toMatch(/\.form-grid\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s);
+    expect(appStyles).toMatch(/\.depth-meta\s*\{[^}]*flex-wrap:\s*wrap[^}]*overflow-wrap:\s*anywhere/s);
+    expect(appStyles).toMatch(/\.depth-meta code\s*\{[^}]*max-width:\s*100%[^}]*word-break:\s*break-word/s);
+    expect(appStyles).toMatch(/\.template-verification\s*\{[^}]*overflow-wrap:\s*anywhere/s);
   });
 });
 
