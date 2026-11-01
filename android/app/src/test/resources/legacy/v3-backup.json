@@ -1,0 +1,300 @@
+{
+  "app": "dabingli",
+  "schemaVersion": 3,
+  "exportedAt": "2026-05-20T06:00:00.000Z",
+  "includesDraft": true,
+  "records": [
+    {
+      "id": "legacy-v3-psychiatry",
+      "updatedAt": "2026-05-20T05:00:00.000Z",
+      "data": {
+        "schemaVersion": 3,
+        "id": "legacy-v3-psychiatry",
+        "updatedAt": "2026-05-20T05:00:00.000Z",
+        "meta": {
+          "createdAt": "2026-05-18T01:00:00.000Z",
+          "updatedAt": "2026-05-20T05:00:00.000Z",
+          "revision": 2,
+          "fieldStates": {},
+          "conflicts": {},
+          "migratedFrom": null,
+          "migrationNotes": [],
+          "lastTemplateFill": null
+        },
+        "documentMeta": {
+          "summary": {
+            "origin": "",
+            "inputFingerprint": "",
+            "inputGroups": {},
+            "generatedTextHash": "",
+            "reviewedFingerprint": "",
+            "updatedAt": ""
+          },
+          "firstCourse": {
+            "s": {
+              "origin": "",
+              "inputFingerprint": "",
+              "inputGroups": {},
+              "generatedTextHash": "",
+              "reviewedFingerprint": "",
+              "updatedAt": ""
+            },
+            "oPe": {
+              "origin": "",
+              "inputFingerprint": "",
+              "inputGroups": {},
+              "generatedTextHash": "",
+              "reviewedFingerprint": "",
+              "updatedAt": ""
+            },
+            "oAux": {
+              "origin": "",
+              "inputFingerprint": "",
+              "inputGroups": {},
+              "generatedTextHash": "",
+              "reviewedFingerprint": "",
+              "updatedAt": ""
+            },
+            "basis": {
+              "origin": "",
+              "inputFingerprint": "",
+              "inputGroups": {},
+              "generatedTextHash": "",
+              "reviewedFingerprint": "",
+              "updatedAt": ""
+            }
+          },
+          "discharge": {
+            "admitCondition": {
+              "origin": "",
+              "inputFingerprint": "",
+              "inputGroups": {},
+              "generatedTextHash": "",
+              "reviewedFingerprint": "",
+              "updatedAt": ""
+            },
+            "diagnoses": {
+              "origin": "",
+              "inputFingerprint": "",
+              "textHash": "",
+              "confirmed": false,
+              "confirmedFingerprint": ""
+            }
+          }
+        },
+        "basic": {
+          "department": "psychiatry",
+          "name": "测试患者己",
+          "gender": "女",
+          "age": "24",
+          "marital": "未婚",
+          "birthPlace": "合成市",
+          "nationality": "合成族",
+          "occupation": "学生",
+          "recordNo": "ZY-0005",
+          "bedNo": "06",
+          "admitDate": "2026-05-20",
+          "recordDate": "2026-05-20",
+          "reliability": "部分可靠",
+          "informant": "母亲",
+          "chiefComplaint": "情绪低落伴失眠",
+          "chiefComplaintDuration": "2",
+          "chiefComplaintDurationUnit": "月"
+        },
+        "hpi": {
+          "onset": "2个月前无明显诱因出现情绪低落",
+          "cause": "无明显诱因",
+          "symptoms": "兴趣减退，精力下降，夜间入睡困难",
+          "relief": "与朋友交流后短暂缓解",
+          "evolution": "症状逐渐加重，影响学习",
+          "accompanying": "伴食欲下降及体重减轻",
+          "negativeDiscriminating": "无兴奋话多、无冲动毁物行为",
+          "treatment": "未接受系统治疗",
+          "generalCondition": "精神差，食欲下降，睡眠差，大小便正常"
+        },
+        "ros": {
+          "neuro": {
+            "moodLow": {
+              "checked": true,
+              "detail": "持续2个月"
+            },
+            "insomnia": {
+              "checked": true,
+              "detail": "入睡困难"
+            }
+          }
+        },
+        "pmh": {
+          "health": "平素健康",
+          "diseaseChecks": {},
+          "diseaseOther": "",
+          "diseaseDetail": "",
+          "longTermMeds": "无",
+          "infection": "否认传染病史",
+          "surgery": "否认手术史",
+          "trauma": "否认外伤史",
+          "transfusion": "否认输血史",
+          "poisoning": "否认中毒史",
+          "vaccine": "预防接种史不详",
+          "allergy": "无",
+          "allergenChecks": {},
+          "allergenOther": "",
+          "allergenReactionChecks": {},
+          "allergyReaction": "",
+          "relatedHistory": "既往无类似发作",
+          "otherTreatDiseases": "",
+          "special": "无"
+        },
+        "personal": {
+          "maternal": "",
+          "birth": "足月顺产",
+          "feeding": "",
+          "growth": "生长发育正常",
+          "residence": "长期居住于合成市",
+          "travel": "无疫区旅居史",
+          "smoking": "无",
+          "smokingAmount": "",
+          "drinking": "无",
+          "drinkingAmount": "",
+          "drugs": "无",
+          "environment": "无特殊毒物接触史",
+          "habits": "近期作息不规律",
+          "sexualHistory": "否认不洁性接触史",
+          "occupationEnv": "学生",
+          "premorbidPersonality": "性格内向，较少表达情绪",
+          "stressEvent": "2个月前学习压力增大"
+        },
+        "marriage": {
+          "status": "未婚",
+          "age": "",
+          "spouseHealth": "",
+          "sexLife": "",
+          "relation": ""
+        },
+        "menstruation": {
+          "applicable": true,
+          "age": "13",
+          "cycle": "28～30天",
+          "duration": "5天",
+          "quantity": "中等",
+          "color": "暗红",
+          "clot": "无",
+          "leukorrhea": "无异常",
+          "lmp": "2026-05-01",
+          "menopauseAge": "",
+          "dysmenorrhea": "无"
+        },
+        "childbirth": {
+          "applicable": false
+        },
+        "family": {
+          "diseaseChecks": {},
+          "other": "否认家族精神疾病史",
+          "deceased": "",
+          "threeGeneration": "父母均健在",
+          "similarDisease": "否认家族类似疾病史",
+          "infectionHistory": "否认家族传染病史"
+        },
+        "pe": {
+          "checked": {
+            "general": {
+              "development": true,
+              "nutrition": true,
+              "conscious": true,
+              "posture": true,
+              "cooperation": true
+            },
+            "special_psychiatry": {
+              "psyAppearance": true,
+              "psyMood": true
+            }
+          },
+          "vitals": {
+            "temperature": "36.5",
+            "pulse": "76",
+            "respiration": "18",
+            "sbp": "112",
+            "dbp": "70",
+            "height": "165",
+            "weight": "50"
+          },
+          "general": {
+            "development": "正常",
+            "nutrition": "偏瘦",
+            "conscious": "清楚",
+            "posture": "自主体位",
+            "face": "表情略显愁苦",
+            "cooperation": "合作"
+          },
+          "special_psychiatry": {
+            "psyAppearance": "衣着整洁，接触被动",
+            "psyMood": "情绪低落，兴趣减退"
+          }
+        },
+        "auxiliary": {
+          "items": [
+            {
+              "name": "甲状腺功能",
+              "result": "未见明显异常",
+              "date": "2026-05-20",
+              "hospital": "合成医院",
+              "no": "LAB-0005"
+            }
+          ]
+        },
+        "summary": "",
+        "diagnosis": {
+          "confirmed": [
+            "抑郁障碍待查"
+          ],
+          "newLine": "",
+          "signature": ""
+        },
+        "soap": {
+          "recordTime": "",
+          "s": {
+            "summary": "",
+            "consistency": ""
+          },
+          "o": {
+            "pe": "",
+            "aux": ""
+          },
+          "a": {
+            "basis": "",
+            "basisDetail": [],
+            "ranking": "",
+            "diff": [],
+            "diffNote": ""
+          },
+          "p": {
+            "principle": "",
+            "perDiagnosis": [],
+            "individual": ""
+          }
+        },
+        "discharge": {
+          "dischargeDate": "",
+          "admitCondition": "",
+          "course": "",
+          "dischargeStatus": "",
+          "diagnoses": [],
+          "diagnosesConfirmed": false,
+          "advice": {
+            "drug": "",
+            "nonDrug": "",
+            "lifestyle": "",
+            "followUp": ""
+          }
+        },
+        "focusPE": {
+          "keys": [],
+          "note": ""
+        },
+        "suggestions": {
+          "accepted": []
+        }
+      }
+    }
+  ]
+}

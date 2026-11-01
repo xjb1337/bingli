@@ -1,0 +1,120 @@
+{
+  "schemaVersion": 1,
+  "id": "legacy-v1-respiratory",
+  "updatedAt": "2026-03-01T03:00:00.000Z",
+  "meta": {
+    "createdAt": "2026-02-28T01:00:00.000Z",
+    "updatedAt": "2026-03-01T03:00:00.000Z"
+  },
+  "basic": {
+    "department": "呼吸内科",
+    "name": "测试患者甲",
+    "gender": "男",
+    "age": 45,
+    "marital": "已婚",
+    "birthPlace": "合成市",
+    "occupation": "测试职业",
+    "admitDate": "2026-03-01",
+    "recordDate": "2026-03-01",
+    "reliability": "可靠",
+    "informant": "本人",
+    "chiefComplaint": "咳嗽、咳痰",
+    "chiefComplaintDuration": 3,
+    "chiefComplaintDurationUnit": "天",
+    "legacyBasicTag": "旧版基本字段-合成"
+  },
+  "hpi": {
+    "onset": "3天前受凉后出现咳嗽",
+    "cause": "受凉后",
+    "symptoms": "咳白色黏液痰，量少",
+    "evolution": "症状逐渐加重",
+    "accompanying": "伴咽痛",
+    "treatment": "未予特殊治疗",
+    "generalCondition": "发病以来精神、食欲尚可，睡眠一般，大小便正常"
+  },
+  "ros": {
+    "resp": {
+      "cough": {
+        "checked": true,
+        "detail": "干咳"
+      }
+    }
+  },
+  "pmh": {
+    "health": "平素体健",
+    "diseaseChecks": {},
+    "infection": "否认肝炎、结核等传染病史",
+    "surgery": "否认手术史",
+    "trauma": "否认外伤史",
+    "transfusion": "否认输血史",
+    "vaccine": "预防接种史不详",
+    "allergy": "无",
+    "special": "无"
+  },
+  "personal": {
+    "birth": "出生于合成市",
+    "residence": "长期居住于合成市",
+    "travel": "无疫区旅居史",
+    "smoking": "无",
+    "drinking": "无",
+    "drugs": "无",
+    "environment": "无特殊毒物接触史"
+  },
+  "marriage": {
+    "status": "已婚",
+    "age": "25",
+    "spouseHealth": "健康"
+  },
+  "menstruation": {
+    "applicable": false
+  },
+  "childbirth": {
+    "applicable": false
+  },
+  "family": {
+    "diseaseChecks": {},
+    "other": "否认家族遗传病史",
+    "deceased": ""
+  },
+  "pe": {
+    "vitals": {
+      "temperature": "37.8",
+      "pulse": "88",
+      "respiration": "20",
+      "sbp": "126",
+      "dbp": "78"
+    },
+    "general": {
+      "development": "正常",
+      "nutrition": "良好",
+      "conscious": "清楚",
+      "posture": "自主体位",
+      "cooperation": "合作"
+    },
+    "chest": {
+      "lungAuscultation": "双肺呼吸音粗，未闻及干湿性啰音"
+    }
+  },
+  "auxiliary": {
+    "items": [
+      {
+        "name": "胸部X线",
+        "result": "双肺纹理增粗"
+      }
+    ]
+  },
+  "summary": "测试患者甲，男，45岁，因咳嗽、咳痰3天就诊。",
+  "diagnosis": {
+    "confirmed": [
+      "急性支气管炎"
+    ],
+    "newLine": ""
+  },
+  "suggestions": {
+    "accepted": []
+  },
+  "legacyUnknown": {
+    "source": "旧版HIS",
+    "syntheticTag": "测试患者甲-未知字段"
+  }
+}

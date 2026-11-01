@@ -1,0 +1,111 @@
+{
+  "app": "dabingli",
+  "schemaVersion": 1,
+  "exportedAt": "2026-03-02T04:00:00.000Z",
+  "records": [
+    {
+      "id": "legacy-v1-pediatrics",
+      "updatedAt": "2026-03-02T03:00:00.000Z",
+      "data": {
+        "schemaVersion": 1,
+        "meta": {
+          "createdAt": "2026-03-01T01:00:00.000Z",
+          "updatedAt": "2026-03-02T03:00:00.000Z"
+        },
+        "basic": {
+          "department": "儿科",
+          "name": "测试患者乙",
+          "gender": "女",
+          "age": "5岁",
+          "marital": "未婚",
+          "birthPlace": "合成县",
+          "admitDate": "2026-03-02",
+          "recordDate": "2026-03-02",
+          "reliability": "可靠",
+          "informant": "患儿母亲",
+          "chiefComplaint": "发热伴咽痛",
+          "chiefComplaintDuration": "2",
+          "chiefComplaintDurationUnit": "天"
+        },
+        "hpi": {
+          "onset": "2天前出现发热",
+          "cause": "受凉后",
+          "symptoms": "体温最高38.6℃，伴咽痛",
+          "treatment": "家中口服退热药后体温可暂降",
+          "generalCondition": "精神稍差，食欲下降，大小便正常"
+        },
+        "ros": {},
+        "pmh": {
+          "health": "平素健康",
+          "diseaseChecks": {},
+          "infection": "否认传染病史",
+          "surgery": "否认手术史",
+          "trauma": "否认外伤史",
+          "transfusion": "否认输血史",
+          "vaccine": "按计划接种",
+          "allergy": "无",
+          "special": "无"
+        },
+        "personal": {
+          "birth": "第1胎足月顺产",
+          "feeding": "母乳喂养",
+          "growth": "生长发育与同龄儿相仿",
+          "residence": "长期居住于合成县",
+          "smoking": "无",
+          "drinking": "无"
+        },
+        "marriage": {
+          "status": "未婚"
+        },
+        "menstruation": {
+          "applicable": false
+        },
+        "childbirth": {
+          "applicable": false
+        },
+        "family": {
+          "diseaseChecks": {},
+          "other": "否认家族遗传病史"
+        },
+        "pe": {
+          "vitals": {
+            "temperature": "38.6",
+            "pulse": "112",
+            "respiration": "24"
+          },
+          "general": {
+            "development": "正常",
+            "nutrition": "中等",
+            "conscious": "清楚",
+            "cooperation": "欠合作"
+          },
+          "head": {
+            "ent": "咽充血，双侧扁桃体Ⅱ度肿大"
+          }
+        },
+        "auxiliary": {
+          "items": [
+            {
+              "name": "血常规",
+              "result": "白细胞计数升高，中性粒细胞比例升高"
+            }
+          ]
+        },
+        "summary": "测试患者乙，女，5岁，因发热伴咽痛2天就诊。",
+        "diagnosis": {
+          "confirmed": [
+            "急性化脓性扁桃体炎"
+          ],
+          "newLine": ""
+        },
+        "suggestions": {
+          "accepted": []
+        },
+        "legacyUnknown": {
+          "source": "旧版HIS",
+          "syntheticTag": "测试患者乙-备份未知字段"
+        }
+      }
+    }
+  ]
+}

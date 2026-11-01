@@ -8,6 +8,8 @@ import android.webkit.*;
 import android.view.*;
 import android.widget.*;
 import java.io.*;
+import java.time.Clock;
+import com.xjb.bingli.migration.LegacyMigrator;
 
 public class MainActivity extends Activity {
     private static final String ORIGIN = "https://appassets.androidplatform.net";
@@ -17,12 +19,15 @@ public class MainActivity extends Activity {
     private UpdateManager updater;
     private AIKeyStore aiKeys;
     private DeepSeekClient aiClient;
+    private LegacyMigrator migrator;
+    private LinearLayout root;
+    private WebView migrationWeb;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         aiKeys = new AIKeyStore(this);
         aiClient = new DeepSeekClient();
-        LinearLayout root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL);
+        root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL);
         root.setOnApplyWindowInsetsListener((v, insets) -> {
             v.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
                 insets.getSystemWindowInsetRight(), insets.getSystemWindowInsetBottom());
@@ -37,15 +42,11 @@ public class MainActivity extends Activity {
         web.addJavascriptInterface(new Bridge(), "BingliAndroid");
         web.setWebViewClient(new WebViewClient() {
             @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
-                Uri uri = request.getUrl();
-                if (ORIGIN.equals(uri.getScheme() + "://" + uri.getAuthority()) && "/assets/index.html".equals(uri.getPath())) {
-                    try { return new WebResourceResponse("text/html", "UTF-8", getAssets().open("index.html")); }
-                    catch (IOException e) { return new WebResourceResponse("text/plain", "UTF-8", 500, "Error", null, new ByteArrayInputStream(new byte[0])); }
-                }
-                return new WebResourceResponse("text/plain", "UTF-8", 403, "Blocked", null, new ByteArrayInputStream(new byte[0]));
+                return assetResponse(request.getUrl());
             }
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-                return !request.getUrl().toString().equals(ORIGIN + "/assets/index.html");
+                String url = request.getUrl().toString();
+                return !(url.equals(ORIGIN + "/assets/index.html") || url.equals(ORIGIN + "/assets/legacy-migrate.html") || url.equals(ORIGIN + "/assets/migrate-recovery.html"));
             }
         });
         web.setWebChromeClient(new WebChromeClient() {
@@ -67,8 +68,77 @@ public class MainActivity extends Activity {
             }
         });
         updater = new UpdateManager(this);
+        migrator = new LegacyMigrator(new File(getFilesDir(), "legacy-migration"), Clock.systemUTC(), BuildConfig.VERSION_NAME);
+        if (migrator.getState() == LegacyMigrator.State.NONE) beginLegacyMigration();
+        else if (migrator.getState() == LegacyMigrator.State.FAILED) loadRecovery();
+        else loadMain();
+    }
+
+    private WebResourceResponse assetResponse(Uri uri) {
+        if (!ORIGIN.equals(uri.getScheme() + "://" + uri.getAuthority()))
+            return blockedResponse();
+        String path = uri.getPath();
+        String asset = "/assets/index.html".equals(path) ? "index.html" :
+            "/assets/legacy-migrate.html".equals(path) ? "legacy-migrate.html" :
+            "/assets/migrate-recovery.html".equals(path) ? "migrate-recovery.html" : null;
+        if (asset == null) return blockedResponse();
+        try { return new WebResourceResponse("text/html", "UTF-8", getAssets().open(asset)); }
+        catch (IOException e) { return new WebResourceResponse("text/plain", "UTF-8", 500, "Error", null, new ByteArrayInputStream(new byte[0])); }
+    }
+    private WebResourceResponse blockedResponse() {
+        return new WebResourceResponse("text/plain", "UTF-8", 403, "Blocked", null, new ByteArrayInputStream(new byte[0]));
+    }
+    private void loadMain() {
+        web.setVisibility(View.VISIBLE);
         web.loadUrl(ORIGIN + "/assets/index.html");
+        if (migrator.getState() == LegacyMigrator.State.IMPORTED) migrator.confirmLaunch(true);
         updater.check(false);
+    }
+    private void loadRecovery() {
+        web.setVisibility(View.VISIBLE);
+        web.loadUrl(ORIGIN + "/assets/migrate-recovery.html");
+    }
+    private void beginLegacyMigration() {
+        if (migrationWeb != null) return;
+        migrationWeb = new WebView(this);
+        migrationWeb.setAlpha(0f);
+        migrationWeb.getSettings().setJavaScriptEnabled(true);
+        migrationWeb.getSettings().setDomStorageEnabled(true);
+        migrationWeb.getSettings().setAllowFileAccess(false);
+        migrationWeb.getSettings().setAllowContentAccess(true);
+        migrationWeb.setWebViewClient(new WebViewClient() {
+            @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) { return assetResponse(request.getUrl()); }
+            @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) { return !request.getUrl().toString().equals(ORIGIN + "/assets/legacy-migrate.html"); }
+        });
+        migrationWeb.addJavascriptInterface(new MigrationBridge(), "BingliLegacyMigrate");
+        root.addView(migrationWeb, new LinearLayout.LayoutParams(1, 1));
+        migrationWeb.loadUrl(ORIGIN + "/assets/legacy-migrate.html");
+    }
+    private void finishLegacyMigration(boolean failed) {
+        if (migrationWeb != null) {
+            root.removeView(migrationWeb);
+            migrationWeb.removeJavascriptInterface("BingliLegacyMigrate");
+            migrationWeb.destroy(); migrationWeb = null;
+        }
+        if (!failed) {
+            LegacyMigrator.Manifest manifest = migrator.manifest();
+            if (manifest != null && !manifest.getCorruptKeys().isEmpty()) {
+                migrator.markFailed("迁移数据包含损坏 JSON：" + String.join(",", manifest.getCorruptKeys()));
+                failed = true;
+            }
+        }
+        if (failed) loadRecovery(); else loadMain();
+    }
+    public final class MigrationBridge {
+        @JavascriptInterface public void submit(String json) {
+            runOnUiThread(() -> {
+                try { migrator.stage(json); finishLegacyMigration(false); }
+                catch (Exception e) { migrator.markFailed(e.getMessage() == null ? "迁移失败" : e.getMessage()); finishLegacyMigration(true); }
+            });
+        }
+        @JavascriptInterface public void fail(String reason) {
+            runOnUiThread(() -> { migrator.markFailed(reason == null ? "迁移页失败" : reason); finishLegacyMigration(true); });
+        }
     }
 
     public final class Bridge {
@@ -89,6 +159,25 @@ public class MainActivity extends Activity {
             }
         }
         @JavascriptInterface public String versionName() { return BuildConfig.VERSION_NAME; }
+        @JavascriptInterface public String stagedLegacy() {
+            try {
+                org.json.JSONObject out = new org.json.JSONObject();
+                String raw = migrator.exportRaw();
+                out.put("payload", new org.json.JSONObject(raw));
+                out.put("rawPayload", raw);
+                LegacyMigrator.Manifest manifest = migrator.manifest();
+                if (manifest != null) out.put("manifest", manifest.toJson());
+                return out.toString();
+            } catch (Exception e) { return ""; }
+        }
+        @JavascriptInterface public void exportLegacyRaw() {
+            export(migrator.exportRaw(), "dabingli-legacy-migration.json", "application/json");
+        }
+        @JavascriptInterface public void retryLegacy() { runOnUiThread(MainActivity.this::beginLegacyMigration); }
+        @JavascriptInterface public void legacyImportSucceeded() {
+            try { migrator.markImported(); } catch (Exception e) { migrator.markFailed(e.getMessage() == null ? "导入失败" : e.getMessage()); }
+        }
+        @JavascriptInterface public void legacyLaunchSucceeded() { migrator.confirmLaunch(true); }
         @JavascriptInterface public void checkUpdates() { runOnUiThread(() -> updater.check(true)); }
         @JavascriptInterface public void copy(String text) {
             runOnUiThread(() -> ((ClipboardManager)getSystemService(CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("病历", text)));
@@ -138,6 +227,7 @@ public class MainActivity extends Activity {
         if (aiClient != null) aiClient.close();
         if (updater != null) updater.close();
         if (chooser != null) { chooser.onReceiveValue(null); chooser = null; }
+        if (migrationWeb != null) { migrationWeb.destroy(); migrationWeb = null; }
         if (web != null) {
             if (web.getParent() instanceof android.view.ViewGroup) {
                 ((android.view.ViewGroup) web.getParent()).removeView(web);
