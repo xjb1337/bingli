@@ -79,6 +79,9 @@ export interface CoreApi {
   getPath(value: unknown, path: string): unknown;
   setPath<T>(value: T, path: string, next: unknown): T;
   cloneValue<T>(value: T): T;
+  stableStringify(value: unknown): string;
+  fingerprint(value: unknown): string;
+  hashText(text: string): string;
   fieldState(record: DabingliRecord, path: string): {
     source: string;
     reviewed: boolean;
@@ -98,6 +101,7 @@ export interface CoreApi {
   markFieldManual(record: DabingliRecord, path: string, value?: unknown): DabingliRecord;
   markFieldReviewed(record: DabingliRecord, path: string, source?: string): DabingliRecord;
   fieldReviewValid(record: DabingliRecord, path: string, value?: unknown): boolean;
+  markDocumentGenerated(record: DabingliRecord, kind: string): DabingliRecord;
   normalizeRecord(raw: unknown, emptyRecord: () => DabingliRecord, validDeptKeys: readonly string[]): DabingliRecord;
   normalizeSettings(raw: unknown): AppSettings;
   lookLikeRecord(value: unknown): boolean;

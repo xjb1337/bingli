@@ -1,0 +1,118 @@
+import type { DabingliRecord } from '@dabingli/domain';
+
+export type AiOperation = 'organize' | 'polish' | 'check' | 'summary';
+
+export type AiErrorCode =
+  | 'missing_key'
+  | 'unauthorized'
+  | 'forbidden'
+  | 'insufficient_balance'
+  | 'rate_limited'
+  | 'server_unavailable'
+  | 'http_error'
+  | 'timeout'
+  | 'network'
+  | 'cancelled'
+  | 'invalid_response'
+  | 'truncated_response'
+  | 'request_failed'
+  | 'record_stale'
+  | 'invalid_input'
+  | 'out_of_scope'
+  | 'invalid_selection'
+  | 'existing_content';
+
+export interface AiSource {
+  source: string;
+  label: string;
+  text: string;
+}
+
+export interface AiRequestBaseline {
+  recordId: string;
+  revision: number;
+  contentHash: string;
+}
+
+export interface AiRequest {
+  operation: AiOperation;
+  target: string;
+  baseline: AiRequestBaseline;
+  sources: AiSource[];
+  allowed: string[];
+  system: string;
+  user: string;
+}
+
+export interface AiEvidence {
+  source: string;
+  quote: string;
+}
+
+export interface AiSuggestion {
+  path: string;
+  text: string;
+  evidence: AiEvidence[];
+}
+
+export interface AiIssue {
+  path: string;
+  message: string;
+}
+
+export interface AiValidatedContent {
+  suggestions: AiSuggestion[];
+  issues: AiIssue[];
+  questions: string[];
+}
+
+export interface AiResult extends AiValidatedContent {
+  baseline: AiRequestBaseline;
+  model: string;
+  createdAt: string;
+  reviewed: false;
+}
+
+export interface AiAdoptedField {
+  path: string;
+  label: string;
+  text: string;
+  reviewed: boolean;
+  model: string;
+  adoptedAt: string;
+  baseline: AiRequestBaseline | null;
+  evidence: AiEvidence[];
+  evidencePaths: string[];
+}
+
+export interface AiTransportRequest {
+  system: string;
+  user: string;
+}
+
+export interface AiTransportResponse {
+  content: unknown;
+  model: string;
+}
+
+export interface AiTransportStatus {
+  configured: boolean;
+  model: string;
+}
+
+export interface AiRequestOptions {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
+
+export interface AiTransport {
+  readonly kind: 'web' | 'android';
+  status(): Promise<AiTransportStatus>;
+  request(request: AiTransportRequest, options?: AiRequestOptions): Promise<AiTransportResponse>;
+}
+
+export type AiTransportFactory = (apiKey: string) => AiTransport;
+
+export interface AiRecordContext {
+  record: DabingliRecord;
+}

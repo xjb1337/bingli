@@ -1,0 +1,18 @@
+{
+  "name": "@dabingli/ai",
+  "version": "3.0.0.8",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@dabingli/domain": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.9"
+  }
+}

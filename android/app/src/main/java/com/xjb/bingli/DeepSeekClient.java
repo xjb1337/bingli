@@ -18,13 +18,26 @@ final class DeepSeekClient {
     private volatile HttpURLConnection connection;
     private volatile String active = "";
     private volatile boolean closed;
+    private static final class RequestFailure extends Exception {
+        final String code;
+        RequestFailure(String code, String message) { super(message); this.code = code; }
+    }
     static boolean validModel(String model) { return "deepseek-flash".equals(model) || "deepseek-v4-pro".equals(model); }
+    static String httpErrorCode(int code) {
+        if (code == 401) return "unauthorized";
+        if (code == 403) return "forbidden";
+        if (code == 402) return "insufficient_balance";
+        if (code == 429) return "rate_limited";
+        if (code >= 500) return "server_unavailable";
+        return "http_error";
+    }
     static String httpError(int code) {
-        if (code == 401 || code == 403) return "API Key 无效或无权限，请检查 AI 设置";
+        if (code == 401) return "API Key 无效，请检查 AI 设置后重试";
+        if (code == 403) return "API Key 无权限，请检查 AI 设置后重试";
         if (code == 402) return "DeepSeek 余额不足，请充值后重试";
         if (code == 429) return "请求过于频繁，请稍后重试";
         if (code >= 500) return "DeepSeek 服务暂不可用，请稍后重试";
-        return "DeepSeek 请求失败（HTTP " + code + "），请检查模型设置";
+        return "DeepSeek 请求失败（HTTP " + code + "），请检查模型设置后重试";
     }
     synchronized boolean request(String id, String key, String model, String system, String user, Callback callback) {
         if (closed || !active.isEmpty()) return false;
@@ -33,7 +46,7 @@ final class DeepSeekClient {
         executor.submit(() -> {
             JSONObject result = new JSONObject(); HttpURLConnection conn = null;
             try {
-                if (key.isEmpty()) throw new IllegalStateException("请先在 AI 设置中保存 API Key");
+                if (key.isEmpty()) throw new RequestFailure("missing_key", "请先在 AI 设置中保存 API Key");
                 if (!id.equals(active)) return;
                 conn = connections.open();
                 connection = conn;
@@ -50,23 +63,31 @@ final class DeepSeekClient {
                 byte[] bytes = body.toString().getBytes(StandardCharsets.UTF_8); conn.setFixedLengthStreamingMode(bytes.length);
                 try (OutputStream output = conn.getOutputStream()) { output.write(bytes); }
                 int code = conn.getResponseCode();
-                if (code != 200) throw new IllegalStateException(httpError(code));
+                if (code != 200) throw new RequestFailure(httpErrorCode(code), httpError(code));
                 String response;
                 try (InputStream input = conn.getInputStream()) { response = readLimited(input); }
                 JSONObject parsed = new JSONObject(response);
                 JSONArray choices = parsed.getJSONArray("choices");
-                if (choices.length() != 1) throw new IllegalStateException("AI 返回候选数量异常，请重试");
+                if (choices.length() != 1) throw new RequestFailure("invalid_response", "AI 返回候选数量异常，请重试");
                 JSONObject choice = choices.getJSONObject(0);
-                if (!"stop".equals(choice.optString("finish_reason"))) throw new IllegalStateException("AI 结果未完整结束，未写入病历；请缩短资料后重试");
+                if (!"stop".equals(choice.optString("finish_reason"))) throw new RequestFailure("truncated_response", "AI 结果未完整结束，未写入病历；请缩短资料后重试");
                 String content = choice.getJSONObject("message").optString("content", "").trim();
-                if (content.isEmpty()) throw new IllegalStateException("AI 返回了空白内容，请重试");
+                if (content.isEmpty()) throw new RequestFailure("invalid_response", "AI 返回了空白内容，请重试");
                 // Only final JSON content enters the UI, never reasoning or raw HTTP errors.
                 result.put("ok", true).put("content", new JSONObject(content)).put("model", model);
             } catch (Exception e) {
-                String message = e instanceof SocketTimeoutException ? "请求超时，原病历未改动；可缩短资料后重试" :
-                    e instanceof IllegalStateException ? e.getMessage() :
-                    e instanceof org.json.JSONException ? "AI 返回格式异常，未写入病历；请重试" : "网络连接失败，请检查联网后重试";
-                try { result.put("ok", false).put("error", message); } catch (Exception ignored) { }
+                String code;
+                String message;
+                if (e instanceof SocketTimeoutException) {
+                    code = "timeout"; message = "请求超时，原病历未改动；可缩短资料后重试";
+                } else if (e instanceof RequestFailure) {
+                    code = ((RequestFailure) e).code; message = e.getMessage();
+                } else if (e instanceof org.json.JSONException) {
+                    code = "invalid_response"; message = "AI 返回格式异常，未写入病历；请重试";
+                } else {
+                    code = "network"; message = "网络连接失败，请检查联网后重试";
+                }
+                try { result.put("ok", false).put("error", message).put("code", code); } catch (Exception ignored) { }
             } finally {
                 if (conn != null) conn.disconnect();
                 synchronized (this) {

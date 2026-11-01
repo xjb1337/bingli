@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { GENERATOR, type AppSettings, type DabingliRecord, type DocumentWarning } from '@dabingli/domain';
 import { Collapsible } from '../components/Collapsible';
 import { Card, StepShell } from '../components/StepShell';
+import { AiAssistantPanel, type AiAssistantPanelProps } from '../components/AiAssistantPanel';
 import type { StepComponentProps } from '../editor-types';
 import { STEP_DESCRIPTIONS } from '../steps';
 
@@ -131,7 +132,12 @@ export function OutputStep({
   errors: _errors,
   onJump,
   settings,
-}: StepComponentProps & { settings: AppSettings; errors: Readonly<Record<string, string>> }) {
+  ai,
+}: StepComponentProps & {
+  settings: AppSettings;
+  errors: Readonly<Record<string, string>>;
+  ai: AiAssistantPanelProps;
+}) {
   const warnings = GENERATOR.validateStructured(record);
   return (
     <StepShell
@@ -164,6 +170,7 @@ export function OutputStep({
           <p className="muted">当前规则未发现提醒，仍须人工核对。</p>
         )}
       </Card>
+      <AiAssistantPanel {...ai} />
       <GeneratedDocuments
         record={record}
         rosMode={settings.rosMode}

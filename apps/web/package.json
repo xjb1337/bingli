@@ -9,6 +9,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@dabingli/ai": "*",
     "@dabingli/domain": "*",
     "@dabingli/storage": "*",
     "react": "^18.3.1",
