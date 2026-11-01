@@ -9,7 +9,13 @@
 APK 由 GitHub Actions 自动构建并使用固定证书签名；密钥保存在仓库 Secrets，不进入公开源码。发布与雷电验收记录见 [Android 交付记录](docs/ANDROID_RELEASE_2026-10-30.md)。
 
 
-本项目仅交付 Android App，支持离线填写、保存、导入导出和病历生成。界面资源随 APK 内置；填写、保存和常规文书生成可离线使用。可选的 DeepSeek 辅助功能需要联网和你自己的 API Key。
+项目同时交付 Android App 和 GitHub Pages 网页版，均支持离线填写、保存、导入导出和病历生成。网页版首次加载后由 Service Worker 缓存全部资源；可选的 DeepSeek 辅助功能需要联网和你自己的 API Key。
+
+## Web 离线网页
+
+浏览器版地址为 <https://xjb1337.github.io/bingli/>，基路径为 `/bingli/`。发布不随推送自动进行，需手动运行
+**Actions → Deploy GitHub Pages → Run workflow**。离线缓存、更新、Android 边界及 JSON 迁移说明见
+[GitHub Pages 离线网页](docs/PAGES.md)。
 
 ## DeepSeek 辅助填写
 
@@ -27,7 +33,7 @@ API Key 由 Android Keystore 加密保存，不返回网页脚本，不包含在
 
 1. 下载上方的最新 APK 并安装，支持 Android 8.0 及以上。
 2. 后续点击 App 底部“检查更新”，按系统提示覆盖安装；请勿卸载后重装，以免清除本机数据。
-3. 旧网页版已停止交付。旧浏览器数据与 App 不互通；若仍能打开旧页面或缓存，请先导出 JSON，再在 App 中导入。停用网站不会自动清除原浏览器存储。
+3. 网页版与 App 是本机独立存储，不会自动同步；请先在网页导出 JSON，再在 App 中导入。卸载 App、切换浏览器或清理站点数据前也应先导出备份。
 
 ---
 
@@ -436,7 +442,7 @@ $env:JAVA_HOME='C:\Program Files\Java\jdk-17'
 
 `node build.js` 直接生成 `android/app/src/main/assets/index.html`，供 APK 打包及内部界面回归使用；它是忽略提交的 App 资源，不再生成根目录网页或独立 HTML 分发文件。`src/` 是 App 内置界面与病历逻辑，仍需保留。
 
-推送 main 后由 `.github/workflows/release.yml` 检查、签名并发布 APK 和 `update.json`。继续使用原包名、签名和存储源，覆盖升级保留 App 本机病历。无需 GitHub Pages 或 Service Worker。
+推送 main 后由 `.github/workflows/release.yml` 检查、签名并发布 APK 和 `update.json`。继续使用原包名、签名和存储源，覆盖升级保留 App 本机病历。网页版由独立的 `.github/workflows/pages.yml` 手动发布，不使用 APK 的 Service Worker 或存储。
 
 ### 生成的病历结构
 

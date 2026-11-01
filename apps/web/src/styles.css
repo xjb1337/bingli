@@ -1278,6 +1278,10 @@ textarea[aria-invalid="true"] {
   overflow-wrap: anywhere;
 }
 
+.ai-send-preview h4 {
+  margin: 4px 0 0;
+}
+
 .ai-json-preview {
   max-width: 100%;
   max-height: 18rem;

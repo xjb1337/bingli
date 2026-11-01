@@ -23,7 +23,7 @@ jobs:
       - run: npm run test:domain
       - run: npm run test:storage
       - run: npm run test:web
-      - run: npm run build -w apps/web
+      - run: npx vite build apps/web
       - run: node build.js
       - run: node --test tests/*.test.cjs
 

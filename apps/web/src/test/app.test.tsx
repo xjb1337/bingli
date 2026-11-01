@@ -149,7 +149,7 @@ describe('step navigation and keyboard flow', () => {
     expect(screen.getByRole('heading', { name: '体格检查' })).toBeInTheDocument();
 
     await user.click(within(directory).getByRole('button', { name: /生成病历/ }));
-    expect(screen.getByRole('heading', { name: '生成病历' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '生成病历' })).toBeInTheDocument();
     expect(screen.getByTestId('doc-record')).toBeInTheDocument();
   });
 
@@ -170,7 +170,7 @@ describe('step navigation and keyboard flow', () => {
 
     const directory = screen.getByRole('complementary', { name: '步骤目录' });
     await user.click(within(directory).getByRole('button', { name: /生成病历/ }));
-    await user.click(screen.getByRole('button', { name: '定位第一处提醒' }));
+    await user.click(await screen.findByRole('button', { name: '定位第一处提醒' }));
 
     expect(screen.getByRole('heading', { name: '基本情况' })).toBeInTheDocument();
     await waitFor(() => {
@@ -355,6 +355,7 @@ describe('golden document rendering', () => {
       await renderApp(repository);
       const directory = screen.getByRole('complementary', { name: '步骤目录' });
       await user.click(within(directory).getByRole('button', { name: /生成病历/ }));
+      await screen.findByRole('heading', { name: '生成病历' });
 
       expect(documentText('record')).toBe(testCase.expected.record);
       expect(documentText('firstCourse')).toBe(testCase.expected.firstCourse);

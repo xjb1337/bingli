@@ -74,7 +74,7 @@ async function saveFromHeader(user: ReturnType<typeof userEvent.setup>): Promise
 
 async function enterKey(user: ReturnType<typeof userEvent.setup>, key: string): Promise<void> {
   await user.click(screen.getByRole('button', { name: '设置' }));
-  const input = screen.getByLabelText('DeepSeek API Key');
+  const input = await screen.findByLabelText('DeepSeek API Key');
   await user.clear(input);
   await user.type(input, key);
   expect(screen.getByText(/仅保存在本页内存，刷新后需重新输入/)).toBeInTheDocument();
@@ -138,6 +138,40 @@ describe('DeepSeek web security boundary', () => {
     expect(appStyles).toMatch(/\.ai-compare\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s);
   });
 
+  it('shows readable send entries by default and keeps raw JSON collapsed', async () => {
+    const transport = fakeTransportFactory(async () => ({ content: aiContent(), model: 'deepseek-flash' }));
+    const user = userEvent.setup();
+    const record = SCHEMA.emptyRecord();
+    record.id = 'preview_entries_case';
+
+    render(
+      <AiAssistantPanel
+        record={record}
+        configured
+        securityContext="web"
+        model="deepseek-flash"
+        createTransport={() => transport.factory('sk-test-preview')}
+        onOpenSettings={() => undefined}
+        onAdoptRecord={async () => true}
+        onConfirmField={async () => true}
+      />,
+    );
+
+    await user.type(screen.getByLabelText(/问诊笔记/), '患者诉咳嗽3天');
+    await user.click(screen.getByRole('button', { name: '预览发送内容' }));
+
+    const sendPreview = screen.getByRole('region', { name: '实际发送内容（1 条资料）' });
+    expect(within(sendPreview).getByText('本次笔记')).toBeInTheDocument();
+    expect(within(sendPreview).getByText('note')).toBeInTheDocument();
+    expect(within(sendPreview).getByText('患者诉咳嗽3天')).toBeInTheDocument();
+    expect(screen.queryByText('查看实际发送内容（1 条资料）')).not.toBeInTheDocument();
+
+    const rawDetails = screen.getByText('查看原始 JSON（高级）').closest('details');
+    expect(rawDetails).not.toBeNull();
+    expect(rawDetails).not.toHaveAttribute('open');
+    expect(within(rawDetails as HTMLElement).getByText(/"sources"/)).toBeInTheDocument();
+  });
+
   it('clears the entered key when the page component is remounted', async () => {
     const transport = fakeTransportFactory(async () => ({ content: aiContent(), model: 'deepseek-flash' }));
     const repository = createTestRepository();
@@ -148,7 +182,7 @@ describe('DeepSeek web security boundary', () => {
 
     await renderApp(transport.factory, repository);
     await user.click(screen.getByRole('button', { name: '设置' }));
-    expect(screen.getByLabelText('DeepSeek API Key')).toHaveValue('');
+    expect(await screen.findByLabelText('DeepSeek API Key')).toHaveValue('');
   });
 
   it('keeps the memory-only key out of storage, exports, URLs, cookies and logs', async () => {
@@ -187,7 +221,7 @@ describe('DeepSeek web security boundary', () => {
     expect(transport.factorySpy).toHaveBeenCalledWith(key);
 
     await user.click(screen.getByRole('button', { name: '设置' }));
-    await user.click(screen.getByRole('button', { name: '查看导出 JSON' }));
+    await user.click(await screen.findByRole('button', { name: '查看导出 JSON' }));
     expect((screen.getByLabelText(/当前导出快照/) as HTMLTextAreaElement).value).not.toContain(key);
   });
 
