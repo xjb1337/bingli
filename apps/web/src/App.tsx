@@ -10,12 +10,17 @@ import {
 import {
   GENERATOR,
   RECORD_CORE,
-  SCHEMA,
   type AppSettings,
   type DabingliRecord,
   type DocumentWarning,
   type RecordListItem,
 } from '@dabingli/domain';
+import {
+  createIndexedDbRepository,
+  serializeBackup,
+  type RecoveryCopySummary,
+  type RecordRepository,
+} from '@dabingli/storage';
 import { Notice } from './components/Notice';
 import { StepDirectory } from './components/StepDirectory';
 import { AuxStep } from './pages/AuxStep';
@@ -31,10 +36,6 @@ import { RecordsPage } from './pages/RecordsPage';
 import { RosStep } from './pages/RosStep';
 import { SettingsPage } from './pages/SettingsPage';
 import { SummaryStep } from './pages/SummaryStep';
-import {
-  createLocalStorageRepository,
-  type RecordRepository,
-} from './repository';
 import { STEPS, stepIndexOf, stepKeyForPath, type StepKey } from './steps';
 import type { StepComponentProps } from './editor-types';
 
@@ -44,6 +45,7 @@ interface InitialState {
   record: DabingliRecord;
   list: RecordListItem[];
   settings: AppSettings;
+  recovery: RecoveryCopySummary | null;
   stepIndex: number;
   alert: string;
 }
@@ -54,10 +56,13 @@ interface ToastState {
   key: number;
 }
 
-function initialize(repository: RecordRepository): InitialState {
-  const current = repository.loadCurrent();
-  const listResult = repository.loadList();
-  const settingsResult = repository.loadSettings();
+async function initialize(repository: RecordRepository): Promise<InitialState> {
+  const [current, listResult, settingsResult, recoveries] = await Promise.all([
+    repository.loadCurrent(),
+    repository.loadList(),
+    repository.loadSettings(),
+    repository.listRecoveryCopies().catch(() => []),
+  ]);
   const settings = settingsResult.settings;
   const alerts: string[] = [];
 
@@ -75,6 +80,7 @@ function initialize(repository: RecordRepository): InitialState {
     record,
     list: listResult.list,
     settings,
+    recovery: recoveries[0] ?? null,
     stepIndex: stepIndexOf(settings.lastStep),
     alert: alerts.join(' '),
   };
@@ -125,12 +131,76 @@ function downloadJson(text: string, filename: string) {
 
 export function App({ repository }: { repository?: RecordRepository }) {
   const repositoryRef = useRef<RecordRepository | null>(repository ?? null);
-  if (!repositoryRef.current) repositoryRef.current = createLocalStorageRepository();
+  if (!repositoryRef.current) repositoryRef.current = createIndexedDbRepository();
   const repo = repositoryRef.current;
-  const [initial] = useState<InitialState>(() => initialize(repo));
+  const [initial, setInitial] = useState<InitialState | null>(null);
+  const [loadError, setLoadError] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        const init = await repo.initialize();
+        const loaded = await initialize(repo);
+        const alerts: string[] = [];
+        if (!init.ok) {
+          alerts.push(
+            `本地数据迁移未完成：${init.migration?.reason ?? init.reason ?? '未知错误'}。旧 localStorage 保持原样。`,
+          );
+        } else if (init.migration?.status === 'migrated') {
+          alerts.push(
+            `已从 localStorage 迁移 ${init.migration.recordCount} 份病历到 IndexedDB；旧数据仍保留。`,
+          );
+        }
+        if (loaded.alert) alerts.push(loaded.alert);
+        if (active) setInitial({ ...loaded, alert: alerts.join(' ') });
+      } catch (error) {
+        if (active) setLoadError(error instanceof Error ? error.message : String(error));
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [repo]);
+
+  if (loadError) {
+    return (
+      <main className="app-main">
+        <section className="workspace-page" role="alert">
+          <h2>无法读取本机病历</h2>
+          <p>{loadError}</p>
+          <button type="button" className="button primary" onClick={() => window.location.reload()}>
+            重新加载
+          </button>
+        </section>
+      </main>
+    );
+  }
+
+  if (!initial) {
+    return (
+      <main className="app-main">
+        <section className="workspace-page" aria-busy="true">
+          <p role="status">正在读取本机病历…</p>
+        </section>
+      </main>
+    );
+  }
+
+  return <EditorApp repository={repo} initial={initial} />;
+}
+
+function EditorApp({
+  repository: repo,
+  initial,
+}: {
+  repository: RecordRepository;
+  initial: InitialState;
+}) {
   const [record, setRecord] = useState<DabingliRecord>(initial.record);
   const [list, setList] = useState<RecordListItem[]>(initial.list);
   const [settings, setSettings] = useState<AppSettings>(initial.settings);
+  const [recovery, setRecovery] = useState<RecoveryCopySummary | null>(initial.recovery);
   const [stepIndex, setStepIndex] = useState(initial.stepIndex);
   const [view, setView] = useState<AppView>('editor');
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -188,9 +258,9 @@ export function App({ repository }: { repository?: RecordRepository }) {
     setExportText(JSON.stringify(bundle, null, 2));
   }
 
-  function persistRecord(showToast = true): boolean {
+  async function persistRecord(showToast = true): Promise<boolean> {
     const revision = Number(record.meta.revision) || 0;
-    const saved = repo.saveToLibrary(record, revision);
+    const saved = await repo.saveToLibrary(record, revision);
     if (!saved.ok) {
       setStorageAlert(saved.reason ?? '保存失败，请先导出备份。');
       notify(saved.reason ?? '保存失败', 'error');
@@ -199,7 +269,7 @@ export function App({ repository }: { repository?: RecordRepository }) {
     const nextRecord = saved.record ?? record;
     setRecord(nextRecord);
     setDirty(false);
-    const loaded = repo.loadList();
+    const loaded = await repo.loadList();
     if (loaded.ok) {
       setList(loaded.list);
       refreshExportPreview(nextRecord, loaded.list);
@@ -208,9 +278,9 @@ export function App({ repository }: { repository?: RecordRepository }) {
     return true;
   }
 
-  function attemptSave(showToast = true) {
+  async function attemptSave(showToast = true): Promise<boolean> {
     setValidationAttempted(true);
-    const saved = persistRecord(showToast);
+    const saved = await persistRecord(showToast);
     if (warnings.some((warning) => warning.paths?.length)) jumpToFirstInvalid();
     return saved;
   }
@@ -230,10 +300,10 @@ export function App({ repository }: { repository?: RecordRepository }) {
     setDirty(true);
   }
 
-  function saveSettings(next: AppSettings) {
+  async function saveSettings(next: AppSettings) {
     const normalized = RECORD_CORE.normalizeSettings(next);
     setSettings(normalized);
-    const result = repo.saveSettings(normalized);
+    const result = await repo.saveSettings(normalized);
     if (!result.ok) notify(result.reason ?? '设置保存失败', 'error');
   }
 
@@ -245,7 +315,7 @@ export function App({ repository }: { repository?: RecordRepository }) {
     setMobileNavOpen(false);
     const nextSettings = { ...settings, lastStep: STEPS[safeIndex]?.key ?? 'basic' };
     setSettings(nextSettings);
-    repo.saveSettings(nextSettings);
+    void repo.saveSettings(nextSettings);
   }
 
   function jumpToPath(path: string) {
@@ -270,9 +340,9 @@ export function App({ repository }: { repository?: RecordRepository }) {
     notify(first?.message ?? '没有可定位的提醒，请人工核对', first ? 'info' : 'success');
   }
 
-  function createNewRecord() {
+  async function createNewRecord() {
     const next = repo.newRecord();
-    const saved = repo.saveToLibrary(next, 0);
+    const saved = await repo.saveToLibrary(next, 0);
     if (!saved.ok) {
       notify(saved.reason ?? '新建病历保存失败', 'error');
       return;
@@ -283,20 +353,21 @@ export function App({ repository }: { repository?: RecordRepository }) {
     setStepIndex(0);
     setDirty(false);
     resetValidationState();
-    const loaded = repo.loadList();
+    const loaded = await repo.loadList();
     if (loaded.ok) setList(loaded.list);
     refreshExportPreview(persisted, loaded.ok ? loaded.list : list);
     notify('已新建空白病历', 'success');
   }
 
-  function openRecord(item: RecordListItem) {
-    const next = RECORD_CORE.cloneValue(item.data);
+  async function openRecord(item: RecordListItem) {
+    const stored = await repo.loadCurrent(item.id);
+    const next = RECORD_CORE.cloneValue(stored.ok && stored.record ? stored.record : item.data);
     setRecord(next);
     setView('editor');
     setStepIndex(0);
     setDirty(false);
     resetValidationState();
-    const saved = repo.saveToLibrary(next, Number(next.meta.revision) || 0);
+    const saved = await repo.saveToLibrary(next, Number(next.meta.revision) || 0);
     if (saved.ok) {
       setRecord(saved.record ?? next);
       refreshExportPreview(saved.record ?? next, list);
@@ -304,14 +375,13 @@ export function App({ repository }: { repository?: RecordRepository }) {
     notify(`已打开 ${item.basic?.name || RECORD_CORE.summarize(item).name}`);
   }
 
-  function deleteRecord(item: RecordListItem) {
+  async function deleteRecord(item: RecordListItem) {
     const nextList = RECORD_CORE.removeRecord(list, item.id);
-    const result = repo.saveList(nextList);
+    const result = await repo.deleteRecord(item.id);
     if (!result.ok) {
       notify(result.reason ?? '删除失败', 'error');
       return;
     }
-    repo.remove(`${repo.keys.draftPrefix}${item.id}`);
     setList(nextList);
     if (record.id === item.id) {
       const next = repo.newRecord();
@@ -323,42 +393,68 @@ export function App({ repository }: { repository?: RecordRepository }) {
     notify('病历已删除', 'success');
   }
 
-  function importJson(raw: string, mode: 'merge' | 'replace') {
+  async function importJson(raw: string, mode: 'merge' | 'replace') {
     try {
-      const parsed = RECORD_CORE.parseImport(raw, SCHEMA.emptyRecord, SCHEMA.DEPARTMENTS.map((item) => item.key));
-      const nextList =
-        mode === 'replace'
-          ? RECORD_CORE.replaceImport(parsed.records)
-          : RECORD_CORE.mergeImport(list, parsed.records).list;
-      const result = repo.saveList(nextList);
-      if (!result.ok) throw new Error(result.reason ?? '写入病历列表失败');
+      const summary = await repo.importBackup(raw, mode);
+      const loaded = await repo.loadList();
+      const nextList = loaded.ok ? loaded.list : [];
       setList(nextList);
-      const first = parsed.records[0];
-      if (first) {
-        const next = RECORD_CORE.cloneValue(first.data);
-        const saved = repo.saveToLibrary(next, Number(next.meta.revision) || 0);
-        if (saved.ok && saved.record) {
-          setRecord(saved.record);
-          refreshExportPreview(saved.record, nextList);
-        }
+
+      const preferred = summary.firstRecordId
+        ? await repo.loadCurrent(summary.firstRecordId)
+        : await repo.loadCurrent();
+      if (preferred.ok && preferred.record) {
+        setRecord(preferred.record);
+        refreshExportPreview(preferred.record, nextList);
       }
+      const recoveries = await repo.listRecoveryCopies().catch(() => []);
+      setRecovery(recoveries[0] ?? null);
       setView('records');
-      notify(`导入完成：${parsed.records.length} 份病历`, 'success');
+      const recovery = summary.recoveryId ? '；已生成替换前恢复副本' : '';
+      notify(`导入完成：${summary.recordCount} 份病历${recovery}`, 'success');
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       notify(`导入失败：${message}`, 'error');
     }
   }
 
-  function exportJson(scope: 'current' | 'all') {
-    const bundle =
-      scope === 'all'
-        ? RECORD_CORE.buildExport(list, undefined, { includeDraft: true, draft: record })
-        : RECORD_CORE.buildExport([], undefined, { includeDraft: true, draft: record });
-    const text = JSON.stringify(bundle, null, 2);
-    setExportText(text);
-    downloadJson(text, scope === 'all' ? 'dabingli-records.json' : `dabingli-${record.id ?? 'record'}.json`);
-    notify('已下载 JSON 备份', 'success');
+  async function restoreRecovery() {
+    if (!recovery) return;
+    if (!window.confirm(`恢复替换导入前的 ${recovery.recordCount} 份病历吗？`)) return;
+    try {
+      await repo.restoreRecovery(recovery.id);
+      const [loaded, current, loadedSettings] = await Promise.all([
+        repo.loadList(),
+        repo.loadCurrent(),
+        repo.loadSettings(),
+      ]);
+      const nextList = loaded.ok ? loaded.list : [];
+      const nextRecord = current.ok && current.record ? current.record : repo.newRecord();
+      setList(nextList);
+      setRecord(nextRecord);
+      if (loadedSettings.ok) setSettings(loadedSettings.settings);
+      setDirty(false);
+      setView('records');
+      resetValidationState();
+      refreshExportPreview(nextRecord, nextList);
+      notify('已恢复替换前病历', 'success');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      notify(`恢复失败：${message}`, 'error');
+    }
+  }
+
+  async function exportJson(scope: 'current' | 'all') {
+    try {
+      const bundle = await repo.exportBackup(scope);
+      const text = serializeBackup(bundle);
+      setExportText(text);
+      downloadJson(text, scope === 'all' ? 'dabingli-records.json' : `dabingli-${record.id ?? 'record'}.json`);
+      notify('已下载 JSON 备份', 'success');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      notify(`导出失败：${message}`, 'error');
+    }
   }
 
   const step = STEPS[stepIndex] ?? STEPS[0];
@@ -413,7 +509,7 @@ export function App({ repository }: { repository?: RecordRepository }) {
     if (!dirty) return;
     if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(() => {
-      persistRecord(false);
+      void persistRecord(false);
     }, 900);
     return () => {
       if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
@@ -466,7 +562,7 @@ export function App({ repository }: { repository?: RecordRepository }) {
       }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
         event.preventDefault();
-        attemptSave(true);
+        void attemptSave(true);
       }
     }
     window.addEventListener('keydown', handleKeyDown);
@@ -478,7 +574,7 @@ export function App({ repository }: { repository?: RecordRepository }) {
     if (stepIndex < STEPS.length - 1) {
       goToStep(stepIndex + 1);
     } else {
-      attemptSave(true);
+      void attemptSave(true);
     }
   }
 
@@ -531,19 +627,23 @@ export function App({ repository }: { repository?: RecordRepository }) {
             list={list}
             activeId={record.id}
             exportText={exportText}
+            recovery={recovery}
             onNew={createNewRecord}
             onOpen={openRecord}
             onDelete={deleteRecord}
             onImport={importJson}
             onDownload={exportJson}
+            onRestoreRecovery={restoreRecovery}
           />
         ) : view === 'settings' ? (
           <SettingsPage
             settings={settings}
             exportText={exportText}
+            recovery={recovery}
             onChange={saveSettings}
             onImport={importJson}
             onDownload={exportJson}
+            onRestoreRecovery={restoreRecovery}
           />
         ) : (
           <div className="editor-workspace">

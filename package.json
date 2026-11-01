@@ -9,6 +9,7 @@
     "build:web": "npm run build:domain && npm run build -w apps/web",
     "test": "node --test tests/*.test.cjs",
     "test:web": "npm run build:domain && npm run test -w apps/web",
+    "test:storage": "npm run build:domain && npm run test -w packages/storage",
     "test:core": "node --test tests/core.test.cjs",
     "test:ui": "node --test tests/app.test.cjs",
     "sweep": "node tools/sweep-abnormal.js",
@@ -30,7 +31,7 @@
     "e2e:psychiatry": "node tools/verify-psychiatry-ui.js",
     "test:psychiatry": "node --test tests/psychiatry.test.cjs",
     "build:domain": "node scripts/build-domain.cjs",
-    "typecheck": "node scripts/typecheck-domain.cjs && npm run build:domain && tsc --noEmit -p apps/web",
+    "typecheck": "node scripts/typecheck-domain.cjs && npm run build:domain && tsc --noEmit -p packages/storage && tsc --noEmit -p apps/web",
     "test:domain": "node scripts/build-domain.cjs && node --test packages/domain/test/*.test.cjs"
   },
   "engines": {
@@ -38,6 +39,7 @@
   },
   "workspaces": [
     "packages/domain",
+    "packages/storage",
     "apps/web"
   ],
   "allowScripts": {

@@ -1,12 +1,21 @@
 import { useRef, useState } from 'react';
+import type { RecoveryCopySummary } from '@dabingli/storage';
 
 export interface DataTransferPanelProps {
   exportText: string;
+  recovery?: RecoveryCopySummary | null;
   onImport: (raw: string, mode: 'merge' | 'replace') => void;
   onDownload: (scope: 'current' | 'all') => void;
+  onRestoreRecovery?: () => void;
 }
 
-export function DataTransferPanel({ exportText, onImport, onDownload }: DataTransferPanelProps) {
+export function DataTransferPanel({
+  exportText,
+  recovery,
+  onImport,
+  onDownload,
+  onRestoreRecovery,
+}: DataTransferPanelProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [mode, setMode] = useState<'merge' | 'replace'>('merge');
   const [showExport, setShowExport] = useState(false);
@@ -52,9 +61,17 @@ export function DataTransferPanel({ exportText, onImport, onDownload }: DataTran
           选择 JSON 文件
         </button>
       </div>
-      <p className="muted">
-        导入兼容现有备份包和单份病历；替换前请先下载备份。旧的 localStorage 键名保持不变。
-      </p>
+      <p className="muted">数据仅保存在本机浏览器；替换导入前会先保存恢复副本。</p>
+      {recovery && onRestoreRecovery ? (
+        <div className="button-row">
+          <p className="muted">
+            替换前恢复副本：{new Date(recovery.createdAt).toLocaleString('zh-CN')} · {recovery.recordCount} 份病历
+          </p>
+          <button type="button" className="button ghost" onClick={onRestoreRecovery}>
+            恢复替换前备份
+          </button>
+        </div>
+      ) : null}
       {showExport ? (
         <label className="export-preview">
           <span>当前导出快照（JSON）</span>

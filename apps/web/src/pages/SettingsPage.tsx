@@ -1,4 +1,5 @@
 import type { AppSettings } from '@dabingli/domain';
+import type { RecoveryCopySummary } from '@dabingli/storage';
 import { DataTransferPanel } from '../components/DataTransferPanel';
 import { FieldRenderer } from '../components/FieldRenderer';
 import { Card, FormGrid } from '../components/StepShell';
@@ -6,15 +7,19 @@ import { Card, FormGrid } from '../components/StepShell';
 export function SettingsPage({
   settings,
   exportText,
+  recovery,
   onChange,
   onImport,
   onDownload,
+  onRestoreRecovery,
 }: {
   settings: AppSettings;
   exportText: string;
+  recovery?: RecoveryCopySummary | null;
   onChange: (settings: AppSettings) => void;
   onImport: (raw: string, mode: 'merge' | 'replace') => void;
   onDownload: (scope: 'current' | 'all') => void;
+  onRestoreRecovery?: () => void;
 }) {
   return (
     <section className="workspace-page" aria-labelledby="settings-heading">
@@ -22,7 +27,7 @@ export function SettingsPage({
         <div>
           <div className="eyebrow">本机偏好</div>
           <h2 id="settings-heading">设置</h2>
-          <p>设置沿用 <code>dabingli.settings.v1</code>，不会改变已有病历内容。</p>
+          <p>设置保存在本机 IndexedDB，不会改变已有病历内容。</p>
         </div>
       </header>
 
@@ -61,15 +66,13 @@ export function SettingsPage({
       </Card>
 
       <Card title="数据导入 / 导出">
-        <DataTransferPanel exportText={exportText} onImport={onImport} onDownload={onDownload} />
-      </Card>
-
-      <Card title="本阶段说明">
-        <ul className="plain-list">
-          <li>存储层暂时使用 localStorage，键名与旧版完全一致。</li>
-          <li>本阶段仅提供本地记录、导入导出和文书生成。</li>
-          <li>Android 应用和旧版 <code>src/app.js</code> 不受本 Web UI 改动影响。</li>
-        </ul>
+        <DataTransferPanel
+          exportText={exportText}
+          recovery={recovery}
+          onImport={onImport}
+          onDownload={onDownload}
+          onRestoreRecovery={onRestoreRecovery}
+        />
       </Card>
     </section>
   );
