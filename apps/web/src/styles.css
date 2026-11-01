@@ -1171,6 +1171,248 @@ textarea[aria-invalid="true"] {
   color: var(--muted);
 }
 
+.ai-panel,
+.ai-panel * {
+  min-width: 0;
+}
+
+.ai-controls,
+.ai-result,
+.ai-adopted,
+.ai-settings {
+  display: grid;
+  gap: 12px;
+}
+
+.ai-empty {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface-soft);
+}
+
+.ai-empty p {
+  flex: 1 1 240px;
+  margin: 0;
+}
+
+.ai-model-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.ai-field {
+  display: grid;
+  gap: 5px;
+  font-weight: 700;
+}
+
+.ai-preview,
+.ai-result,
+.ai-adopted {
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.ai-panel details > summary {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.ai-consent {
+  display: flex;
+  min-height: 44px;
+  align-items: flex-start;
+  gap: 9px;
+  padding-block: 6px;
+  cursor: pointer;
+}
+
+.ai-consent input,
+.ai-check input {
+  flex: 0 0 20px;
+  width: 20px;
+  min-height: 20px;
+  height: 20px;
+  margin: 3px 0 0;
+  padding: 0;
+  accent-color: var(--primary);
+}
+
+.ai-source-list,
+.ai-suggestion-list,
+.ai-adopted-list {
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+  margin: 10px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ai-source-list li,
+.ai-suggestion,
+.ai-adopted-list > li {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-soft);
+}
+
+.ai-source-list p,
+.ai-suggestion p,
+.ai-adopted-list p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ai-json-preview {
+  max-width: 100%;
+  max-height: 18rem;
+  margin-bottom: 0;
+  padding: 10px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #f7faf9;
+  font-size: 0.76rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ai-result-heading,
+.ai-adopted-head,
+.ai-adopt-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ai-result-heading h4,
+.ai-result h5 {
+  margin: 0;
+}
+
+.ai-badge {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  padding: 3px 9px;
+  border: 1px solid #d8bd79;
+  border-radius: 999px;
+  color: #754b00;
+  background: #fff8e6;
+  font-size: 0.78rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.ai-badge.is-reviewed {
+  border-color: #93cbbd;
+  color: var(--primary-strong);
+  background: #ecfaf6;
+}
+
+.ai-suggestion {
+  display: grid;
+  gap: 9px;
+  background: var(--surface);
+}
+
+.ai-check {
+  display: flex;
+  min-height: 44px;
+  align-items: flex-start;
+  gap: 9px;
+  padding-block: 4px;
+  cursor: pointer;
+}
+
+.ai-compare {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+
+.ai-compare > div {
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+.ai-compare small {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.ai-compare p {
+  margin: 3px 0 0;
+}
+
+.ai-suggestion blockquote,
+.ai-adopted-list blockquote {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-left: 3px solid var(--border-strong);
+  background: var(--surface-soft);
+}
+
+.ai-suggestion blockquote p,
+.ai-adopted-list blockquote p {
+  margin: 4px 0 0;
+}
+
+.ai-adopt-actions {
+  align-items: end;
+}
+
+.ai-adopt-actions .ai-consent {
+  flex: 1 1 240px;
+}
+
+.ai-adopted-list > li {
+  display: grid;
+  gap: 6px;
+}
+
+.ai-adopted-list small {
+  color: var(--muted);
+}
+
+.ai-adopted-list .button {
+  justify-self: start;
+}
+
+.ai-error {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-left: 4px solid var(--danger);
+  border-radius: 7px;
+  color: #7f2d27;
+  background: #fff1ef;
+  font-weight: 700;
+}
+
+.ai-status {
+  margin: 10px 0 0;
+  color: var(--primary-strong);
+}
+
 .toast {
   position: fixed;
   z-index: 50;
@@ -1226,6 +1468,10 @@ textarea[aria-invalid="true"] {
 
   .symptom-row > .symptom-details {
     grid-column: 1 / -1;
+  }
+
+  .ai-compare {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -1325,6 +1571,17 @@ textarea[aria-invalid="true"] {
   .summary-badge {
     max-width: 100%;
     margin-left: 40px;
+  }
+
+  .ai-model-row,
+  .ai-adopt-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .ai-adopt-actions .button,
+  .ai-empty .button {
+    width: 100%;
   }
 }
 

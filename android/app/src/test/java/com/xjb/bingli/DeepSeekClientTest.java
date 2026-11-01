@@ -10,9 +10,19 @@ public class DeepSeekClientTest {
         assertFalse(DeepSeekClient.validModel("../../other")); assertFalse(DeepSeekClient.validModel(null));
     }
     @Test public void classifyErrorsWithoutReflectingRemoteBody() {
-        assertTrue(DeepSeekClient.httpError(401).contains("Key")); assertTrue(DeepSeekClient.httpError(402).contains("余额"));
+        assertTrue(DeepSeekClient.httpError(401).contains("Key")); assertTrue(DeepSeekClient.httpError(403).contains("权限"));
+        assertTrue(DeepSeekClient.httpError(402).contains("余额"));
         assertTrue(DeepSeekClient.httpError(429).contains("频繁")); assertTrue(DeepSeekClient.httpError(503).contains("暂不可用"));
         assertTrue(DeepSeekClient.httpError(302).contains("302"));
+    }
+    @Test public void emitsStableHttpErrorCodes() {
+        assertEquals("unauthorized", DeepSeekClient.httpErrorCode(401));
+        assertEquals("forbidden", DeepSeekClient.httpErrorCode(403));
+        assertEquals("insufficient_balance", DeepSeekClient.httpErrorCode(402));
+        assertEquals("rate_limited", DeepSeekClient.httpErrorCode(429));
+        assertEquals("server_unavailable", DeepSeekClient.httpErrorCode(500));
+        assertEquals("server_unavailable", DeepSeekClient.httpErrorCode(503));
+        assertEquals("http_error", DeepSeekClient.httpErrorCode(302));
     }
     @Test public void readUtf8Response() throws Exception {
         String text = "{\"text\":\"患者诉咳嗽\"}";

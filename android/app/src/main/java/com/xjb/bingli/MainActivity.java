@@ -155,7 +155,7 @@ public class MainActivity extends Activity {
                 boolean accepted = aiClient.request(id, aiKeys.read(), aiKeys.model(), p.getString("system"), p.getString("user"), MainActivity.this::aiResult);
                 if (!accepted) aiResult(id, new org.json.JSONObject().put("ok", false).put("error", "已有请求进行中或参数无效，请稍后重试"));
             } catch (Exception e) {
-                try { aiResult(id, new org.json.JSONObject().put("ok", false).put("error", "无法读取 AI 设置，请重新保存密钥")); } catch (Exception ignored) { }
+                try { aiResult(id, new org.json.JSONObject().put("ok", false).put("code", "missing_key").put("error", "无法读取 AI 设置，请重新保存密钥")); } catch (Exception ignored) { }
             }
         }
         @JavascriptInterface public String versionName() { return BuildConfig.VERSION_NAME; }
@@ -197,7 +197,8 @@ public class MainActivity extends Activity {
     private void aiResult(String id, org.json.JSONObject result) {
         runOnUiThread(() -> {
             if (web == null || isFinishing() || isDestroyed()) return;
-            web.evaluateJavascript("if(typeof AI_ASSIST!=='undefined') AI_ASSIST.receive(" + org.json.JSONObject.quote(id) + "," + result.toString() + ")", null);
+            String call = org.json.JSONObject.quote(id) + "," + result.toString();
+            web.evaluateJavascript("if(typeof BINGLI_AI_TRANSPORT_RECEIVE==='function'){BINGLI_AI_TRANSPORT_RECEIVE(" + call + ");}else if(typeof AI_ASSIST!=='undefined'){AI_ASSIST.receive(" + call + ");}", null);
         });
     }
     @Override protected void onActivityResult(int request, int result, Intent data) {

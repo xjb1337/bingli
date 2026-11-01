@@ -16,6 +16,15 @@ import {
   type RecordListItem,
 } from '@dabingli/domain';
 import {
+  AndroidBridgeTransport,
+  WebFetchTransport,
+  confirmAiField,
+  getAndroidAiBridge,
+  type AiTransport,
+  type AiTransportFactory,
+  type AiTransportStatus,
+} from '@dabingli/ai';
+import {
   createIndexedDbRepository,
   serializeBackup,
   type RecoveryCopySummary,
@@ -129,7 +138,13 @@ function downloadJson(text: string, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-export function App({ repository }: { repository?: RecordRepository }) {
+export function App({
+  repository,
+  aiTransportFactory,
+}: {
+  repository?: RecordRepository;
+  aiTransportFactory?: AiTransportFactory;
+}) {
   const repositoryRef = useRef<RecordRepository | null>(repository ?? null);
   if (!repositoryRef.current) repositoryRef.current = createIndexedDbRepository();
   const repo = repositoryRef.current;
@@ -187,15 +202,17 @@ export function App({ repository }: { repository?: RecordRepository }) {
     );
   }
 
-  return <EditorApp repository={repo} initial={initial} />;
+  return <EditorApp repository={repo} initial={initial} aiTransportFactory={aiTransportFactory} />;
 }
 
 function EditorApp({
   repository: repo,
   initial,
+  aiTransportFactory,
 }: {
   repository: RecordRepository;
   initial: InitialState;
+  aiTransportFactory?: AiTransportFactory;
 }) {
   const [record, setRecord] = useState<DabingliRecord>(initial.record);
   const [list, setList] = useState<RecordListItem[]>(initial.list);
@@ -213,8 +230,35 @@ function EditorApp({
   const [exportText, setExportText] = useState(() =>
     JSON.stringify(RECORD_CORE.buildExport(initial.list, undefined, { includeDraft: true, draft: initial.record }), null, 2),
   );
+  const [apiKey, setApiKey] = useState('');
+  const androidBridge = useMemo(() => getAndroidAiBridge(), []);
+  const [androidStatus, setAndroidStatus] = useState<AiTransportStatus | null>(null);
+  const [androidStatusLoading, setAndroidStatusLoading] = useState(Boolean(androidBridge));
   const toastTimer = useRef<number | null>(null);
   const saveTimer = useRef<number | null>(null);
+
+  function refreshAndroidAiStatus() {
+    if (!androidBridge) return;
+    setAndroidStatusLoading(true);
+    void new AndroidBridgeTransport({ bridge: androidBridge }).status().then((status) => {
+      setAndroidStatus(status);
+      setAndroidStatusLoading(false);
+    });
+  }
+
+  useEffect(() => {
+    if (!androidBridge) return;
+    let active = true;
+    setAndroidStatusLoading(true);
+    void new AndroidBridgeTransport({ bridge: androidBridge }).status().then((status) => {
+      if (!active) return;
+      setAndroidStatus(status);
+      setAndroidStatusLoading(false);
+    });
+    return () => {
+      active = false;
+    };
+  }, [androidBridge]);
 
   const warnings = useMemo(() => GENERATOR.validateStructured(record), [record]);
   const errors = useMemo(
@@ -256,6 +300,41 @@ function EditorApp({
       draft: nextRecord,
     });
     setExportText(JSON.stringify(bundle, null, 2));
+  }
+
+  async function saveAiMutation(nextRecord: DabingliRecord, message: string): Promise<boolean> {
+    const revision = Number(record.meta.revision) || 0;
+    const saved = await repo.saveToLibrary(nextRecord, revision);
+    if (!saved.ok) {
+      setStorageAlert(saved.reason ?? 'AI 内容保存失败，请先导出备份。');
+      notify(saved.reason ?? 'AI 内容保存失败', 'error');
+      return false;
+    }
+    const persisted = saved.record ?? nextRecord;
+    setRecord(persisted);
+    setDirty(false);
+    const loaded = await repo.loadList();
+    if (loaded.ok) {
+      setList(loaded.list);
+      refreshExportPreview(persisted, loaded.list);
+    }
+    notify(message, 'success');
+    return true;
+  }
+
+  async function adoptAiRecord(nextRecord: DabingliRecord): Promise<boolean> {
+    return saveAiMutation(nextRecord, 'AI 建议已采纳，仍需逐项核对');
+  }
+
+  async function confirmAiContent(path: string): Promise<boolean> {
+    const next = confirmAiField(record, path);
+    return saveAiMutation(next, '已标记为已核对');
+  }
+
+  function createAiTransport(): AiTransport {
+    if (aiTransportFactory) return aiTransportFactory(apiKey);
+    if (androidBridge) return new AndroidBridgeTransport({ bridge: androidBridge });
+    return new WebFetchTransport({ apiKey });
   }
 
   async function persistRecord(showToast = true): Promise<boolean> {
@@ -457,6 +536,9 @@ function EditorApp({
     }
   }
 
+  const aiSecurityContext = androidBridge ? 'android' as const : 'web' as const;
+  const aiConfigured = androidBridge ? androidStatus?.configured === true : apiKey.trim().length > 0;
+  const aiModel = androidBridge ? androidStatus?.model ?? 'deepseek-flash' : 'deepseek-flash';
   const step = STEPS[stepIndex] ?? STEPS[0];
   const stepKey: StepKey = step.key;
   const stepProps: StepComponentProps = {
@@ -501,7 +583,23 @@ function EditorApp({
       stepContent = <SummaryStep {...stepProps} />;
       break;
     case 'output':
-      stepContent = <OutputStep {...stepProps} settings={settings} />;
+      stepContent = (
+        <OutputStep
+          {...stepProps}
+          settings={settings}
+          ai={{
+            record,
+            configured: aiConfigured,
+            securityContext: aiSecurityContext,
+            model: aiModel,
+            loadingAndroidStatus: androidBridge ? androidStatusLoading : false,
+            createTransport: createAiTransport,
+            onOpenSettings: () => setView('settings'),
+            onAdoptRecord: adoptAiRecord,
+            onConfirmField: confirmAiContent,
+          }}
+        />
+      );
       break;
   }
 
@@ -599,6 +697,11 @@ function EditorApp({
           </div>
         </div>
         <nav className="header-actions" aria-label="全局操作">
+          {view !== 'editor' ? (
+            <button type="button" className="button ghost" onClick={() => setView('editor')}>
+              返回编辑
+            </button>
+          ) : null}
           <button
             type="button"
             className={`button ghost${view === 'records' ? ' is-active' : ''}`}
@@ -640,7 +743,14 @@ function EditorApp({
             settings={settings}
             exportText={exportText}
             recovery={recovery}
+            apiKey={apiKey}
+            androidConfigured={androidStatus?.configured}
+            androidModel={androidStatus?.model}
+            androidStatusLoading={androidStatusLoading}
             onChange={saveSettings}
+            onApiKeyChange={setApiKey}
+            onOpenAndroidAiSettings={androidBridge ? () => androidBridge.aiSettings?.() : undefined}
+            onRefreshAndroidStatus={androidBridge ? refreshAndroidAiStatus : undefined}
             onImport={importJson}
             onDownload={exportJson}
             onRestoreRecovery={restoreRecovery}
