@@ -32,7 +32,8 @@
     "test:psychiatry": "node --test tests/psychiatry.test.cjs",
     "build:domain": "node scripts/build-domain.cjs",
     "typecheck": "node scripts/typecheck-domain.cjs && npm run build:domain && tsc --noEmit -p packages/storage && tsc --noEmit -p apps/web",
-    "test:domain": "node scripts/build-domain.cjs && node --test packages/domain/test/*.test.cjs"
+    "test:domain": "node scripts/build-domain.cjs && node --test packages/domain/test/*.test.cjs",
+    "harness:android-migration": "node tools/android-migration-harness/run.cjs"
   },
   "engines": {
     "node": ">=22"

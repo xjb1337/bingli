@@ -1,0 +1,149 @@
+[
+  {
+    "case": "v1",
+    "legacyKeys": 4,
+    "legacyRecordCount": 1,
+    "localStorageSha256Before": "c67e2265f79555240f393fc76eea1b38a34c863787bd18fbed76f0def069b98d",
+    "localStorageSha256After": "c67e2265f79555240f393fc76eea1b38a34c863787bd18fbed76f0def069b98d",
+    "localStorageUnchanged": true,
+    "stagedBytes": 6630,
+    "stagedSha256": "4ee07a5ed450250ae618bbdb0c91657f2580599052dc91ba53c6af372f86d347",
+    "importOk": true,
+    "indexedDbRecordCount": 1,
+    "ids": [
+      "legacy-v1-pediatrics"
+    ],
+    "comparison": {
+      "records": true,
+      "exportJson": true,
+      "perRecord": [
+        {
+          "id": "legacy-v1-pediatrics",
+          "idMatch": true,
+          "name": true,
+          "chiefComplaint": true,
+          "diagnosis": true
+        }
+      ]
+    },
+    "indexedDbExportSha256": "df8045b63af6e3076f302a4fd16306042658008e4cc79c067b50e5a3b0f3a62f"
+  },
+  {
+    "case": "v2",
+    "legacyKeys": 4,
+    "legacyRecordCount": 1,
+    "localStorageSha256Before": "72b0d7a13724ed02367abc1b690aeb0ceff37f50b3073e0fc14dcb127fd012dd",
+    "localStorageSha256After": "72b0d7a13724ed02367abc1b690aeb0ceff37f50b3073e0fc14dcb127fd012dd",
+    "localStorageUnchanged": true,
+    "stagedBytes": 12554,
+    "stagedSha256": "3cb6e782b0d2bc62d1210eb206422bd8d4d258d65c77f1982f885600961bb3c9",
+    "importOk": true,
+    "indexedDbRecordCount": 1,
+    "ids": [
+      "legacy-v2-neurology"
+    ],
+    "comparison": {
+      "records": true,
+      "exportJson": true,
+      "perRecord": [
+        {
+          "id": "legacy-v2-neurology",
+          "idMatch": true,
+          "name": true,
+          "chiefComplaint": true,
+          "diagnosis": true
+        }
+      ]
+    },
+    "indexedDbExportSha256": "4528a2e64a694a57783b6e06853ec8169fd1de5a8854e0c587ef4a684e2ea313"
+  },
+  {
+    "case": "v3",
+    "legacyKeys": 4,
+    "legacyRecordCount": 1,
+    "localStorageSha256Before": "ca8806aac19db3eff78607af2c3e3600c144524848a907d168bc363b321d875b",
+    "localStorageSha256After": "ca8806aac19db3eff78607af2c3e3600c144524848a907d168bc363b321d875b",
+    "localStorageUnchanged": true,
+    "stagedBytes": 17540,
+    "stagedSha256": "4ea8c246b51cb9cd2608fefec1dcae5a30df3fa9efae961d969d0def0f8be851",
+    "importOk": true,
+    "indexedDbRecordCount": 1,
+    "ids": [
+      "legacy-v3-psychiatry"
+    ],
+    "comparison": {
+      "records": true,
+      "exportJson": true,
+      "perRecord": [
+        {
+          "id": "legacy-v3-psychiatry",
+          "idMatch": true,
+          "name": true,
+          "chiefComplaint": true,
+          "diagnosis": true
+        }
+      ]
+    },
+    "indexedDbExportSha256": "9da03fa9436da72949077579790cfe3d8444d887042abd57206b23ff4cfa3797"
+  },
+  {
+    "case": "mixed",
+    "legacyKeys": 4,
+    "legacyRecordCount": 3,
+    "localStorageSha256Before": "e7e8b76cb79d2314488159d8e55cbacb4cdb35de2b731e89e43dd38dcf3b2152",
+    "localStorageSha256After": "e7e8b76cb79d2314488159d8e55cbacb4cdb35de2b731e89e43dd38dcf3b2152",
+    "localStorageUnchanged": true,
+    "stagedBytes": 24406,
+    "stagedSha256": "aa693c783c8ee2beb4e41567253ed36f3e9c4b2c813b276e81ac343004f05ae1",
+    "importOk": true,
+    "indexedDbRecordCount": 3,
+    "ids": [
+      "legacy-v3-psychiatry",
+      "legacy-v2-neurology",
+      "legacy-v1-pediatrics"
+    ],
+    "comparison": {
+      "records": true,
+      "exportJson": true,
+      "perRecord": [
+        {
+          "id": "legacy-v1-pediatrics",
+          "idMatch": true,
+          "name": true,
+          "chiefComplaint": true,
+          "diagnosis": true
+        },
+        {
+          "id": "legacy-v2-neurology",
+          "idMatch": true,
+          "name": true,
+          "chiefComplaint": true,
+          "diagnosis": true
+        },
+        {
+          "id": "legacy-v3-psychiatry",
+          "idMatch": true,
+          "name": true,
+          "chiefComplaint": true,
+          "diagnosis": true
+        }
+      ]
+    },
+    "indexedDbExportSha256": "b34bc70fd5807cc09365d6922ac11359cdaf4b78d7e6a06313ffc2565b89b542"
+  },
+  {
+    "case": "corrupt",
+    "legacyKeys": 2,
+    "legacyRecordCount": "corrupt",
+    "localStorageSha256Before": "f16fd7c12ca0bb659a29fc72dd461d0a839ba77fb726688aeafed844db3a894b",
+    "localStorageSha256After": "f16fd7c12ca0bb659a29fc72dd461d0a839ba77fb726688aeafed844db3a894b",
+    "localStorageUnchanged": true,
+    "stagedBytes": 105,
+    "stagedSha256": "f3450c3a0f8d374a69fa2d8b283d73479e97d7c045ef0836aeab19442f44e72d",
+    "importOk": false,
+    "error": "旧病历列表损坏，未执行迁移",
+    "indexedDbRecordCount": 0,
+    "ids": [],
+    "indexedDbExportSha256": null
+  }
+]

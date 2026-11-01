@@ -1,4 +1,7 @@
-plugins { id 'com.android.application' }
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
 android {
     useLibrary 'android.test.runner'
     useLibrary 'android.test.base'
@@ -29,8 +32,13 @@ android {
     }
     buildFeatures { buildConfig true }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+    kotlinOptions { jvmTarget = '17' }
 }
-dependencies { implementation 'androidx.core:core:1.13.1'; testImplementation 'junit:junit:4.13.2' }
+dependencies {
+    implementation 'androidx.core:core:1.13.1'
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20240303'
+}
 tasks.register('buildWeb', Exec) { workingDir '../..'; commandLine 'node', 'build.js' }
 // Package the internal HTML asset; no standalone website is published.
 tasks.named('preBuild').configure { dependsOn 'buildWeb' }

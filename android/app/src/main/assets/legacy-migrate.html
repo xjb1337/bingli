@@ -1,0 +1,18 @@
+<!doctype html><meta charset="utf-8"><title>迁移中</title>
+<script>
+(() => {
+  const allowed = k => k === 'dabingli.records.v1' || k === 'dabingli.current.v1' || k === 'dabingli.settings.v1' || k.startsWith('dabingli.draft.v1.');
+  try {
+    const keys = {};
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && allowed(key)) keys[key] = localStorage.getItem(key);
+    }
+    const payload = JSON.stringify({ keys });
+    if (!window.BingliLegacyMigrate || typeof window.BingliLegacyMigrate.submit !== 'function') throw new Error('迁移桥接不可用');
+    window.BingliLegacyMigrate.submit(payload);
+  } catch (error) {
+    if (window.BingliLegacyMigrate) window.BingliLegacyMigrate.fail(String(error && error.message || error));
+  }
+})();
+</script>

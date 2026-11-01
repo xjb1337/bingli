@@ -1,0 +1,255 @@
+{
+  "schemaVersion": 2,
+  "id": "legacy-v2-digestive",
+  "updatedAt": "2026-04-02T05:00:00.000Z",
+  "meta": {
+    "createdAt": "2026-04-01T01:00:00.000Z",
+    "updatedAt": "2026-04-02T05:00:00.000Z"
+  },
+  "basic": {
+    "department": "消化内科",
+    "name": "测试患者丙",
+    "gender": "女",
+    "age": "38",
+    "marital": "已婚",
+    "nativePlace": "合成省",
+    "birthPlace": "合成市",
+    "nationality": "合成族",
+    "occupation": "文员",
+    "workUnit": "合成单位",
+    "address": "合成市测试路1号",
+    "phone": "000-0000-0000",
+    "recordNo": "ZY-0001",
+    "bedNo": "08",
+    "admitDate": "2026-04-02",
+    "recordDate": "2026-04-02",
+    "reliability": "可靠",
+    "informant": "本人",
+    "chiefComplaint": "上腹痛",
+    "chiefComplaintDuration": "3",
+    "chiefComplaintDurationUnit": "天"
+  },
+  "hpi": {
+    "onset": "3天前进食油腻食物后出现上腹痛",
+    "cause": "进食油腻食物后",
+    "symptoms": "中上腹持续性隐痛，进食后加重",
+    "relief": "休息后稍缓解",
+    "evolution": "疼痛程度逐渐加重",
+    "accompanying": "伴恶心，无呕吐",
+    "negativeDiscriminating": "无发热、黄疸、黑便",
+    "treatment": "自行口服胃药，效果欠佳",
+    "generalCondition": "发病以来精神一般，食欲下降，睡眠尚可，大小便正常"
+  },
+  "ros": {
+    "gi": {
+      "nausea": {
+        "checked": true,
+        "detail": "饭后明显"
+      },
+      "vomiting": {
+        "negative": true
+      }
+    }
+  },
+  "pmh": {
+    "health": "平素健康",
+    "diseaseChecks": {},
+    "diseaseOther": "",
+    "diseaseDetail": "",
+    "longTermMeds": "无",
+    "infection": "否认肝炎、结核等传染病史",
+    "surgery": "否认手术史",
+    "trauma": "否认外伤史",
+    "transfusion": "否认输血史",
+    "poisoning": "否认中毒史",
+    "vaccine": "预防接种史不详",
+    "allergy": "无",
+    "allergenChecks": {},
+    "allergenOther": "",
+    "allergenReactionChecks": {},
+    "allergyReaction": "",
+    "relatedHistory": "否认类似腹痛发作",
+    "otherTreatDiseases": "",
+    "special": "无"
+  },
+  "personal": {
+    "maternal": "",
+    "birth": "出生于合成市",
+    "feeding": "",
+    "growth": "",
+    "residence": "长期居住于合成市",
+    "travel": "无疫区旅居史",
+    "smoking": "无",
+    "smokingAmount": "",
+    "drinking": "无",
+    "drinkingAmount": "",
+    "drugs": "无",
+    "environment": "无特殊毒物接触史",
+    "habits": "规律",
+    "sexualHistory": "否认不洁性接触史",
+    "occupationEnv": "办公室工作，无粉尘及毒物接触",
+    "premorbidPersonality": "",
+    "stressEvent": ""
+  },
+  "marriage": {
+    "status": "已婚",
+    "age": "28",
+    "spouseHealth": "健康",
+    "sexLife": "正常",
+    "relation": "和睦"
+  },
+  "menstruation": {
+    "applicable": true,
+    "age": "14",
+    "cycle": "28天",
+    "duration": "5天",
+    "quantity": "中等",
+    "color": "暗红",
+    "clot": "无",
+    "leukorrhea": "无异常",
+    "lmp": "2026-03-20",
+    "menopauseAge": "",
+    "dysmenorrhea": "无"
+  },
+  "childbirth": {
+    "applicable": true,
+    "fullTerm": "1",
+    "premature": "0",
+    "abortion": "0",
+    "alive": "1",
+    "gravida": "1",
+    "para": "1",
+    "details": "",
+    "lastBirth": "2022-06",
+    "contraception": "避孕套"
+  },
+  "family": {
+    "diseaseChecks": {},
+    "other": "否认家族遗传病史",
+    "deceased": "",
+    "threeGeneration": "祖父母、外祖父母均健在",
+    "similarDisease": "否认家族类似疾病史",
+    "infectionHistory": "否认家族传染病史"
+  },
+  "pe": {
+    "checked": {
+      "general": {
+        "development": true,
+        "nutrition": true,
+        "conscious": true,
+        "posture": true,
+        "cooperation": true
+      },
+      "abdomen": {
+        "abdInspect": true,
+        "abdAuscultation": true,
+        "abdPalpation": true
+      }
+    },
+    "vitals": {
+      "temperature": "36.9",
+      "pulse": "82",
+      "respiration": "18",
+      "sbp": "118",
+      "dbp": "72"
+    },
+    "general": {
+      "development": "正常",
+      "nutrition": "中等",
+      "conscious": "清楚",
+      "posture": "自主体位",
+      "cooperation": "合作"
+    },
+    "abdomen": {
+      "abdInspect": "腹部平坦，未见胃肠型及蠕动波",
+      "abdAuscultation": "肠鸣音正常，约4次/分",
+      "abdPalpation": "中上腹压痛，无反跳痛，肝脾肋下未触及"
+    }
+  },
+  "auxiliary": {
+    "items": [
+      {
+        "name": "腹部超声",
+        "result": "胆囊壁毛糙，未见明显结石",
+        "date": "2026-04-02",
+        "hospital": "合成医院",
+        "no": "US-0002"
+      }
+    ]
+  },
+  "summary": "测试患者丙，女，38岁，因上腹痛3天入院。",
+  "diagnosis": {
+    "confirmed": [
+      "急性胃炎",
+      "胆囊炎待排"
+    ],
+    "newLine": "",
+    "signature": "测试医师甲"
+  },
+  "soap": {
+    "s": {
+      "summary": "中年女性，急性起病，上腹痛3天，进食油腻食物后加重。",
+      "consistency": "与病史采集内容一致。"
+    },
+    "o": {
+      "pe": "中上腹压痛，无反跳痛。",
+      "aux": "腹部超声提示胆囊壁毛糙。"
+    },
+    "a": {
+      "basis": "病史、体征及超声结果支持急性胃炎。",
+      "basisDetail": [
+        {
+          "diagnosis": "急性胃炎",
+          "history": "上腹痛3天，进食油腻食物后加重",
+          "pe": "中上腹压痛",
+          "aux": "腹部超声提示胆囊壁毛糙"
+        }
+      ],
+      "ranking": "急性胃炎为主要诊断。",
+      "diff": [
+        {
+          "diagnosis": "消化性溃疡",
+          "why": "可有上腹痛",
+          "against": "疼痛与进食关系不典型",
+          "points": "必要时胃镜检查"
+        }
+      ],
+      "diffNote": ""
+    },
+    "p": {
+      "principle": "抑酸、保护胃黏膜，完善检查。",
+      "perDiagnosis": [
+        {
+          "diagnosis": "急性胃炎",
+          "exam": "胃镜、幽门螺杆菌检测",
+          "treatment": "抑酸及对症治疗"
+        }
+      ],
+      "individual": "根据进食诱因调整饮食。"
+    }
+  },
+  "discharge": {
+    "dischargeDate": "2026-04-07",
+    "admitCondition": "因上腹痛3天入院，中上腹压痛。",
+    "course": "予抑酸治疗后腹痛缓解。",
+    "dischargeStatus": "腹痛消失，进食可。",
+    "diagnoses": [
+      "急性胃炎"
+    ],
+    "advice": {
+      "drug": "按医嘱口服抑酸药",
+      "nonDrug": "规律饮食",
+      "lifestyle": "避免油腻及刺激性食物",
+      "followUp": "1周后门诊复诊"
+    }
+  },
+  "focusPE": {
+    "keys": [
+      "abdomen.abdPalpation"
+    ],
+    "note": "重点记录腹部压痛。"
+  },
+  "suggestions": {
+    "accepted": []
+  }
+}

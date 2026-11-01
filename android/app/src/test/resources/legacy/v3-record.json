@@ -1,0 +1,349 @@
+{
+  "schemaVersion": 3,
+  "id": "legacy-v3-obstetrics",
+  "updatedAt": "2026-05-10T09:00:00.000Z",
+  "meta": {
+    "createdAt": "2026-05-03T01:00:00.000Z",
+    "updatedAt": "2026-05-10T09:00:00.000Z",
+    "revision": 4,
+    "fieldStates": {
+      "basic.name": {
+        "source": "manual",
+        "reviewed": true,
+        "reviewedValueHash": "",
+        "sourceRef": ""
+      }
+    },
+    "conflicts": {},
+    "migratedFrom": null,
+    "migrationNotes": [],
+    "lastTemplateFill": null
+  },
+  "documentMeta": {
+    "summary": {
+      "origin": "manual",
+      "inputFingerprint": "",
+      "inputGroups": {},
+      "generatedTextHash": "",
+      "reviewedFingerprint": "",
+      "updatedAt": "2026-05-03T03:00:00.000Z"
+    },
+    "firstCourse": {
+      "s": {
+        "origin": "manual",
+        "inputFingerprint": "",
+        "inputGroups": {},
+        "generatedTextHash": "",
+        "reviewedFingerprint": "",
+        "updatedAt": "2026-05-03T03:00:00.000Z"
+      },
+      "oPe": {
+        "origin": "",
+        "inputFingerprint": "",
+        "inputGroups": {},
+        "generatedTextHash": "",
+        "reviewedFingerprint": "",
+        "updatedAt": ""
+      },
+      "oAux": {
+        "origin": "",
+        "inputFingerprint": "",
+        "inputGroups": {},
+        "generatedTextHash": "",
+        "reviewedFingerprint": "",
+        "updatedAt": ""
+      },
+      "basis": {
+        "origin": "",
+        "inputFingerprint": "",
+        "inputGroups": {},
+        "generatedTextHash": "",
+        "reviewedFingerprint": "",
+        "updatedAt": ""
+      }
+    },
+    "discharge": {
+      "admitCondition": {
+        "origin": "manual",
+        "inputFingerprint": "",
+        "inputGroups": {},
+        "generatedTextHash": "",
+        "reviewedFingerprint": "",
+        "updatedAt": "2026-05-10T08:00:00.000Z"
+      },
+      "diagnoses": {
+        "origin": "manual",
+        "inputFingerprint": "",
+        "textHash": "",
+        "confirmed": true,
+        "confirmedFingerprint": ""
+      }
+    }
+  },
+  "basic": {
+    "department": "obstetrics",
+    "name": "测试患者戊",
+    "gender": "女",
+    "age": "31",
+    "birthDate": "",
+    "marital": "已婚",
+    "nativePlace": "合成省",
+    "birthPlace": "合成市",
+    "nationality": "合成族",
+    "occupation": "教师",
+    "workUnit": "合成学校",
+    "address": "合成市样例路3号",
+    "phone": "000-0000-0003",
+    "recordNo": "ZY-0003",
+    "bedNo": "15",
+    "admitDate": "2026-05-03",
+    "admitTime": "09:30",
+    "recordDate": "2026-05-03",
+    "recordTime": "10:00",
+    "reliability": "可靠",
+    "informant": "本人",
+    "chiefComplaint": "停经34周，发现血压升高",
+    "chiefComplaintDuration": "1",
+    "chiefComplaintDurationUnit": "周"
+  },
+  "hpi": {
+    "onset": "1周前产检发现血压升高",
+    "cause": "无明显诱因",
+    "symptoms": "血压最高150/96mmHg，无头痛、视物模糊",
+    "relief": "休息后无明显变化",
+    "evolution": "血压波动于140～150/90～96mmHg",
+    "accompanying": "偶有双下肢轻度水肿",
+    "negativeDiscriminating": "无头痛、胸痛、呼吸困难及抽搐",
+    "treatment": "门诊建议低盐饮食并监测血压",
+    "generalCondition": "精神可，食欲正常，睡眠一般，大小便正常"
+  },
+  "ros": {
+    "cardio": {
+      "hypertension": {
+        "checked": true,
+        "detail": "最高150/96mmHg"
+      }
+    }
+  },
+  "pmh": {
+    "health": "平素健康",
+    "diseaseChecks": {},
+    "diseaseOther": "",
+    "diseaseDetail": "",
+    "longTermMeds": "无",
+    "infection": "否认肝炎、结核等传染病史",
+    "surgery": "否认手术史",
+    "trauma": "否认外伤史",
+    "transfusion": "否认输血史",
+    "poisoning": "否认中毒史",
+    "vaccine": "预防接种史不详",
+    "allergy": "无",
+    "allergenChecks": {},
+    "allergenOther": "",
+    "allergenReactionChecks": {},
+    "allergyReaction": "",
+    "relatedHistory": "既往无高血压病史",
+    "otherTreatDiseases": "",
+    "special": "无"
+  },
+  "personal": {
+    "maternal": "",
+    "birth": "出生于合成市",
+    "feeding": "",
+    "growth": "",
+    "residence": "长期居住于合成市",
+    "travel": "无疫区旅居史",
+    "smoking": "无",
+    "smokingAmount": "",
+    "drinking": "无",
+    "drinkingAmount": "",
+    "drugs": "无",
+    "environment": "无特殊毒物接触史",
+    "habits": "规律",
+    "sexualHistory": "否认不洁性接触史",
+    "occupationEnv": "教师，无粉尘及毒物接触",
+    "premorbidPersonality": "",
+    "stressEvent": ""
+  },
+  "marriage": {
+    "status": "已婚",
+    "age": "27",
+    "spouseHealth": "健康",
+    "sexLife": "正常",
+    "relation": "和睦"
+  },
+  "menstruation": {
+    "applicable": true,
+    "age": "13",
+    "cycle": "30天",
+    "duration": "5天",
+    "quantity": "中等",
+    "color": "暗红",
+    "clot": "无",
+    "leukorrhea": "无异常",
+    "lmp": "2025-09-15",
+    "menopauseAge": "",
+    "dysmenorrhea": "无"
+  },
+  "childbirth": {
+    "applicable": true,
+    "fullTerm": "0",
+    "premature": "0",
+    "abortion": "0",
+    "alive": "0",
+    "gravida": "1",
+    "para": "0",
+    "details": "首次妊娠",
+    "lastBirth": "",
+    "contraception": "无"
+  },
+  "family": {
+    "diseaseChecks": {},
+    "other": "否认家族遗传病史",
+    "deceased": "",
+    "threeGeneration": "父母均健在",
+    "similarDisease": "否认家族类似疾病史",
+    "infectionHistory": "否认家族传染病史"
+  },
+  "pe": {
+    "checked": {
+      "general": {
+        "development": true,
+        "nutrition": true,
+        "conscious": true,
+        "posture": true,
+        "cooperation": true
+      },
+      "chest": {
+        "lungAuscultation": true,
+        "heartAuscultation": true
+      },
+      "abdomen": {
+        "abdInspect": true,
+        "abdPalpation": true
+      }
+    },
+    "vitals": {
+      "temperature": "36.7",
+      "pulse": "92",
+      "respiration": "19",
+      "sbp": "146",
+      "dbp": "94",
+      "height": "162",
+      "weight": "68",
+      "abdCirc": "96"
+    },
+    "general": {
+      "development": "正常",
+      "nutrition": "良好",
+      "conscious": "清楚",
+      "posture": "自主体位",
+      "face": "正常",
+      "cooperation": "合作"
+    },
+    "chest": {
+      "lungAuscultation": "双肺呼吸音清，未闻及干湿性啰音",
+      "heartAuscultation": "心律齐，各瓣膜听诊区未闻及病理性杂音"
+    },
+    "abdomen": {
+      "abdInspect": "腹部膨隆，符合妊娠月份，未见胃肠型",
+      "abdPalpation": "腹软，无压痛及反跳痛，子宫轮廓清楚"
+    }
+  },
+  "auxiliary": {
+    "items": [
+      {
+        "name": "尿蛋白定量",
+        "result": "24小时尿蛋白定量0.28g",
+        "date": "2026-05-03",
+        "hospital": "合成医院",
+        "no": "LAB-0004"
+      },
+      {
+        "name": "产科超声",
+        "result": "单活胎，胎儿生长符合孕周，羊水指数正常",
+        "date": "2026-05-03",
+        "hospital": "合成医院",
+        "no": "US-0004"
+      }
+    ]
+  },
+  "summary": "测试患者戊，女，31岁，因停经34周、发现血压升高1周入院。",
+  "diagnosis": {
+    "confirmed": [
+      "妊娠期高血压疾病",
+      "孕1产0 34周"
+    ],
+    "newLine": "",
+    "signature": "测试医师丙"
+  },
+  "soap": {
+    "recordTime": "2026-05-03 11:00",
+    "s": {
+      "summary": "青年女性，孕34周，发现血压升高1周，无头痛及视物模糊。",
+      "consistency": "与病史采集内容一致。"
+    },
+    "o": {
+      "pe": "血压146/94mmHg，双下肢轻度水肿。",
+      "aux": "尿蛋白定量0.28g，胎儿超声未见异常。"
+    },
+    "a": {
+      "basis": "妊娠20周后血压升高，结合尿蛋白及临床情况评估。",
+      "basisDetail": [
+        {
+          "diagnosis": "妊娠期高血压疾病",
+          "history": "孕34周，发现血压升高1周",
+          "pe": "血压146/94mmHg",
+          "aux": "尿蛋白定量0.28g"
+        }
+      ],
+      "ranking": "妊娠期高血压疾病为主要诊断。",
+      "diff": [
+        {
+          "diagnosis": "慢性高血压",
+          "why": "可出现血压升高",
+          "against": "既往无高血压病史，孕20周后才发现",
+          "points": "产后复查血压"
+        }
+      ],
+      "diffNote": ""
+    },
+    "p": {
+      "principle": "监测血压及母胎情况，必要时降压治疗。",
+      "perDiagnosis": [
+        {
+          "diagnosis": "妊娠期高血压疾病",
+          "exam": "血压监测、尿蛋白定量、胎儿监护",
+          "treatment": "休息、低盐饮食，必要时降压"
+        }
+      ],
+      "individual": "结合孕周及胎盘功能安排分娩时机。"
+    }
+  },
+  "discharge": {
+    "dischargeDate": "2026-05-10",
+    "admitCondition": "因停经34周、发现血压升高1周入院，入院血压146/94mmHg。",
+    "course": "住院期间监测血压，予休息及低盐饮食，血压波动于140～150/90～96mmHg，胎儿监护未见异常。",
+    "dischargeStatus": "血压控制平稳，无头痛及视物模糊，胎儿情况良好。",
+    "diagnoses": [
+      "妊娠期高血压疾病",
+      "孕1产0 34周"
+    ],
+    "diagnosesConfirmed": true,
+    "advice": {
+      "drug": "按医嘱必要时口服降压药",
+      "nonDrug": "居家监测血压及胎动",
+      "lifestyle": "低盐饮食，保证休息",
+      "followUp": "3天后产科门诊复诊，有异常随时就诊"
+    }
+  },
+  "focusPE": {
+    "keys": [
+      "abdomen.abdPalpation"
+    ],
+    "note": "重点记录子宫及血压情况。"
+  },
+  "suggestions": {
+    "accepted": []
+  }
+}

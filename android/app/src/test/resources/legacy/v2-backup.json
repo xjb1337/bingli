@@ -1,0 +1,198 @@
+{
+  "app": "dabingli",
+  "schemaVersion": 2,
+  "exportedAt": "2026-04-10T06:00:00.000Z",
+  "records": [
+    {
+      "id": "legacy-v2-neurology",
+      "updatedAt": "2026-04-10T05:00:00.000Z",
+      "data": {
+        "schemaVersion": 2,
+        "meta": {
+          "createdAt": "2026-04-09T01:00:00.000Z",
+          "updatedAt": "2026-04-10T05:00:00.000Z"
+        },
+        "basic": {
+          "department": "神经内科",
+          "name": "测试患者丁",
+          "gender": "男",
+          "age": "67",
+          "marital": "已婚",
+          "nationality": "合成族",
+          "occupation": "退休",
+          "address": "合成市样例街2号",
+          "recordNo": "ZY-0002",
+          "bedNo": "12",
+          "admitDate": "2026-04-10",
+          "recordDate": "2026-04-10",
+          "reliability": "可靠",
+          "informant": "配偶",
+          "chiefComplaint": "右侧肢体无力",
+          "chiefComplaintDuration": "1",
+          "chiefComplaintDurationUnit": "天"
+        },
+        "hpi": {
+          "onset": "1天前晨起发现右侧肢体无力",
+          "cause": "无明显诱因",
+          "symptoms": "右上肢持物不稳，右下肢行走拖步",
+          "evolution": "症状持续，无明显好转",
+          "accompanying": "伴言语含糊，无头痛及呕吐",
+          "negativeDiscriminating": "无意识丧失、抽搐及发热",
+          "treatment": "未自行用药",
+          "generalCondition": "精神稍差，食欲一般，大小便正常"
+        },
+        "ros": {},
+        "pmh": {
+          "health": "有高血压病史",
+          "diseaseChecks": {
+            "高血压": true
+          },
+          "diseaseOther": "",
+          "diseaseDetail": "高血压10年，平素服药不规律",
+          "longTermMeds": "苯磺酸氨氯地平片",
+          "infection": "否认传染病史",
+          "surgery": "否认手术史",
+          "trauma": "否认外伤史",
+          "transfusion": "否认输血史",
+          "poisoning": "否认中毒史",
+          "vaccine": "预防接种史不详",
+          "allergy": "无",
+          "relatedHistory": "",
+          "otherTreatDiseases": "高血压",
+          "special": "无"
+        },
+        "personal": {
+          "birth": "出生于合成市",
+          "residence": "长期居住于合成市",
+          "travel": "无疫区旅居史",
+          "smoking": "已戒",
+          "smokingAmount": "20支/日×20年，已戒5年",
+          "drinking": "无",
+          "drinkingAmount": "",
+          "drugs": "无",
+          "environment": "无特殊毒物接触史",
+          "habits": "规律",
+          "sexualHistory": "否认不洁性接触史"
+        },
+        "marriage": {
+          "status": "已婚",
+          "age": "25",
+          "spouseHealth": "健康",
+          "sexLife": "正常",
+          "relation": "和睦"
+        },
+        "menstruation": {
+          "applicable": false
+        },
+        "childbirth": {
+          "applicable": false
+        },
+        "family": {
+          "diseaseChecks": {},
+          "other": "否认家族遗传病史",
+          "deceased": "",
+          "similarDisease": "否认家族类似疾病史"
+        },
+        "pe": {
+          "checked": {
+            "general": {
+              "development": true,
+              "nutrition": true,
+              "conscious": true,
+              "posture": true,
+              "cooperation": true
+            },
+            "nervousPE": {
+              "nerve": true,
+              "babinski": true,
+              "kernig": true
+            }
+          },
+          "vitals": {
+            "temperature": "36.5",
+            "pulse": "78",
+            "respiration": "18",
+            "sbp": "158",
+            "dbp": "92"
+          },
+          "general": {
+            "development": "正常",
+            "nutrition": "中等",
+            "conscious": "清楚",
+            "posture": "自主体位",
+            "cooperation": "合作"
+          },
+          "nervousPE": {
+            "nerve": "右侧肢体肌力4级，右侧病理征阳性",
+            "babinski": "右侧巴氏征阳性",
+            "kernig": "克氏征阴性"
+          }
+        },
+        "auxiliary": {
+          "items": [
+            {
+              "name": "头颅CT",
+              "result": "未见明显出血灶",
+              "date": "2026-04-10",
+              "hospital": "合成医院",
+              "no": "CT-0003"
+            }
+          ]
+        },
+        "summary": "测试患者丁，男，67岁，因右侧肢体无力1天入院。",
+        "diagnosis": {
+          "confirmed": [
+            "急性脑梗死",
+            "高血压3级"
+          ],
+          "newLine": "",
+          "signature": "测试医师乙"
+        },
+        "soap": {
+          "s": {
+            "summary": "老年男性，突发右侧肢体无力1天。",
+            "consistency": "与病史采集内容一致。"
+          },
+          "o": {
+            "pe": "右侧肢体肌力4级，右侧巴氏征阳性。",
+            "aux": "头颅CT未见出血。"
+          },
+          "a": {
+            "basis": "突发局灶性神经功能缺损，结合危险因素考虑急性脑梗死。",
+            "basisDetail": [],
+            "ranking": "",
+            "diff": [],
+            "diffNote": ""
+          },
+          "p": {
+            "principle": "抗血小板、改善脑循环并控制血压。",
+            "perDiagnosis": [],
+            "individual": ""
+          }
+        },
+        "discharge": {
+          "dischargeDate": "",
+          "admitCondition": "",
+          "course": "",
+          "dischargeStatus": "",
+          "diagnoses": [],
+          "advice": {
+            "drug": "",
+            "nonDrug": "",
+            "lifestyle": "",
+            "followUp": ""
+          }
+        },
+        "focusPE": {
+          "keys": [
+            "nervousPE.babinski"
+          ],
+          "note": ""
+        },
+        "suggestions": {
+          "accepted": []
+        }
+      }
+    }
+  ]
+}
