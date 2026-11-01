@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { RECORD_CORE, SCHEMA, type RecordListItem } from '@dabingli/domain';
+import type { RecoveryCopySummary } from '@dabingli/storage';
 import { DataTransferPanel } from '../components/DataTransferPanel';
 import { Card } from '../components/StepShell';
 
@@ -7,20 +8,24 @@ export function RecordsPage({
   list,
   activeId,
   exportText,
+  recovery,
   onNew,
   onOpen,
   onDelete,
   onImport,
   onDownload,
+  onRestoreRecovery,
 }: {
   list: readonly RecordListItem[];
   activeId?: string;
   exportText: string;
+  recovery?: RecoveryCopySummary | null;
   onNew: () => void;
   onOpen: (record: RecordListItem) => void;
   onDelete: (record: RecordListItem) => void;
   onImport: (raw: string, mode: 'merge' | 'replace') => void;
   onDownload: (scope: 'current' | 'all') => void;
+  onRestoreRecovery?: () => void;
 }) {
   const summaries = useMemo(() => {
     const departmentNames = new Map(SCHEMA.DEPARTMENTS.map((item) => [item.key, item.name]));
@@ -40,7 +45,7 @@ export function RecordsPage({
         <div>
           <div className="eyebrow">本机病历</div>
           <h2 id="records-heading">病历列表</h2>
-          <p>数据保存在兼容旧版的 localStorage 键中；当前版本不启用 IndexedDB。</p>
+          <p>病历保存在本机 IndexedDB；旧 localStorage 只在首次启动时只读迁移，原数据不会删除。</p>
         </div>
         <button type="button" className="button primary" onClick={onNew}>
           + 新建病历
@@ -89,7 +94,13 @@ export function RecordsPage({
       </div>
 
       <Card title="导入 / 导出">
-        <DataTransferPanel exportText={exportText} onImport={onImport} onDownload={onDownload} />
+        <DataTransferPanel
+          exportText={exportText}
+          recovery={recovery}
+          onImport={onImport}
+          onDownload={onDownload}
+          onRestoreRecovery={onRestoreRecovery}
+        />
       </Card>
     </section>
   );

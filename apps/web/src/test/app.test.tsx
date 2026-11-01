@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
@@ -7,6 +7,11 @@ import {
   type DabingliRecord,
   type RecordListItem,
 } from '@dabingli/domain';
+import {
+  createIndexedDbRepository,
+  deleteIndexedDbDatabase,
+  type IndexedDbRecordRepository,
+} from '@dabingli/storage';
 import { App } from '../App';
 import { createLocalStorageRepository } from '../repository';
 import fixtureV1 from '../../../../tests/fixtures/legacy/v1-record.json?raw';
@@ -23,6 +28,27 @@ import goldenV3FirstCourse from '../../../../tests/golden/v3-obstetrics/first-co
 import goldenV3Discharge from '../../../../tests/golden/v3-obstetrics/discharge.txt?raw';
 
 const DEPARTMENT_KEYS = SCHEMA.DEPARTMENTS.map((department) => department.key);
+const testRepositories: IndexedDbRecordRepository[] = [];
+const testDatabaseNames: string[] = [];
+let databaseSequence = 0;
+
+function createTestRepository(): IndexedDbRecordRepository {
+  databaseSequence += 1;
+  const name = `apps-web-test-${Date.now()}-${databaseSequence}`;
+  const repository = createIndexedDbRepository({
+    databaseName: name,
+    legacyStorage: window.localStorage,
+  });
+  testRepositories.push(repository);
+  testDatabaseNames.push(name);
+  return repository;
+}
+
+async function renderApp(repository = createTestRepository()) {
+  const view = render(<App repository={repository} />);
+  await screen.findByLabelText(/姓名/);
+  return { ...view, repository };
+}
 
 function readStoredJson<T>(key: string): T {
   const raw = window.localStorage.getItem(key);
@@ -37,9 +63,9 @@ function fixtureRecord(raw: string): DabingliRecord {
   return RECORD_CORE.cloneValue(first.data);
 }
 
-function seedLibrary(record: DabingliRecord): void {
-  const repository = createLocalStorageRepository(window.localStorage);
-  const saved = repository.saveToLibrary(record, Number(record.meta.revision) || 0);
+async function seedLibrary(repository: IndexedDbRecordRepository, record: DabingliRecord): Promise<void> {
+  await repository.initialize();
+  const saved = await repository.saveToLibrary(record, Number(record.meta.revision) || 0);
   if (!saved.ok) throw new Error(saved.reason ?? 'failed to seed repository');
 }
 
@@ -51,10 +77,15 @@ beforeEach(() => {
   window.localStorage.clear();
 });
 
+afterEach(async () => {
+  await Promise.all(testRepositories.splice(0).map((repository) => repository.close()));
+  await Promise.all(testDatabaseNames.splice(0).map((name) => deleteIndexedDbDatabase(name)));
+});
+
 describe('step navigation and keyboard flow', () => {
   it('keeps entered values while moving with the next and previous buttons', async () => {
     const user = userEvent.setup();
-    render(<App />);
+    await renderApp();
 
     const name = screen.getByLabelText(/姓名/);
     await user.type(name, '导航测试患者');
@@ -69,7 +100,7 @@ describe('step navigation and keyboard flow', () => {
 
   it('advances with Enter and keeps an open field group open while editing', async () => {
     const user = userEvent.setup();
-    render(<App />);
+    await renderApp();
 
     await user.click(screen.getByLabelText(/姓名/));
     await user.keyboard('{Enter}');
@@ -91,7 +122,7 @@ describe('step navigation and keyboard flow', () => {
 
   it('jumps directly to any step from the directory', async () => {
     const user = userEvent.setup();
-    render(<App />);
+    await renderApp();
 
     const directory = screen.getByRole('complementary', { name: '步骤目录' });
     await user.click(within(directory).getByRole('button', { name: /体格检查/ }));
@@ -104,7 +135,7 @@ describe('step navigation and keyboard flow', () => {
 
   it('closes the mobile directory with Escape', async () => {
     const user = userEvent.setup();
-    render(<App />);
+    await renderApp();
 
     await user.click(screen.getByRole('button', { name: /步骤 1\/11/ }));
     await waitFor(() => expect(document.getElementById('mobile-step-nav')).toBeInTheDocument());
@@ -115,7 +146,7 @@ describe('step navigation and keyboard flow', () => {
 
   it('moves to the first invalid field when locating a validation error', async () => {
     const user = userEvent.setup();
-    render(<App />);
+    await renderApp();
 
     const directory = screen.getByRole('complementary', { name: '步骤目录' });
     await user.click(within(directory).getByRole('button', { name: /生成病历/ }));
@@ -129,7 +160,7 @@ describe('step navigation and keyboard flow', () => {
 
   it('shows field errors only after the field is blurred or a save is attempted', async () => {
     const user = userEvent.setup();
-    render(<App />);
+    await renderApp();
 
     const name = screen.getByLabelText(/姓名/);
     const nameField = name.closest<HTMLElement>('[data-field-wrap]');
@@ -157,8 +188,8 @@ describe('step navigation and keyboard flow', () => {
   });
 });
 
-describe('localStorage repository compatibility', () => {
-  it('round-trips a record using the frozen legacy keys', () => {
+describe('localStorage fallback compatibility', () => {
+  it('round-trips a record using the frozen legacy keys', async () => {
     const repository = createLocalStorageRepository(window.localStorage);
     expect(repository.keys).toEqual({
       list: 'dabingli.records.v1',
@@ -173,7 +204,7 @@ describe('localStorage repository compatibility', () => {
     record.basic.age = '38';
     record.hpi.onset = '3天前出现咽痛';
 
-    const saved = repository.saveToLibrary(record, 0);
+    const saved = await repository.saveToLibrary(record, 0);
     if (!saved.ok || !saved.record?.id) throw new Error(saved.reason ?? 'save failed');
     const id = saved.record.id;
 
@@ -189,37 +220,36 @@ describe('localStorage repository compatibility', () => {
     expect(list[0]?.id).toBe(id);
     expect(list[0]?.data.basic.name).toBe('兼容键患者');
 
-    repository.saveSettings({ ...repository.loadSettings().settings, lastStep: 'pe', fontScale: 1.15 });
+    const settings = await repository.loadSettings();
+    await repository.saveSettings({ ...settings.settings, lastStep: 'pe', fontScale: 1.15 });
     expect(readStoredJson<{ lastStep: string }>(repository.keys.settings).lastStep).toBe('pe');
 
     const reopened = createLocalStorageRepository(window.localStorage);
-    expect(reopened.loadCurrent().record?.basic.name).toBe('兼容键患者');
-    expect(reopened.loadList().list[0]?.data.basic.name).toBe('兼容键患者');
-    expect(reopened.loadSettings().settings.fontScale).toBe(1.15);
+    expect((await reopened.loadCurrent()).record?.basic.name).toBe('兼容键患者');
+    expect((await reopened.loadList()).list[0]?.data.basic.name).toBe('兼容键患者');
+    expect((await reopened.loadSettings()).settings.fontScale).toBe(1.15);
   });
 
   it('renders a saved record after the app is mounted again', async () => {
     const user = userEvent.setup();
-    const firstRender = render(<App />);
+    const repository = createTestRepository();
+    const firstRender = await renderApp(repository);
 
     await user.type(screen.getByLabelText(/姓名/), '重新加载患者');
     await user.click(screen.getByRole('button', { name: /保存病历/ }));
 
     await waitFor(() => {
-      expect(window.localStorage.getItem(RECORD_CORE.STORAGE_KEYS.current)).not.toBeNull();
+      expect(screen.getByRole('status')).toHaveTextContent('已保存到本机');
     });
-    const pointer = readStoredJson<{ id: string }>(RECORD_CORE.STORAGE_KEYS.current);
-    expect(
-      readStoredJson<DabingliRecord>(`${RECORD_CORE.STORAGE_KEYS.draftPrefix}${pointer.id}`).basic.name,
-    ).toBe('重新加载患者');
+    expect((await repository.loadCurrent()).record?.basic.name).toBe('重新加载患者');
+    expect(window.localStorage.getItem(RECORD_CORE.STORAGE_KEYS.current)).toBeNull();
+    expect(window.localStorage.getItem(RECORD_CORE.STORAGE_KEYS.list)).toBeNull();
 
     firstRender.unmount();
-    render(<App />);
+    await renderApp(repository);
 
     expect(screen.getByLabelText(/姓名/)).toHaveValue('重新加载患者');
-    expect(readStoredJson<RecordListItem[]>(RECORD_CORE.STORAGE_KEYS.list)[0]?.data.basic.name).toBe(
-      '重新加载患者',
-    );
+    expect((await repository.loadList()).list[0]?.data.basic.name).toBe('重新加载患者');
   });
 });
 
@@ -262,9 +292,10 @@ describe('golden document rendering', () => {
       const user = userEvent.setup();
       const record = fixtureRecord(testCase.fixture);
       record.soap.recordTime = testCase.firstCourseDate;
-      seedLibrary(record);
+      const repository = createTestRepository();
+      await seedLibrary(repository, record);
 
-      render(<App />);
+      await renderApp(repository);
       const directory = screen.getByRole('complementary', { name: '步骤目录' });
       await user.click(within(directory).getByRole('button', { name: /生成病历/ }));
 

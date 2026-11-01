@@ -14,6 +14,9 @@ Vite 默认以 `/bingli/` 为发布基路径；部署到其他路径时设置 `V
 VITE_BASE=/ npm run build:web
 ```
 
-本阶段使用兼容旧版的 `localStorage` 键：
+病历、当前草稿和设置保存在 IndexedDB（Dexie）。首次启动时，如果旧的
 `dabingli.records.v1`、`dabingli.current.v1`、`dabingli.draft.v1.<id>` 和
-`dabingli.settings.v1`。索引数据库、Service Worker 与 AI 助手不在本 PR 范围内。
+`dabingli.settings.v1` 存在且新数据库为空，会通过 `@dabingli/domain` 迁移并保留旧键，
+作为回滚来源。替换导入会先写入可恢复的替换前副本。Service Worker 与 AI 助手不在本 PR 范围内。
+
+存储边界位于 `@dabingli/storage`；旧 localStorage 适配器只作为迁移输入和测试回退。
