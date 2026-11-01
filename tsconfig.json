@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "CommonJS",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "allowJs": false,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["packages/domain/src/**/*.ts"],
+  "exclude": ["packages/domain/dist", "node_modules"]
+}
