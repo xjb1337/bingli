@@ -18,6 +18,7 @@
   --warning: #9a6208;
   --radius: 14px;
   --shadow: 0 8px 28px rgb(24 69 60 / 8%);
+  --page-gutter: 12px;
 }
 
 * {
@@ -173,7 +174,8 @@ code {
   gap: 14px;
   width: 100%;
   min-width: 0;
-  padding: 12px max(16px, calc((100vw - 1440px) / 2));
+  padding-block: 12px;
+  padding-inline: max(var(--page-gutter), calc((100% - 1440px) / 2));
   border-bottom: 1px solid rgb(147 184 174 / 65%);
   background: rgb(255 255 255 / 94%);
   backdrop-filter: blur(12px);
@@ -228,11 +230,12 @@ code {
   width: min(100%, 1440px);
   min-width: 0;
   margin: 0 auto;
-  padding: 22px clamp(12px, 3vw, 32px) 48px;
+  padding-block: 22px 48px;
+  padding-inline: var(--page-gutter);
 }
 
 .global-notice {
-  width: min(100% - 24px, 1376px);
+  width: min(calc(100% - 2 * var(--page-gutter)), calc(1440px - 2 * var(--page-gutter)));
   margin: 16px auto 0;
 }
 
@@ -1480,6 +1483,10 @@ textarea[aria-invalid="true"] {
 }
 
 @media (min-width: 1024px) {
+  :root {
+    --page-gutter: 16px;
+  }
+
   .editor-workspace {
     grid-template-columns: minmax(224px, 252px) minmax(0, 1fr);
     gap: 24px;
@@ -1512,8 +1519,12 @@ textarea[aria-invalid="true"] {
 }
 
 @media (max-width: 420px) {
+  :root {
+    --page-gutter: 10px;
+  }
+
   .app-header {
-    padding: 10px 12px;
+    padding-block: 10px;
   }
 
   .brand-subtitle {
@@ -1531,7 +1542,7 @@ textarea[aria-invalid="true"] {
   }
 
   .app-main {
-    padding: 14px 10px 36px;
+    padding-block: 14px 36px;
   }
 
   .step-header,
