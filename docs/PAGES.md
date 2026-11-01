@@ -40,8 +40,8 @@ node --test tests/pr7-offline.test.cjs
 2. 工作流依次执行 `npm ci`、`npm run build:domain`、`npx vite build apps/web`，再上传 `apps/web/dist`。
 3. 仓库 Pages 的 Source 应设置为 **GitHub Actions**。
 
-工作流仅支持 `workflow_dispatch`，权限限定为 `pages: write` 和 `id-token: write`。Android APK
-发布继续使用独立的 `release.yml`，两者互不触发。
+工作流仅支持 `workflow_dispatch`；检测与构建 job 只有 `contents: read`，部署 job 才临时获得
+`pages: write` 和 `id-token: write`。Android APK 发布继续使用独立的 `release.yml`，两者互不触发。
 
 ## Android 与数据迁移
 

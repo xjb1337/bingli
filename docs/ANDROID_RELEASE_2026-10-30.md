@@ -25,7 +25,7 @@ $env:GRADLE_USER_HOME='C:\Users\liu\.gradle'
 
 参考 `xjb1337/medical-question-ai`，检查 `xjb1337/bingli` 最新正式 Release，读取唯一的 `update.json` 与 APK asset。启动时每天检查，顶部按钮可手动检查。下载前验证清单与当前签名；下载后验证大小、SHA-256、包名、版本号、版本名和实际 APK 签名，拒绝降级，再调用系统安装器。用户确认安装，不支持绕过系统静默安装。
 
-`.github/workflows/release.yml` 在 main 推送或手动触发后先运行网页验证与 Android 测试/lint，再构建签名 release、校验固定证书和版本、发布 `bingli.apk` 与 `update.json`。CI versionCode 为 300000 + GITHUB_RUN_NUMBER，正常高于本地首版。
+`.github/workflows/release.yml` 只在手动触发、输入 `confirm=RELEASE` 并通过 `release` 环境审批后运行；普通 push/PR 不构建 APK。它先运行网页验证与 Android 测试/lint，再构建签名 release、校验包名、固定证书和版本、发布 `bingli.apk` 与 `update.json`。新版发布步骤、Secrets 和回滚见 [Android 发布流程](RELEASE.md)。CI versionCode 为 300000 + GITHUB_RUN_NUMBER，正常高于本地首版。
 
 需要仓库 Secrets：ANDROID_KEYSTORE_BASE64、ANDROID_KEYSTORE_PASSWORD、ANDROID_KEY_ALIAS、ANDROID_KEY_PASSWORD、ANDROID_EXPECTED_CERT_SHA256。必须配置本机首版的同一密钥。
 
