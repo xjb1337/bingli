@@ -50,6 +50,23 @@ describe('WebFetchTransport', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it('calls the default global fetch without rebinding this (browser Illegal invocation)', async () => {
+    const original = globalThis.fetch;
+    const strictFetch = vi.fn(function (this: unknown) {
+      if (this !== undefined && this !== globalThis) throw new TypeError('Illegal invocation');
+      return Promise.resolve(response(200, successBody()));
+    });
+    globalThis.fetch = strictFetch as unknown as typeof fetch;
+    try {
+      const transport = new WebFetchTransport({ apiKey: 'sk-test-memory-only' });
+      const result = await transport.request(request);
+      expect(result.model).toBe('deepseek-flash');
+      expect(strictFetch).toHaveBeenCalledTimes(1);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
   it('sends the key only in the authorization header and parses final JSON', async () => {
     const fetchImpl = vi.fn(async () => response(200, successBody())) as unknown as typeof fetch;
     const transport = new WebFetchTransport({

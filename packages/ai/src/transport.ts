@@ -98,7 +98,7 @@ export class WebFetchTransport implements AiTransport {
     this.model = options.model ?? DEFAULT_DEEPSEEK_MODEL;
     this.endpoint = options.endpoint ?? DEEPSEEK_ENDPOINT;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-    this.fetchImpl = options.fetchImpl ?? fetch;
+    this.fetchImpl = options.fetchImpl ?? ((input, init) => globalThis.fetch(input, init));
   }
 
   async status(): Promise<AiTransportStatus> {
