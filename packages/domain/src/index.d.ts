@@ -3,6 +3,7 @@ import type {
   DabingliRecord,
   Department,
   DepthItem,
+  DiagnosticSeverity,
   DocumentIR,
   DocumentWarning,
   ExportBundle,
@@ -19,6 +20,7 @@ import type {
   RecordDocumentBundle,
   RecordListItem,
   RecordSummary,
+  RosEntry,
   RosSystem,
   SaveResult,
   SettingsResult,
@@ -57,6 +59,12 @@ export interface SchemaApi {
   peChecked(record: DabingliRecord, groupKey: string, itemKey: string): boolean;
   setPeChecked(record: DabingliRecord, groupKey: string, itemKey: string, on: boolean): DabingliRecord;
   peNormalText(item: PeItem): string;
+  FACT_STATES: readonly string[];
+  normalizeFactState(value: unknown): string;
+  rosFactState(entry: RosEntry | undefined): string;
+  peFactState(record: DabingliRecord, groupKey: string, itemKey: string, item?: PeItem): string;
+  inferPeFactState(item: PeItem | null, value: unknown): string;
+  setPeFactState(record: DabingliRecord, groupKey: string, itemKey: string, state: string): DabingliRecord;
 }
 
 export interface CoreApi {
@@ -148,6 +156,11 @@ export interface GeneratorApi {
   draftHPI(record: DabingliRecord): string;
   draftSummary(record: DabingliRecord): string;
   firstCourseSelfCheck(record: DabingliRecord): string[];
+  firstCourseSelfCheckDiagnostics(record: DabingliRecord): DocumentWarning[];
+  qualityDiagnostics(record: DabingliRecord): DocumentWarning[];
+  vitalConsistencyDiagnostics(record: DabingliRecord): DocumentWarning[];
+  factStateDiagnostics(record: DabingliRecord): DocumentWarning[];
+  hpiQualityDiagnostics(record: DabingliRecord): DocumentWarning[];
   diagnosisList(record: DabingliRecord): string[];
 }
 
@@ -169,6 +182,16 @@ export interface DepthApi {
   count(record: DabingliRecord): { total: number; high: number; mid: number; low: number };
   LABEL: Readonly<Record<string, string>>;
   SYMPTOMS: readonly unknown[];
+  DIAGNOSTIC_CODES: readonly string[];
+}
+
+export interface DiagnosticsApi {
+  SEVERITIES: readonly DiagnosticSeverity[];
+  create(input: Partial<DocumentWarning> & { code: string; path: string; message: string }): DocumentWarning;
+  fromWarning(warning: DocumentWarning | string, defaults?: Partial<DocumentWarning>): DocumentWarning;
+  isDiagnostic(value: unknown): value is DocumentWarning;
+  assertValid(list: unknown[]): unknown[];
+  codes(list: DocumentWarning[]): string[];
 }
 
 export interface HintsApi {
@@ -185,6 +208,7 @@ export const RECORD_CORE: CoreApi;
 export const TEMPLATE_DATA: readonly unknown[];
 export const TEMPLATES: TemplatesApi;
 export const DEPTH: DepthApi;
+export const DIAGNOSTICS: DiagnosticsApi;
 export const GENERATOR: GeneratorApi;
 export const HINTS: HintsApi;
 export const DOC_IR: {
@@ -210,6 +234,26 @@ export const DOC_IR: {
   renderPlain(document: DocumentIR): string;
   renderRecord(document: DocumentIR): string;
   warningList(document: DocumentIR): DocumentWarning[];
+  createFact(input: unknown): Fact | null;
+  documentFromSections(
+    kind: 'record' | 'firstCourse' | 'discharge',
+    title: string,
+    sections: readonly unknown[],
+    warnings?: readonly (DocumentWarning | string)[],
+    prefix?: string,
+  ): DocumentIR;
+  fromNumberedText(
+    kind: 'record' | 'firstCourse' | 'discharge',
+    title: string,
+    text: string,
+    warnings?: readonly (DocumentWarning | string)[],
+    factsByTitle?: Readonly<Record<string, Fact[]>>,
+  ): DocumentIR;
+  renderDocument(document: DocumentIR): string;
+  renderNumbered(document: DocumentIR): string;
+  isBareTimeFragment(text: string): boolean;
+  normalizeNegationScope(text: string): string;
+  assembleClinicalNarrative(parts: readonly string[]): string[];
 };
 export const DOCUMENT_IR: typeof DOC_IR;
 export const MIGRATIONS: {

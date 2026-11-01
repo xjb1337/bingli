@@ -1504,10 +1504,12 @@ const SCHEMA = (() => {
         onset: '',              // 起病情况
         cause: '',              // 发病诱因（评分表第2页 2 分）
         symptoms: '',           // 主要症状特点
+        aggravating: '',        // 加重因素
         relief: '',             // 缓解因素（评分表第6页现病史明确列出）
         evolution: '',          // 病情进展
         accompanying: '',       // 伴随症状
         negativeDiscriminating: '', // 有鉴别诊断意义的阴性病史（第2页 5 分；第6页现病史）
+        negativePertinent: '',  // 新结构字段别名；旧 negativeDiscriminating 原样保留
         treatment: '',          // 诊治经过（整段手写，覆盖诊治单位/检查/治疗/用药/效果）
         generalCondition: '',   // 一般情况
         extra: ''               // 补充
@@ -1644,6 +1646,10 @@ const SCHEMA = (() => {
         spine: {},
         nervousPE: {}
       },
+      // 查体事实状态：{ [组.项]: 'asked_positive'|'asked_negative'|'not_asked' }
+      // 不放进 pe 对象内，避免被旧代码当成一个查体分组；旧存档缺省时由
+      // pe.checked 与已填写文字推导，读写完全兼容。
+      peFactStates: {},
       // 辅助检查
       auxiliary: {
         // 每项：{ name 项目名, result 结果, date 检查日期, hospital 检查机构, no 检查号 }
@@ -1829,6 +1835,53 @@ const SCHEMA = (() => {
 
   /* ---------------------- 查体项「是否本次检查了」 ---------------------- */
 
+  const FACT_STATES = [
+    'asked_positive', 'asked_negative', 'not_asked',
+    'default_normal_pending_review', 'manual_text'
+  ];
+
+  /** 统一事实状态；同时接受计划中的连字符写法，方便旧数据/外部调用。 */
+  function normalizeFactState(value) {
+    const key = String(value == null ? '' : value).trim().toLowerCase().replace(/-/g, '_');
+    return FACT_STATES.indexOf(key) >= 0 ? key : '';
+  }
+
+  /** ROS 条目状态：显式 status 优先，旧 checked/negative 仅作回退。 */
+  function rosFactState(entry) {
+    const item = entry || {};
+    const explicit = normalizeFactState(item.status || item.factState);
+    if (explicit) return explicit;
+    if (item.checked) return 'asked_positive';
+    if (item.negative) return 'asked_negative';
+    return 'not_asked';
+  }
+
+  function peStoredFactState(record, groupKey, itemKey) {
+    const all = (record || {}).peFactStates || {};
+    const group = all[groupKey];
+    if (!group || typeof group !== 'object') return '';
+    const raw = group[itemKey];
+    if (raw && typeof raw === 'object') return normalizeFactState(raw.state || raw.status);
+    return normalizeFactState(raw);
+  }
+
+  function setPeFactState(record, groupKey, itemKey, state) {
+    if (!record) return record;
+    const normalized = normalizeFactState(state);
+    if (!normalized) return record;
+    const all = record.peFactStates || (record.peFactStates = {});
+    const group = all[groupKey] || (all[groupKey] = {});
+    group[itemKey] = normalized;
+    return record;
+  }
+
+  /** 勾选/填写内容推导出的保守状态；显式状态永远优先。 */
+  function inferPeFactState(item, value) {
+    const shown = String(value == null ? '' : value).trim();
+    if (!shown) return 'asked_negative';
+    return peValueIsDefault(item, shown) ? 'asked_negative' : 'asked_positive';
+  }
+
   /**
    * 一个查体项到底做没做——这是「勾选制」的唯一真相。
    *
@@ -1859,6 +1912,8 @@ const SCHEMA = (() => {
    */
   function peChecked(record, groupKey, itemKey) {
     const pe = (record || {}).pe || {};
+    const explicit = peStoredFactState(record, groupKey, itemKey);
+    if (explicit) return explicit !== 'not_asked';
     const ck = pe.checked || {};
     const g = ck[groupKey];
     const raw = g && typeof g === 'object' ? g[itemKey] : undefined;
@@ -1875,6 +1930,19 @@ const SCHEMA = (() => {
     // 当已查）本轮删除。现在走到这里的都是「用户没勾、也没写过字」的项，
     // 一定是没查 —— 不许替学生认定正常。
     return false;
+  }
+
+  /**
+   * 查体事实状态：未勾/显式未查 → not_asked；已查且手写异常描述 → asked_positive；
+   * 已查但为空或仍是规范正常描述 → asked_negative。显式状态优先。
+   */
+  function peFactState(record, groupKey, itemKey, itemOverride) {
+    const explicit = peStoredFactState(record, groupKey, itemKey);
+    if (explicit) return explicit;
+    if (!peChecked(record, groupKey, itemKey)) return 'not_asked';
+    const item = itemOverride || findPEItem(groupKey + '.' + itemKey);
+    const store = (((record || {}).pe || {})[groupKey]) || {};
+    return inferPeFactState(item, store[itemKey]);
   }
 
   /**
@@ -1910,7 +1978,9 @@ const SCHEMA = (() => {
     PE_INDEX, findPEItem, childPEItems, peItemFilled, parentSupersededByChild,
     peValueIsDefault,
     // 勾选制（本次检查了哪些项）
-    peChecked, setPeChecked, peNormalText
+    peChecked, setPeChecked, peNormalText,
+    FACT_STATES, normalizeFactState, rosFactState, peFactState, inferPeFactState,
+    setPeFactState
   };
 })();
 

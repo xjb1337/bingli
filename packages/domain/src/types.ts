@@ -12,6 +12,13 @@ export type FieldSource =
   | '';
 export type Polarity = 'positive' | 'negative' | 'unknown';
 export type DocumentKind = 'record' | 'firstCourse' | 'discharge';
+export type DiagnosticSeverity = 'error' | 'warning' | 'info';
+export type FactState =
+  | 'asked_positive'
+  | 'asked_negative'
+  | 'not_asked'
+  | 'default_normal_pending_review'
+  | 'manual_text';
 
 export interface Evidence {
   path?: string;
@@ -40,11 +47,13 @@ export interface DocumentSection {
 
 export interface DocumentWarning {
   code: string;
-  severity: string;
+  severity: DiagnosticSeverity;
+  path: string;
   message: string;
   paths?: string[];
   document?: DocumentKind;
   action?: string;
+  evidence?: Evidence[];
 }
 
 export interface DocumentIR {
@@ -112,10 +121,12 @@ export interface HpiSection {
   onset: string;
   cause: string;
   symptoms: string;
+  aggravating?: string;
   relief: string;
   evolution: string;
   accompanying: string;
   negativeDiscriminating: string;
+  negativePertinent?: string;
   treatment: string;
   generalCondition: string;
   extra: string;
@@ -125,6 +136,8 @@ export interface HpiSection {
 export interface RosEntry {
   checked?: boolean;
   negative?: boolean;
+  status?: FactState | string;
+  factState?: FactState | string;
   time?: string;
   detail?: string;
   [key: string]: unknown;
@@ -334,6 +347,7 @@ export interface DabingliRecord {
   basic: BasicSection;
   hpi: HpiSection;
   ros: RosStore;
+  peFactStates?: Record<string, Record<string, FactState | { state?: FactState; status?: FactState } | undefined> | undefined>;
   pmh: PmhSection;
   personal: PersonalSection;
   marriage: MarriageSection;
@@ -496,6 +510,7 @@ export interface VitalDefinition {
 }
 
 export interface TemplateSource {
+  kind?: string;
   label: string;
   note: string;
 }
@@ -507,6 +522,9 @@ export interface Template {
   alias?: string[];
   hint?: string;
   source?: TemplateSource;
+  verified?: boolean;
+  verificationStatus?: 'verified' | 'unverified' | string;
+  verificationLabel?: string;
   record: Record<string, unknown>;
   [key: string]: unknown;
 }
@@ -544,6 +562,13 @@ export interface DepthItem {
   section: string;
   message: string;
   label: string;
+  code: string;
+  severity: DiagnosticSeverity;
+  path: string;
+  paths: string[];
+  document?: DocumentKind;
+  action?: string;
+  evidence: Evidence[];
 }
 
 export interface GenerateOptions {

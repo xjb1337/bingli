@@ -426,15 +426,32 @@ export function SummaryStep({ record, update, errors, onJump }: StepComponentPro
       <Collapsible title="问诊补充提示" badge={`${depth.length} 条`}>
         {depth.length ? (
           <ul className="depth-list">
-            {depth.map((item) => (
-              <li key={item.id} className={`depth-${item.level}`}>
-                <span>{item.label}</span>
-                <div>
-                  <p>{item.message}</p>
-                  <small>{item.section}</small>
-                </div>
-              </li>
-            ))}
+            {depth.map((item) => {
+              const locations = Array.from(new Set(item.evidence
+                .map((evidence) => evidence.path)
+                .filter((path): path is string => Boolean(path))));
+              return (
+                <li key={item.id} className={`depth-${item.level}`}>
+                  <span>{item.label}</span>
+                  <div>
+                    <p>{item.message}</p>
+                    <small className="depth-meta">
+                      <code>{item.code}</code>
+                      <code>{item.path}</code>
+                      <span>{item.section}</span>
+                      {locations.length ? <span>证据：{locations.join('、')}</span> : null}
+                    </small>
+                    <button
+                      type="button"
+                      className="button ghost compact-button depth-jump"
+                      onClick={() => onJump(item.path)}
+                    >
+                      定位
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         ) : (
           <p className="muted">当前规则未发现需要补充的追问。</p>
