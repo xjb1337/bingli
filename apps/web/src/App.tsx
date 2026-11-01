@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   useEffect,
   useMemo,
   useRef,
@@ -37,16 +39,27 @@ import { BasicStep } from './pages/BasicStep';
 import { FamilyStep } from './pages/FamilyStep';
 import { HpiStep } from './pages/HpiStep';
 import { MarriageStep } from './pages/MarriageStep';
-import { OutputStep } from './pages/OutputStep';
 import { PeStep } from './pages/PeStep';
 import { PersonalStep } from './pages/PersonalStep';
 import { PmhStep } from './pages/PmhStep';
-import { RecordsPage } from './pages/RecordsPage';
 import { RosStep } from './pages/RosStep';
-import { SettingsPage } from './pages/SettingsPage';
 import { SummaryStep } from './pages/SummaryStep';
 import { STEPS, stepIndexOf, stepKeyForPath, type StepKey } from './steps';
 import type { StepComponentProps } from './editor-types';
+
+const OutputStep = lazy(() =>
+  import('./pages/OutputStep').then((module) => ({ default: module.OutputStep })),
+);
+const RecordsPage = lazy(() =>
+  import('./pages/RecordsPage').then((module) => ({ default: module.RecordsPage })),
+);
+const SettingsPage = lazy(() =>
+  import('./pages/SettingsPage').then((module) => ({ default: module.SettingsPage })),
+);
+
+function LazyContentFallback() {
+  return <p className="lazy-content-status" role="status">正在加载页面，请稍候。</p>;
+}
 
 type AppView = 'editor' | 'records' | 'settings';
 
@@ -726,35 +739,39 @@ function EditorApp({
 
       <main id="main-content" className="app-main">
         {view === 'records' ? (
-          <RecordsPage
-            list={list}
-            activeId={record.id}
-            exportText={exportText}
-            recovery={recovery}
-            onNew={createNewRecord}
-            onOpen={openRecord}
-            onDelete={deleteRecord}
-            onImport={importJson}
-            onDownload={exportJson}
-            onRestoreRecovery={restoreRecovery}
-          />
+          <Suspense fallback={<LazyContentFallback />}>
+            <RecordsPage
+              list={list}
+              activeId={record.id}
+              exportText={exportText}
+              recovery={recovery}
+              onNew={createNewRecord}
+              onOpen={openRecord}
+              onDelete={deleteRecord}
+              onImport={importJson}
+              onDownload={exportJson}
+              onRestoreRecovery={restoreRecovery}
+            />
+          </Suspense>
         ) : view === 'settings' ? (
-          <SettingsPage
-            settings={settings}
-            exportText={exportText}
-            recovery={recovery}
-            apiKey={apiKey}
-            androidConfigured={androidStatus?.configured}
-            androidModel={androidStatus?.model}
-            androidStatusLoading={androidStatusLoading}
-            onChange={saveSettings}
-            onApiKeyChange={setApiKey}
-            onOpenAndroidAiSettings={androidBridge ? () => androidBridge.aiSettings?.() : undefined}
-            onRefreshAndroidStatus={androidBridge ? refreshAndroidAiStatus : undefined}
-            onImport={importJson}
-            onDownload={exportJson}
-            onRestoreRecovery={restoreRecovery}
-          />
+          <Suspense fallback={<LazyContentFallback />}>
+            <SettingsPage
+              settings={settings}
+              exportText={exportText}
+              recovery={recovery}
+              apiKey={apiKey}
+              androidConfigured={androidStatus?.configured}
+              androidModel={androidStatus?.model}
+              androidStatusLoading={androidStatusLoading}
+              onChange={saveSettings}
+              onApiKeyChange={setApiKey}
+              onOpenAndroidAiSettings={androidBridge ? () => androidBridge.aiSettings?.() : undefined}
+              onRefreshAndroidStatus={androidBridge ? refreshAndroidAiStatus : undefined}
+              onImport={importJson}
+              onDownload={exportJson}
+              onRestoreRecovery={restoreRecovery}
+            />
+          </Suspense>
         ) : (
           <div className="editor-workspace">
             <aside className="desktop-step-directory" aria-label="步骤目录">
@@ -790,7 +807,9 @@ function EditorApp({
               ) : null}
 
               <form className="editor-form" onSubmit={submitStep} onBlur={handleFieldBlur} noValidate>
-                {stepContent}
+                <Suspense fallback={<LazyContentFallback />}>
+                  {stepContent}
+                </Suspense>
                 <footer className="editor-footer">
                   <button
                     type="button"

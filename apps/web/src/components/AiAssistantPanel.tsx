@@ -268,8 +268,8 @@ export function AiAssistantPanel({
                 <input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} />
                 <span>我已核对下方实际发送内容，确认可以发送给 DeepSeek。</span>
               </label>
-              <details>
-                <summary>查看实际发送内容（{request.sources.length} 条资料）</summary>
+              <section className="ai-send-preview" aria-labelledby="ai-send-heading">
+                <h4 id="ai-send-heading">实际发送内容（{request.sources.length} 条资料）</h4>
                 <ul className="ai-source-list">
                   {request.sources.map((source, index) => (
                     <li key={`${source.source}-${index}`}>
@@ -279,6 +279,9 @@ export function AiAssistantPanel({
                     </li>
                   ))}
                 </ul>
+              </section>
+              <details>
+                <summary>查看原始 JSON（高级）</summary>
                 <pre className="ai-json-preview">{request.user}</pre>
               </details>
             </div>
