@@ -12,11 +12,10 @@ const { bootGlobals } = require('./bootstrap.cjs');
 
 const { SCHEMA, GENERATOR, HINTS } = bootGlobals();
 
-// 章节顺序对齐用户提供的病历模板（2026-10）
+// 固定章节顺序对齐温州市人民医院入院记录模板（2026-10）
 const REQUIRED_SECTIONS = [
-  '一般项目', '主诉', '现病史', '既往史', '系统回顾',
-  '个人史', '婚姻史', '月经与生育史', '家庭史', '体格检查', '辅助检查',
-  '摘要', '诊断依据', '初步诊断'
+  '一般项目', '主诉', '现病史', '既往史',
+  '个人史', '婚育史', '家族史', '体格检查', '辅助检查', '初步诊断'
 ];
 
 function makeRecord(deptKey, over) {
@@ -37,12 +36,15 @@ function makeRecord(deptKey, over) {
 
 /* ======================= 科室完整性 ======================= */
 
-test('每个科室都能生成全部14个章节', async t => {
+test('每个科室都能生成10个固定章节，空系统回顾不输出', async t => {
   for (const dept of SCHEMA.DEPARTMENTS) {
     await t.test(dept.name, () => {
       const text = GENERATOR.generate(makeRecord(dept.key)).text;
       const missing = REQUIRED_SECTIONS.filter(s => !text.includes(`【${s}】`));
       assert.deepEqual(missing, [], `缺少章节：${missing.join(',')}`);
+      assert.ok(!text.includes('【系统回顾】'), '未问系统回顾时整节不出现');
+      assert.ok(!text.includes('【摘要】'), '入院记录模板不包含摘要');
+      assert.ok(!text.includes('【诊断依据】'), '入院记录模板不包含诊断依据');
     });
   }
 });

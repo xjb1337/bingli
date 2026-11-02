@@ -130,7 +130,11 @@ function renderPlain(ir) {
 }
 
 function renderRecord(ir) {
-  return (ir && Array.isArray(ir.sections) ? ir.sections : []).map((s) => `【${s.title}】\n${(s.paragraphs || []).join('\n')}`).join('\n\n') + '\n';
+  const head = clean(ir && ir.prefix);
+  const body = (ir && Array.isArray(ir.sections) ? ir.sections : [])
+    .map((s) => `【${s.title}】\n${(s.paragraphs || []).join('\n')}`)
+    .join('\n\n');
+  return (head ? `${head}\n\n` : '') + body + '\n';
 }
 
 function renderNumbered(ir) {

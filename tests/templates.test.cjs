@@ -300,8 +300,8 @@ test('listByDept 只给本科室的模板，通用科给空', () => {
 /* ---------------------------- 生成质量 ---------------------------- */
 
 test('每个模板套用后都能生成一份结构完整的病历', () => {
-  const REQUIRED = ['一般项目', '主诉', '现病史', '既往史', '系统回顾', '个人史',
-    '婚姻史', '月经与生育史', '家庭史', '体格检查', '辅助检查', '摘要', '诊断依据', '初步诊断'];
+  const REQUIRED = ['一般项目', '主诉', '现病史', '既往史', '个人史',
+    '婚育史', '家族史', '体格检查', '辅助检查', '初步诊断'];
   const bad = [];
   TEMPLATES.all().forEach(t => {
     const r = S.emptyRecord();
@@ -309,6 +309,9 @@ test('每个模板套用后都能生成一份结构完整的病历', () => {
     const text = G.generate(r).text;
     REQUIRED.forEach(sec => {
       if (!text.includes(`【${sec}】`)) bad.push(`${t.key}: 缺【${sec}】`);
+    });
+    ['摘要', '诊断依据'].forEach(sec => {
+      if (text.includes(`【${sec}】`)) bad.push(`${t.key}: 入院记录不应输出【${sec}】`);
     });
     const lines = text.split('\n').filter(x => x.trim());
     if (lines.length < 40) bad.push(`${t.key}: 只有 ${lines.length} 行，太短`);

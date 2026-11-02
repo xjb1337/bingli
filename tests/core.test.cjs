@@ -448,8 +448,8 @@ test('中文科室名的旧存档能正常生成专科查体', () => {
   };
   const r = C.normalizeRecord(raw, SCHEMA.emptyRecord, DEPT_KEYS);
   assert.equal(r.basic.department, 'digestive');
-  // 科别行要写中文名，不是键名
+  // 眉栏科室要写中文名，不是键名
   const t = GENERATOR.generate(r).text;
-  assert.match(t, /科别：消化内科/);
-  assert.doesNotMatch(t, /科别：digestive/);
+  assert.match(t, /科室：消化内科/);
+  assert.doesNotMatch(t, /科室：digestive/);
 });

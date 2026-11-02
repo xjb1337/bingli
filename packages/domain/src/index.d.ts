@@ -147,6 +147,7 @@ export interface CoreApi {
 }
 
 export interface GeneratorApi {
+  DOCUMENT_TEMPLATES: DocumentTemplateMap;
   generate(record: DabingliRecord, options?: GenerateOptions): GeneratedRecord;
   generatePlain(record: DabingliRecord, options?: GenerateOptions): string;
   validate(record: DabingliRecord): string[];
@@ -169,6 +170,7 @@ export interface GeneratorApi {
 }
 
 export interface TemplatesApi {
+  DOCUMENT_TEMPLATES: DocumentTemplateMap;
   listByDept(dept: string): Template[];
   get(key: string): Template | null;
   all(): Template[];
@@ -179,6 +181,25 @@ export interface TemplatesApi {
   deptName(key: string): string;
   outlineOf(template: Template): TemplateOutlineItem[];
   SECTION_LABEL: Readonly<Record<string, string>>;
+}
+
+export interface DocumentTemplateMetadata {
+  kind: 'record' | 'firstCourse' | 'discharge';
+  title: string;
+  verified: boolean;
+  verificationStatus: 'verified' | 'unverified';
+  verificationLabel: string;
+  source?: {
+    kind: string;
+    label: string;
+    note?: string;
+  };
+}
+
+export interface DocumentTemplateMap {
+  record: DocumentTemplateMetadata;
+  firstCourse: DocumentTemplateMetadata;
+  discharge: DocumentTemplateMetadata;
 }
 
 export interface DepthApi {
@@ -214,6 +235,7 @@ export const TEMPLATES: TemplatesApi;
 export const DEPTH: DepthApi;
 export const DIAGNOSTICS: DiagnosticsApi;
 export const GENERATOR: GeneratorApi;
+export const DOCUMENT_TEMPLATES: DocumentTemplateMap;
 export const HINTS: HintsApi;
 export const DOC_IR: {
   section(title: string, body: string, facts?: Fact[], warnings?: readonly (DocumentWarning | string)[]): {
