@@ -590,8 +590,8 @@ test('录入步骤顺序与 SECTION_ORDER 的病史部分一一对应', () => {
 
   const map = {
     basic: '一般项目', hpi: '现病史', pmh: '既往史', ros: '系统回顾',
-    personal: '个人史', marriage: '婚姻史', family: '家庭史',
-    pe: '体格检查', aux: '辅助检查', summary: '摘要'
+    personal: '个人史', marriage: '婚育史', family: '家族史',
+    pe: '体格检查', aux: '辅助检查'
   };
   const pairs = keys.filter(k => map[k]).map(k => [k, sec.indexOf(map[k])]);
   const idx = pairs.map(p => p[1]);
@@ -600,6 +600,9 @@ test('录入步骤顺序与 SECTION_ORDER 的病史部分一一对应', () => {
   // 数组原型不同，deepStrictEqual 会因原型不等而报「看起来一模一样」的错。
   const sorted = [...idx].sort((a, b) => a - b);
   assert.equal(idx.join(','), sorted.join(','), `步骤顺序应与章节顺序一致，实际：${JSON.stringify(pairs)}`);
+  // 摘要步骤仍保留结构化数据供首次病程使用，但入院记录模板不打印【摘要】。
+  assert.equal(sec.includes('摘要'), false);
+  assert.equal(sec.includes('诊断依据'), false);
 });
 
 /* ======================= 记住上次停留的步骤 ======================= */

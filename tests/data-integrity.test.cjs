@@ -35,7 +35,7 @@ function vitalsLine(r) {
 
 /** 摘要（含「查体：」那一段） */
 function summaryText(r) {
-  return GENERATOR.generate(r).sections['摘要'] || '';
+  return GENERATOR.buildSummary(r) || '';
 }
 
 /** 首次病程录的 O 段 */

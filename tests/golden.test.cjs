@@ -46,7 +46,7 @@ const DOCUMENTS = [
   {
     file: 'dabingli.txt',
     generate: (record, testCase) => GENERATOR.generate(record).text,
-    heading: '【一般项目】'
+    heading: '【入院记录】'
   },
   {
     file: 'first-course.txt',

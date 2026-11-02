@@ -233,7 +233,7 @@ test('PR5-08 三种文书都从文档 IR 输出且章节顺序稳定', () => {
   assert.deepEqual(Object.keys(bundle).sort(), ['discharge', 'firstCourse', 'record']);
 
   assert.equal(bundle.record.kind, 'record');
-  assert.equal(bundle.record.title, '大病历');
+  assert.equal(bundle.record.title, '入院记录');
   assert.equal(bundle.firstCourse.kind, 'firstCourse');
   assert.equal(bundle.firstCourse.title, '首次病程录');
   assert.equal(bundle.discharge.kind, 'discharge');
@@ -242,7 +242,10 @@ test('PR5-08 三种文书都从文档 IR 输出且章节顺序稳定', () => {
   assert.equal(bundle.record.text, GENERATOR.generate(r).text);
   assert.equal(bundle.firstCourse.text, GENERATOR.buildFirstCourseRecord(r));
   assert.equal(bundle.discharge.text, GENERATOR.buildDischargeRecord(r));
-  assert.deepEqual(bundle.record.sections.map(item => item.title), GENERATOR.SECTION_ORDER);
+  assert.deepEqual(bundle.record.sections.map(item => item.title), [
+    '一般项目', '主诉', '现病史', '既往史', '个人史', '婚育史', '家族史',
+    '体格检查', '辅助检查', '初步诊断'
+  ]);
   assert.deepEqual(bundle.firstCourse.sections.map(item => item.title), [
     '一、病历特点（S）', '二、客观记录（O）', '三、诊断依据（A）', '四、鉴别诊断（A）', '五、诊疗计划（P）'
   ]);
