@@ -1,0 +1,415 @@
+{
+  "schemaVersion": 3,
+  "id": "wzrm-neuro-fictional",
+  "updatedAt": "2026-10-28T08:00:00.000Z",
+  "_fictional": true,
+  "meta": {
+    "createdAt": "2026-10-20T01:30:00.000Z",
+    "updatedAt": "2026-10-28T08:00:00.000Z",
+    "revision": 3,
+    "fieldStates": {},
+    "conflicts": {},
+    "migratedFrom": null,
+    "migrationNotes": [],
+    "lastTemplateFill": null
+  },
+  "documentMeta": {
+    "summary": {
+      "origin": "manual",
+      "inputFingerprint": "",
+      "inputGroups": {},
+      "generatedTextHash": "",
+      "reviewedFingerprint": "",
+      "updatedAt": "2026-10-20T03:00:00.000Z"
+    },
+    "firstCourse": {
+      "s": {
+        "origin": "manual",
+        "inputFingerprint": "",
+        "inputGroups": {},
+        "generatedTextHash": "",
+        "reviewedFingerprint": "",
+        "updatedAt": "2026-10-20T03:00:00.000Z"
+      },
+      "oPe": {
+        "origin": "manual",
+        "inputFingerprint": "",
+        "inputGroups": {},
+        "generatedTextHash": "",
+        "reviewedFingerprint": "",
+        "updatedAt": "2026-10-20T03:00:00.000Z"
+      },
+      "oAux": {
+        "origin": "manual",
+        "inputFingerprint": "",
+        "inputGroups": {},
+        "generatedTextHash": "",
+        "reviewedFingerprint": "",
+        "updatedAt": "2026-10-20T03:00:00.000Z"
+      },
+      "basis": {
+        "origin": "manual",
+        "inputFingerprint": "",
+        "inputGroups": {},
+        "generatedTextHash": "",
+        "reviewedFingerprint": "",
+        "updatedAt": "2026-10-20T03:00:00.000Z"
+      }
+    },
+    "discharge": {
+      "admitCondition": {
+        "origin": "manual",
+        "inputFingerprint": "",
+        "inputGroups": {},
+        "generatedTextHash": "",
+        "reviewedFingerprint": "",
+        "updatedAt": "2026-10-28T07:30:00.000Z"
+      },
+      "diagnoses": {
+        "origin": "manual",
+        "inputFingerprint": "",
+        "textHash": "",
+        "confirmed": true,
+        "confirmedFingerprint": "2026-10-28T08:00:00.000Z"
+      }
+    }
+  },
+  "basic": {
+    "department": "neurology",
+    "name": "虚构患者丙",
+    "gender": "男",
+    "age": "62",
+    "birthDate": "1964-03-12",
+    "marital": "已婚",
+    "nativePlace": "合成省",
+    "birthPlace": "合成市",
+    "nationality": "汉族",
+    "occupation": "虚构职业",
+    "workUnit": "合成市虚构单位",
+    "address": "合成市测试路1号",
+    "phone": "000-0000-0001",
+    "recordNo": "TEST-0001",
+    "bedNo": "08",
+    "admitDate": "2026-10-20",
+    "admitTime": "09:50",
+    "recordDate": "2026-10-20",
+    "recordTime": "10:00",
+    "reliability": "可靠",
+    "informant": "本人",
+    "chiefComplaint": "左侧肢体乏力8小时余",
+    "chiefComplaintDuration": "",
+    "chiefComplaintDurationUnit": "小时"
+  },
+  "hpi": {
+    "onset": "患者8小时前（2026-10-20 02:30左右）无明显诱因出现左侧肢体乏力，持物不稳，行走时向左偏斜，伴言语稍含糊。",
+    "cause": "无明显诱因。",
+    "symptoms": "左侧上下肢乏力，以左上肢远端为著，无肢体麻木及疼痛。",
+    "aggravating": "活动后乏力无明显加重。",
+    "relief": "休息后症状无明显缓解。",
+    "evolution": "起床后症状持续存在，并逐渐出现行走困难，需他人扶持。",
+    "accompanying": "病程中无头痛、恶心呕吐、意识障碍及抽搐。",
+    "negativeDiscriminating": "无突发剧烈头痛、视物模糊、失语及大小便失禁，无发热、胸痛及心悸。",
+    "negativePertinent": "",
+    "treatment": "于发病约3小时后至合成市人民医院急诊就诊，行头颅CT示左侧基底节区低密度影，考虑急性脑梗死，予吸氧、控制血压等处理后转至我院。",
+    "generalCondition": "入院时仍诉左侧肢体乏力，可在家属扶持下行走，无头痛、恶心呕吐及意识障碍；发病以来精神稍差，食欲减退，睡眠一般，大小便正常，体重无明显变化。",
+    "extra": ""
+  },
+  "ros": {},
+  "pmh": {
+    "health": "一般",
+    "diseaseChecks": {
+      "高血压": true
+    },
+    "diseaseOther": "",
+    "diseaseDetail": "高血压病8年，长期口服苯磺酸氨氯地平片5mg每日1次，平素血压控制在130～150/80～90mmHg；否认糖尿病、冠心病、既往脑卒中及其他慢性病史。",
+    "longTermMeds": "苯磺酸氨氯地平片5mg每日1次，已规律服用8年。",
+    "infection": "否认肝炎、结核及其他传染病史。",
+    "surgery": "否认手术史。",
+    "trauma": "否认外伤史。",
+    "transfusion": "否认输血史。",
+    "poisoning": "否认中毒史。",
+    "vaccine": "预防接种史不详。",
+    "allergy": "无",
+    "allergenChecks": {},
+    "allergenOther": "",
+    "allergenReactionChecks": {},
+    "allergyReaction": "",
+    "relatedHistory": "高血压病是本次脑梗死的危险因素。",
+    "otherTreatDiseases": "",
+    "special": ""
+  },
+  "personal": {
+    "maternal": "",
+    "birth": "",
+    "feeding": "",
+    "growth": "",
+    "residence": "长期居住于合成市。",
+    "travel": "否认近期疫区居住及旅行史。",
+    "smoking": "无",
+    "smokingAmount": "",
+    "drinking": "无",
+    "drinkingAmount": "",
+    "drugs": "无",
+    "environment": "无特殊毒物、粉尘及放射性物质接触史。",
+    "habits": "饮食偏咸，作息规律。",
+    "sexualHistory": "否认冶游史。",
+    "occupationEnv": "虚构职业，室内工作，无工业毒物、粉尘及放射性物质接触。",
+    "premorbidPersonality": "性格开朗，家庭关系和睦。",
+    "stressEvent": "发病前无明确精神应激事件。"
+  },
+  "marriage": {
+    "status": "",
+    "age": "28",
+    "spouseHealth": "配偶健康。",
+    "sexLife": "正常。",
+    "relation": "和睦。"
+  },
+  "menstruation": {
+    "applicable": "无",
+    "age": "",
+    "cycle": "",
+    "duration": "",
+    "quantity": "",
+    "color": "",
+    "clot": "",
+    "leukorrhea": "",
+    "lmp": "",
+    "menopauseAge": "",
+    "dysmenorrhea": ""
+  },
+  "childbirth": {
+    "applicable": "有",
+    "fullTerm": "",
+    "premature": "",
+    "abortion": "",
+    "alive": "",
+    "gravida": "2",
+    "para": "",
+    "details": "育有1子1女，子女均体健。",
+    "lastBirth": "",
+    "contraception": ""
+  },
+  "family": {
+    "diseaseChecks": {},
+    "other": "",
+    "deceased": "父母均健在。",
+    "threeGeneration": "否认两系三代明确遗传性疾病史。",
+    "similarDisease": "否认家族中类似脑血管疾病史。",
+    "infectionHistory": "否认家族结核、肝炎、性病等传染病史。"
+  },
+  "pe": {
+    "checked": {
+      "general": {
+        "development": true,
+        "nutrition": true,
+        "conscious": true,
+        "posture": true,
+        "face": true,
+        "cooperation": true
+      },
+      "skin": {
+        "color": true,
+        "rash": true,
+        "elasticity": true,
+        "lymph": true
+      },
+      "chest": {
+        "lungAuscultation": true,
+        "heartAuscultation": true
+      },
+      "abdomen": {
+        "abdInspect": true,
+        "abdAuscultation": true,
+        "abdPercussion": true,
+        "abdPalpation": true
+      },
+      "special_neurology": {
+        "neuroExtra1": true,
+        "neuroExtra2": true,
+        "neuroExtra3": true,
+        "neuroExtra4": true,
+        "neuroExtra5": true,
+        "neuroSuperficialReflex": true,
+        "neuroDeepReflex": true,
+        "neuroPathologic": true,
+        "neuroMeningeal": true,
+        "neuroGait": true,
+        "neuroAutonomic": true
+      }
+    },
+    "vitals": {
+      "temperature": "36.5",
+      "pulse": "82",
+      "respiration": "18",
+      "sbp": "168",
+      "dbp": "96",
+      "height": "170",
+      "weight": "72",
+      "abdCirc": "92"
+    },
+    "general": {
+      "development": "发育正常",
+      "nutrition": "营养中等",
+      "conscious": "神志清楚，精神可",
+      "posture": "自主体位",
+      "face": "面容自然",
+      "cooperation": "查体合作"
+    },
+    "skin": {
+      "color": "全身皮肤黏膜无黄染、苍白、发绀",
+      "rash": "未见皮疹及出血点",
+      "elasticity": "皮肤弹性良好",
+      "lymph": "全身浅表淋巴结未触及肿大"
+    },
+    "head": {},
+    "neck": {},
+    "chest": {
+      "lungAuscultation": "双肺呼吸音清，未闻及干湿性啰音及胸膜摩擦音",
+      "heartAuscultation": "心律齐，各瓣膜听诊区未闻及病理性杂音"
+    },
+    "abdomen": {
+      "abdInspect": "腹部平坦，未见腹壁静脉曲张及胃肠型",
+      "abdAuscultation": "肠鸣音正常，未闻及血管杂音",
+      "abdPercussion": "肝区及双肾区无叩击痛，移动性浊音阴性",
+      "abdPalpation": "腹平软，全腹无压痛及反跳痛，肝脾肋下未触及"
+    },
+    "genital": {},
+    "spine": {},
+    "nervousPE": {},
+    "special_neurology": {
+      "neuroExtra1": "言语略显含糊，定向力、记忆力、计算力正常，能配合检查。",
+      "neuroExtra2": "双侧瞳孔等大等圆，对光反射灵敏；左侧鼻唇沟变浅，示齿时口角略向右偏，伸舌居中。",
+      "neuroExtra3": "左侧上肢近端肌力4级、远端肌力3级，左下肢肌力4级；右侧肢体肌力5级；左侧肢体肌张力稍低，未见肌萎缩。",
+      "neuroExtra4": "左侧偏身痛温觉减退，右侧感觉正常。",
+      "neuroExtra5": "双侧指鼻及跟膝胫试验尚稳准，Romberg征因需扶持未查。",
+      "neuroSuperficialReflex": "左侧腹壁反射减弱，右侧存在；提睾反射未查。",
+      "neuroDeepReflex": "左侧肱二头肌反射及膝腱反射较右侧活跃，跟腱反射对称存在。",
+      "neuroPathologic": "左侧Babinski征阳性，Oppenheim征、Gordon征、Chaddock征阴性；Hoffmann征阴性。",
+      "neuroMeningeal": "颈项强直阴性，Kernig征阴性，Brudzinski征阴性。",
+      "neuroGait": "家属扶持下可行走，呈左侧偏瘫步态。",
+      "neuroAutonomic": "皮肤划痕试验阴性，出汗正常，无体位性低血压。"
+    }
+  },
+  "peFactStates": {},
+  "auxiliary": {
+    "items": [
+      {
+        "name": "血常规",
+        "result": "白细胞 11.2×10^9/L（↑），中性粒细胞百分比 78.6%（↑），血红蛋白 138g/L，血小板 218×10^9/L",
+        "date": "2026-10-20",
+        "hospital": "合成市人民医院",
+        "no": "LAB-TEST-0001"
+      },
+      {
+        "name": "生化检查",
+        "result": "空腹血糖 7.8mmol/L（↑），低密度脂蛋白胆固醇 3.9mmol/L（↑），肌酐 76μmol/L，尿素氮 5.4mmol/L",
+        "date": "2026-10-20",
+        "hospital": "合成市人民医院",
+        "no": "LAB-TEST-0002"
+      },
+      {
+        "name": "头颅CT",
+        "result": "左侧基底节区片状低密度影，边界欠清，考虑急性脑梗死；未见颅内出血。",
+        "date": "2026-10-20",
+        "hospital": "合成市人民医院",
+        "no": "CT-TEST-0001"
+      }
+    ]
+  },
+  "summary": "患者因左侧肢体乏力8小时余入院。既往高血压病8年，长期服药。查体：血压168/96mmHg，神志清楚，左侧上肢肌力3～4级、左下肢肌力4级，左侧Babinski征阳性。头颅CT提示左侧基底节区低密度影，考虑急性脑梗死；血常规示白细胞11.2×10^9/L，空腹血糖7.8mmol/L，低密度脂蛋白胆固醇3.9mmol/L。初步诊断：脑梗死、高血压病。",
+  "diagnosis": {
+    "confirmed": [
+      "脑梗死",
+      "高血压病"
+    ],
+    "newLine": "",
+    "signature": "虚构医师甲"
+  },
+  "soap": {
+    "recordTime": "2026-10-20 10:30",
+    "s": {
+      "summary": "老年男性，急性起病，左侧肢体乏力8小时余，伴言语稍含糊，无头痛、呕吐及意识障碍。",
+      "consistency": "现病史、既往史及查体记录与病史采集内容一致。"
+    },
+    "o": {
+      "pe": "血压168/96mmHg；神志清楚，左侧鼻唇沟变浅，左侧上肢肌力3～4级、左下肢肌力4级，左侧Babinski征阳性。",
+      "aux": "头颅CT示左侧基底节区低密度影，考虑急性脑梗死；血常规示白细胞11.2×10^9/L，空腹血糖7.8mmol/L，LDL-C 3.9mmol/L。"
+    },
+    "a": {
+      "basis": "患者老年男性，急性起病，存在局灶性神经功能缺损及脑血管病危险因素，影像学可见责任病灶。",
+      "basisDetail": [
+        {
+          "diagnosis": "脑梗死",
+          "history": "急性起病，左侧肢体乏力8小时余，既往高血压病8年",
+          "pe": "血压168/96mmHg，左侧肢体肌力3～4级，左侧Babinski征阳性",
+          "aux": "头颅CT示左侧基底节区低密度影，考虑急性脑梗死"
+        },
+        {
+          "diagnosis": "高血压病",
+          "history": "高血压病史8年，长期口服降压药",
+          "pe": "入院血压168/96mmHg",
+          "aux": "生化检查未见明显肾功能异常"
+        }
+      ],
+      "ranking": "脑梗死为主要诊断，高血压病为并存的基础疾病。",
+      "diff": [
+        {
+          "diagnosis": "脑出血",
+          "why": "也可表现为急性局灶性神经功能缺损",
+          "against": "头颅CT未见颅内出血灶",
+          "points": "动态复查头颅影像并观察神经功能变化"
+        },
+        {
+          "diagnosis": "短暂性脑缺血发作",
+          "why": "可出现短暂性肢体无力",
+          "against": "症状持续8小时未完全缓解，且头颅CT已有低密度病灶",
+          "points": "结合症状演变及脑血管影像评估"
+        }
+      ],
+      "diffNote": "鉴别诊断均围绕本次局灶性神经功能缺损展开。"
+    },
+    "p": {
+      "principle": "尽快评估再灌注治疗适应证，予抗血小板、调脂稳定斑块及血压管理，同时防治并发症。",
+      "perDiagnosis": [
+        {
+          "diagnosis": "脑梗死",
+          "exam": "完善头颅MRI/MRA、颈动脉超声、心电图及心电监测，动态评估NIHSS",
+          "treatment": "结合时间窗及影像评估再灌注治疗；阿司匹林抗血小板、阿托伐他汀调脂稳定斑块，监测神经功能"
+        },
+        {
+          "diagnosis": "高血压病",
+          "exam": "动态血压监测、电解质及肾功能检查",
+          "treatment": "低盐饮食，苯磺酸氨氯地平控制血压，避免降压过快"
+        }
+      ],
+      "individual": "患者发病8小时余，需结合影像及禁忌证制定个体化方案，并注意吞咽功能与跌倒风险。"
+    }
+  },
+  "discharge": {
+    "dischargeDate": "2026-10-28",
+    "admitCondition": "因左侧肢体乏力8小时余入院。入院查体：血压168/96mmHg，神志清楚，左侧上肢肌力3～4级、左下肢肌力4级，左侧Babinski征阳性。",
+    "course": "入院后完善头颅CT及实验室检查，予阿司匹林抗血小板、阿托伐他汀调脂稳定斑块、苯磺酸氨氯地平控制血压及康复训练。住院期间神经功能较前改善，复查头颅CT未见出血转化。",
+    "dischargeStatus": "左侧肢体乏力较入院减轻，可独立行走，左上肢肌力4级、左下肢肌力4+级，左侧Babinski征阳性，血压控制在140/85mmHg左右。",
+    "diagnoses": [
+      "脑梗死",
+      "高血压病"
+    ],
+    "diagnosesConfirmed": true,
+    "advice": {
+      "drug": "继续口服阿司匹林100mg每日1次、阿托伐他汀20mg每晚1次；苯磺酸氨氯地平片5mg每日1次，遵医嘱调整。",
+      "nonDrug": "坚持肢体功能康复训练，进行吞咽及跌倒风险评估。",
+      "lifestyle": "低盐低脂饮食，戒烟限酒，规律作息，监测血压。",
+      "followUp": "2周后神经内科复诊；如再次出现肢体无力、言语不清或头痛呕吐，立即就诊。"
+    }
+  },
+  "focusPE": {
+    "keys": [
+      "special_neurology.neuroExtra3",
+      "special_neurology.neuroPathologic"
+    ],
+    "note": "重点记录左侧肢体肌力及病理征。"
+  },
+  "suggestions": {
+    "accepted": []
+  }
+}
