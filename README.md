@@ -97,7 +97,8 @@ API Key 由 Android Keystore 加密保存，不返回网页脚本，不包含在
 
 套用后挂号科室也会一起补上（如果你还停在通用科），否则该科专科查体出不来。一份病历只能套用一种模板；要换模板，请先新建病历，再选择新模板，避免两份范例混在一起。已有内容仍可按实际情况修改；旧版本留下的病历如果没有模板标记，需要自己检查已有内容。
 
-> 模板数据在 `tools/tpl-parts/*.cjs`，改完跑 `node tools/gen-templates.js` 重新生成，
+> 模板数据在 `tools/tpl-parts/*.cjs`，改完跑 `node tools/gen-templates.js` 重新生成
+> `packages/domain/src/template-data.ts`（`src/template-data.js` 是兼容入口），
 > 再用 `node tools/check-templates.js tools/tpl-parts/*.cjs` 自检（会把每个查体值拿去和
 > 选项表逐字比对，`abdPalpation: '中上腹压痛'` 这种自己改词的错误当场报出来）。
 
@@ -329,7 +330,7 @@ E:\bingli\
 ├─ src\
 │  ├─ schema.js      字段定义：系统回顾、查体项目、科室配置
 │  ├─ core.js        数据边界层：存档迁移、校验、导入导出、合并（无 DOM 依赖，可单测）
-│  ├─ template-data.js  模板病例数据（由 tools/gen-templates.js 生成，别手改）
+│  ├─ template-data.js  模板病例数据的兼容入口（数据源在 packages/domain/src/template-data.ts）
 │  ├─ templates.js   模板套用：只补空白、不覆盖、自动补科室
 │  ├─ depth.js       问诊深度自查：读你写的现病史/既往史，挑"问了但没问深"的地方
 │  ├─ generator.js   病历生成逻辑（纯函数）
@@ -340,7 +341,7 @@ E:\bingli\
 ├─ build.js          打包：生成 App 内置 HTML 资源
 ├─ tools\
 │  ├─ tpl-parts\     模板病例源文件（一个病种一个 .cjs）
-│  ├─ gen-templates.js   把 tpl-parts 生成 src/template-data.js
+│  ├─ gen-templates.js   把 tpl-parts 生成 packages/domain/src/template-data.ts
 │  ├─ check-templates.js 模板自检：查体值必须逐字取自选项表
 │  └─ …              其余是一次性核对脚本（对齐教材、扫重复、真机验收）
 ├─ dist\

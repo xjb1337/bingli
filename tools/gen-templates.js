@@ -1,9 +1,10 @@
-/* 从 tools/tpl-parts/*.cjs 生成 src/template-data.js
+/* 从 tools/tpl-parts/*.cjs 生成模板数据
  *
  * 为什么要这一步：
  *   模板内容是「纯数据 + 长中文」，手写进 src/ 容易和撰写者的工作区打架；
  *   而浏览器端是单文件内联，不能 require。所以把撰写区（tools/tpl-parts）当源，
- *   src/template-data.js 当产物。测试里会重跑本逻辑比对，产物过期就红。
+ *   packages/domain/src/template-data.ts 当产物，src/template-data.js 只保留兼容入口。
+ *   测试里会重跑本逻辑比对，产物过期就红。
  *
  * 用法：node tools/gen-templates.js
  */
@@ -12,7 +13,8 @@ const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
 const PARTS = path.join(__dirname, 'tpl-parts');
-const OUT = path.join(ROOT, 'src/template-data.js');
+const OUT = path.join(ROOT, 'packages', 'domain', 'src', 'template-data.ts');
+const COMPAT = path.join(ROOT, 'src', 'template-data.js');
 
 function main() {
   if (!fs.existsSync(PARTS)) {
@@ -65,8 +67,14 @@ function main() {
     + `if (typeof module !== 'undefined' && module.exports) {\n  module.exports = TEMPLATE_DATA;\n}\n`;
 
   fs.writeFileSync(OUT, header + body, 'utf8');
+  fs.writeFileSync(COMPAT,
+    '/* Compatibility entry point; implementation lives in packages/domain/src/template-data.ts. */\n'
+    + "if (typeof module !== 'undefined') module['exports'] = require('../packages/domain/dist/template-data.js');\n",
+    'utf8');
+  require(path.join(ROOT, 'scripts', 'build-domain.cjs')).build();
   const kb = (Buffer.byteLength(header + body, 'utf8') / 1024).toFixed(1);
   console.log(`已生成：${OUT}`);
+  console.log(`兼容入口：${COMPAT}`);
   console.log(`${list.length} 个模板（${list.map(t => t.key).join(', ')}），${kb} KB`);
 }
 
