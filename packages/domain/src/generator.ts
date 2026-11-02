@@ -611,14 +611,38 @@ const GENERATOR = (() => {
     return text;
   }
 
-  function admissionGeneralCondition(text) {
+  /**
+   * 把一般情况拆成「入院时…」（归入现病史主体）和「病来…」两段。
+   *
+   * 学生常把入院时的情况与发病以来的一般情况写在同一栏，中间用分号
+   * 隔开。模板要求后者单独成段；若把整栏都放进「病来」段，就会留下
+   * 「病来，入院时…；发病以来精神…」这样的重复起句。这里只认分句
+   * 开头的时间状语，避免把正文里的普通「以来」误拆。
+   */
+  function splitAdmissionGeneralCondition(text) {
     const t = stripTail(text);
-    if (!t) return '';
-    if (/^病来[，,]?/.test(t)) return ensureSentence(t);
-    if (/^发病以来[，,]?/.test(t)) {
-      return ensureSentence('病来，' + t.replace(/^发病以来[，,]?\s*/, ''));
-    }
-    return ensureSentence('病来，' + t);
+    if (!t) return { body: '', general: '' };
+    const trigger = /(^|[；;，,。])\s*(病来以来|发病以来|起病以来|病来)/;
+    const match = t.match(trigger);
+    if (!match) return { body: '', general: ensureSentence(`病来，${t}`) };
+
+    const body = stripTail(t.slice(0, match.index));
+    let clause = stripTail(match[2] + t.slice(match.index + match[0].length));
+    let previous;
+    do {
+      previous = clause;
+      clause = stripTail(clause.replace(/^(?:病来以来|发病以来|起病以来|病来)[，,]?\s*/, ''));
+    } while (clause !== previous);
+
+    // 同一段里再出现「；发病以来…」时去掉重复的起句，只保留病来段。
+    clause = stripTail(clause.replace(
+      /([；;，,。])\s*(?:病来以来|发病以来|起病以来|病来)[，,]?\s*/g,
+      '$1'
+    ));
+    return {
+      body,
+      general: clause ? ensureSentence(`病来，${clause}`) : '病来。'
+    };
   }
 
   /**
@@ -627,10 +651,12 @@ const GENERATOR = (() => {
    */
   function buildAdmissionHPI(r) {
     const parts = hpiNarrativeParts(r);
+    const generalParts = splitAdmissionGeneralCondition(parts.general);
     let body = joinSentences(parts.sentences);
     if (body && !/^(患者|患儿|产妇|孕妇|本人|家属|该)/.test(body)) {
       body = subjectOf(r) + body;
     }
+    if (generalParts.body) body = joinSentences([body, generalParts.body]);
     const dx = (((r.diagnosis || {}).confirmed || []).map(stripTail).filter(Boolean))[0] || '';
     const alreadyAdmitted = /收住入院|收入/.test([body, parts.general, parts.other, parts.extra].join(''));
     if (dx && !alreadyAdmitted) {
@@ -638,8 +664,7 @@ const GENERATOR = (() => {
     }
     const lines = [];
     if (body) lines.push(body);
-    const general = admissionGeneralCondition(parts.general);
-    if (general) lines.push(general);
+    if (generalParts.general) lines.push(generalParts.general);
     if (parts.other) lines.push(ensureSentence(`现在需要治疗的其他现病史：${parts.other}`));
     if (parts.extra) lines.push(ensureSentence(parts.extra));
     return lines.join('\n');
@@ -806,21 +831,27 @@ const GENERATOR = (() => {
    */
   function pastHealthSentence(value) {
     const health = stripTail(value);
-    if (!health) return `患者既往健康状况：${PH}。`;
-    if (/^(?:平素)?体健$/.test(health)) return '患者既往体健。';
-    return ensureSentence(health);
+    if (!health) return '';
+    if (/^(?:平素)?(?:体健|健康)$/.test(health)) return '患者既往体健。';
+    if (/^(?:平素)?一般$/.test(health)) return '患者既往健康状况一般。';
+    if (/^(?:较差|差)$/.test(health)) return '患者既往健康状况较差。';
+
+    // 自由文本已经带了主语/时间状语时不再重复，避免「患者既往患者既往…」。
+    if (/^患者既往/.test(health)) return ensureSentence(health);
+    if (/^患者/.test(health)) return ensureSentence(health.replace(/^患者/, '患者既往'));
+    if (/^既往/.test(health)) return ensureSentence(`患者${health}`);
+    return ensureSentence(`患者既往${health}`);
   }
 
   function buildPMH(r, opts = {}) {
     const p = r.pmh || {};
     const lines = [];
 
-    // 1) 既往健康状况：填了「良好」写「平素良好」，没填写「／」。
-    //    旧实现没填时写「平素体健」，同样是替学生下结论。
-    //    学生自己写「既往体健」时不能再冠一次「平素」，否则变成「平素既往体健」。
+    // 1) 既往健康状况：模板要求写成完整句；空值不输出该行。
     const health = stripTail(p.health);
     if (opts.template) {
-      lines.push(pastHealthSentence(health));
+      const healthSentence = pastHealthSentence(health);
+      if (healthSentence) lines.push(healthSentence);
     } else {
       lines.push(`既往健康状况：${health ? (/^(平素|既往)/.test(health) ? health : `平素${health}`) : PH}`);
     }

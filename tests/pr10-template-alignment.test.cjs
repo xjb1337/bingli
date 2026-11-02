@@ -57,9 +57,12 @@ test('PR10-02 现病史增加收住入院句、独立一般情况段，且不打
   const record = loadFixture();
   const text = GENERATOR.generate(record).text;
   const hpi = GENERATOR.generate(record).sections['现病史'];
+  const [narrative, general] = hpi.split('\n');
 
   assert.match(hpi, /现为求进一步诊治，遂至我院就诊，拟“脑梗死”收住入院。/);
-  assert.match(hpi, /\n病来，/);
+  assert.match(narrative, /无头痛、恶心呕吐及意识障碍。现为求进一步诊治，遂至我院就诊，拟“脑梗死”收住入院。$/);
+  assert.equal(general, '病来，精神稍差，食欲减退，睡眠一般，大小便正常，体重无明显变化。');
+  assert.doesNotMatch(general, /发病以来|病来，病来/);
   assert.doesNotMatch(text, /书写规则/);
   assert.doesNotMatch(text, /发生时间、有无诱因/);
 
@@ -136,4 +139,60 @@ test('PR10-06 文书模板元数据只把入院记录标为已对照', () => {
     assert.equal(item.verificationLabel, '待医院模板核对');
   });
   assert.equal(TEMPLATES.DOCUMENT_TEMPLATES.record.verificationStatus, 'verified');
+});
+
+test('PR10-07 既往健康状况归一为完整句，自由文本不重复主语，空值不输出', () => {
+  const cases = [
+    ['平素体健', '患者既往体健。'],
+    ['体健', '患者既往体健。'],
+    ['健康', '患者既往体健。'],
+    ['一般', '患者既往健康状况一般。'],
+    ['平素一般', '患者既往健康状况一般。'],
+    ['较差', '患者既往健康状况较差。'],
+    ['差', '患者既往健康状况较差。'],
+    ['患者既往有慢性胃炎', '患者既往有慢性胃炎。'],
+    ['既往有慢性胃炎', '患者既往有慢性胃炎。'],
+    ['患者有慢性胃炎', '患者既往有慢性胃炎。'],
+    ['长期服药', '患者既往长期服药。']
+  ];
+
+  cases.forEach(([health, expected]) => {
+    const record = loadFixture();
+    record.pmh.health = health;
+    const pmh = GENERATOR.generate(record).sections['既往史'];
+    assert.equal(pmh.split('\n')[0], expected, health);
+  });
+
+  const empty = loadFixture();
+  empty.pmh.health = '';
+  const emptyPMH = GENERATOR.generate(empty).sections['既往史'];
+  assert.ok(!emptyPMH.includes('患者既往健康状况'));
+  assert.match(emptyPMH, /^疾病史：/);
+});
+
+test('PR10-08 一般情况中的病来分句单独成段且去除重复起句', () => {
+  const cases = [
+    ['发病以来精神可', '病来，精神可。'],
+    ['病来，精神可', '病来，精神可。'],
+    ['病来精神可', '病来，精神可。'],
+    ['病来以来精神可', '病来，精神可。'],
+    ['起病以来精神可', '病来，精神可。'],
+    ['精神可', '病来，精神可。']
+  ];
+
+  cases.forEach(([generalCondition, expected]) => {
+    const record = loadFixture();
+    record.hpi.generalCondition = generalCondition;
+    const hpi = GENERATOR.generate(record).sections['现病史'];
+    const lines = hpi.split('\n');
+    assert.equal(lines[lines.length - 1], expected, generalCondition);
+    assert.equal((hpi.match(/病来，/g) || []).length, 1, generalCondition);
+    assert.doesNotMatch(lines[lines.length - 1], /发病以来|起病以来|病来以来|病来，病来/);
+  });
+
+  const split = loadFixture();
+  split.hpi.generalCondition = '入院时精神可；发病以来食欲差';
+  const [narrative, general] = GENERATOR.generate(split).sections['现病史'].split('\n');
+  assert.match(narrative, /入院时精神可。现为求进一步诊治，遂至我院就诊，拟“脑梗死”收住入院。$/);
+  assert.equal(general, '病来，食欲差。');
 });
