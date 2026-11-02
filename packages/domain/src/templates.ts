@@ -43,6 +43,43 @@ var TEMPLATES = (function () {
 
   const NORMALIZED = DATA.map(normalizeTemplate);
 
+  const SIDE_PLACEHOLDERS = ['（患侧）', '（对侧）', '（健侧）'];
+  const SIDE_PLACEHOLDER_RE = /（(?:患侧|对侧|健侧)）/g;
+
+  /**
+   * 列出模板里尚未由学生填写的侧别占位符。占位符只是提示，不猜、
+   * 不自动选边；套用时按模板原文写入，由学生按实际患者改成左或右。
+   */
+  function findUnfilledPlaceholders(value) {
+    const out = [];
+    (function walk(node, path) {
+      if (typeof node === 'string') {
+        const matches = node.match(SIDE_PLACEHOLDER_RE);
+        if (matches) matches.forEach(placeholder => out.push({ path, placeholder, text: node }));
+        return;
+      }
+      if (Array.isArray(node)) {
+        node.forEach((item, index) => walk(item, `${path}[${index}]`));
+        return;
+      }
+      if (node && typeof node === 'object') {
+        Object.keys(node).forEach(key => walk(node[key], path ? `${path}.${key}` : key));
+      }
+    })(value, '');
+    return out;
+  }
+
+  function unfilledPlaceholders(key) {
+    const t = get(key);
+    if (!t) return [];
+    return findUnfilledPlaceholders({
+      name: t.name,
+      alias: t.alias || [],
+      hint: t.hint || '',
+      record: t.record || {}
+    });
+  }
+
   /**
    * 某个科室有哪些模板。general（通用/全科）返回空数组——
    * 通用科没有「标准病例」这回事，只能从头问。
@@ -242,7 +279,10 @@ var TEMPLATES = (function () {
     return out;
   }
 
-  return { listByDept, get, all, apply, previewPaths, deptName, outlineOf, SECTION_LABEL };
+  return {
+    listByDept, get, all, apply, previewPaths, deptName, outlineOf, SECTION_LABEL,
+    SIDE_PLACEHOLDERS, findUnfilledPlaceholders, unfilledPlaceholders
+  };
 })();
 
 if (typeof module !== 'undefined' && module.exports) {

@@ -540,6 +540,12 @@ export interface TemplateApplyResult {
   values?: Record<string, string>;
 }
 
+export interface TemplatePlaceholder {
+  path: string;
+  placeholder: string;
+  text: string;
+}
+
 export interface TemplateOutlineItem {
   path: string;
   section: string;

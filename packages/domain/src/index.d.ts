@@ -28,6 +28,7 @@ import type {
   Template,
   TemplateApplyResult,
   TemplateOutlineItem,
+  TemplatePlaceholder,
   VitalDefinition,
 } from './types';
 
@@ -180,6 +181,9 @@ export interface TemplatesApi {
   previewPaths(key: string): string[];
   deptName(key: string): string;
   outlineOf(template: Template): TemplateOutlineItem[];
+  SIDE_PLACEHOLDERS: readonly string[];
+  findUnfilledPlaceholders(value: unknown): TemplatePlaceholder[];
+  unfilledPlaceholders(key: string): TemplatePlaceholder[];
   SECTION_LABEL: Readonly<Record<string, string>>;
 }
 
