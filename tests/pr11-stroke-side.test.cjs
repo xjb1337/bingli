@@ -105,3 +105,25 @@ test('templates helper lists side placeholders and apply keeps them verbatim', (
     assert.ok(!appliedText.includes(side), `套用结果把占位符自动填成了「${side}」`);
   }
 });
+
+test('stroke template outputs never nest full-width parentheses around placeholders', () => {
+  const { SCHEMA, TEMPLATES, GENERATOR } = bootGlobals();
+  const record = SCHEMA.emptyRecord();
+  assert.equal(TEMPLATES.apply(record, 'stroke').ok, true);
+  const outputs = [
+    ['模板源文件', strokeText(require(SOURCE_FILE))],
+    ['生成的 JS', strokeText(strokeOf(require(JS_COPY), '生成的 JS'))],
+    ['生成的 TS', strokeText(strokeOf(loadTsCopy(), '生成的 TS'))],
+    ['套用后病历', JSON.stringify(record)],
+    ['入院记录', GENERATOR.generate(record).text],
+    ['首次病程录', GENERATOR.buildFirstCourseRecord(record, { date: '2026-10-20 10:30' })],
+    ['出院记录', GENERATOR.buildDischargeRecord(record)],
+  ];
+  for (const [label, text] of outputs) {
+    assert.ok(!text.includes('（（'), `${label}含嵌套括号「（（」`);
+    assert.ok(!text.includes('））'), `${label}含嵌套括号「））」`);
+  }
+  const placeholders = TEMPLATES.unfilledPlaceholders('stroke');
+  assert.ok(placeholders.some((item) => item.path === 'name' && item.placeholder === '（对侧）'));
+  assert.match(record.diagnosis.confirmed[0], /^（对侧）大脑中动脉供血区急性缺血性脑卒中$/);
+});
