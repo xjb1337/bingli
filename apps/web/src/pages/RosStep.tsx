@@ -19,19 +19,20 @@ interface SymptomState {
 }
 
 function symptomState(entry: RosEntry | undefined): SymptomState {
-  if (entry?.checked) return { label: '阳性', tone: 'positive' };
-  if (entry?.negative) return { label: '阴性', tone: 'negative' };
+  const state = SCHEMA.rosFactState(entry);
+  if (state === 'asked_positive') return { label: '阳性', tone: 'positive' };
+  if (state === 'asked_negative') return { label: '阴性', tone: 'negative' };
   return { label: '未问', tone: 'unasked' };
 }
 
 export function RosStep({ record, update, errors }: StepComponentProps) {
   const positiveCount = SCHEMA.ROS.reduce((total, system) => {
     const store = record.ros[system.key] ?? {};
-    return total + system.symptoms.filter((symptom) => store[symptom.key]?.checked).length;
+    return total + system.symptoms.filter((symptom) => SCHEMA.rosFactState(store[symptom.key]) === 'asked_positive').length;
   }, 0);
   const negativeCount = SCHEMA.ROS.reduce((total, system) => {
     const store = record.ros[system.key] ?? {};
-    return total + system.symptoms.filter((symptom) => store[symptom.key]?.negative).length;
+    return total + system.symptoms.filter((symptom) => SCHEMA.rosFactState(store[symptom.key]) === 'asked_negative').length;
   }, 0);
 
   function setSymptom(
@@ -40,10 +41,15 @@ export function RosStep({ record, update, errors }: StepComponentProps) {
     state: 'positive' | 'negative' | 'unasked',
   ) {
     const current = record.ros[system.key]?.[symptom.key] ?? {};
+    const status = state === 'positive'
+      ? 'asked_positive'
+      : state === 'negative' ? 'asked_negative' : 'not_asked';
     const next: RosEntry = {
       ...current,
       checked: state === 'positive',
       negative: state === 'negative',
+      status,
+      factState: status,
     };
     if (state !== 'positive') {
       next.time = '';
@@ -58,7 +64,16 @@ export function RosStep({ record, update, errors }: StepComponentProps) {
       next[system.key] = {};
       system.symptoms.forEach((symptom) => {
         const row = next[system.key];
-        if (row) row[symptom.key] = { checked: false, negative: true, time: '', detail: '' };
+        if (row) {
+          row[symptom.key] = {
+            checked: false,
+            negative: true,
+            status: 'asked_negative',
+            factState: 'asked_negative',
+            time: '',
+            detail: '',
+          };
+        }
       });
     });
     update('ros', next);
@@ -66,7 +81,7 @@ export function RosStep({ record, update, errors }: StepComponentProps) {
 
   return (
     <StepShell
-      eyebrow="第 4 / 11 步"
+      eyebrow="第 8 / 11 步"
       title="系统回顾"
       description={STEP_DESCRIPTIONS.ros}
     >
@@ -114,10 +129,11 @@ export function RosStep({ record, update, errors }: StepComponentProps) {
         {SCHEMA.ROS.map((system) => {
           const store = record.ros[system.key] ?? {};
           const asked = system.symptoms.filter((symptom) => {
-            const entry = store[symptom.key];
-            return entry?.checked || entry?.negative;
+            return SCHEMA.rosFactState(store[symptom.key]) !== 'not_asked';
           }).length;
-          const positive = system.symptoms.filter((symptom) => store[symptom.key]?.checked).length;
+          const positive = system.symptoms.filter((symptom) => (
+            SCHEMA.rosFactState(store[symptom.key]) === 'asked_positive'
+          )).length;
           return (
             <Collapsible
               key={system.key}

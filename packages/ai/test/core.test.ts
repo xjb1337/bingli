@@ -148,3 +148,110 @@ describe('AI result validation and adoption', () => {
     expect(() => adoptAiSuggestions(record, request, result, [0], false)).not.toThrow();
   });
 });
+
+describe('AI image/text recognition boundary', () => {
+  const image = { mimeType: 'image/jpeg', dataBase64: 'aGVsbG8=' };
+  const recognizeRequest = (
+    record: DabingliRecord,
+    note = '体温 37.8℃，心律不齐。',
+    attachment: { mimeType: string; dataBase64: string } | null = image,
+  ) => prepareAiRequest('recognize', record, note, 'hpi.symptoms', attachment);
+
+  function recognized(
+    path: string,
+    text: string,
+    evidence: Array<{ source: string; quote: string }> = [],
+  ) {
+    return {
+      suggestions: [{ path, text, evidence }],
+      issues: [],
+      questions: [],
+    };
+  }
+
+  it('prepares a multimodal request without duplicating base64 in user JSON', () => {
+    const request = recognizeRequest(makeRecord());
+    expect(request.operation).toBe('recognize');
+    expect(request.image).toEqual(image);
+    expect(request.sources.map((source) => source.source)).toEqual(['note', 'image']);
+    expect(request.user).not.toContain(image.dataBase64);
+    expect(request.allowed).toContain('pe.vitals.temperature');
+    expect(request.allowed).toContain('ros.resp.fever.status');
+    expect(request.system).toContain('asked_positive');
+  });
+
+  it('supports text-only or image-only and enforces image type/size/base64 limits', () => {
+    expect(recognizeRequest(makeRecord(), '患者诉咳嗽3天', null).image).toBeUndefined();
+    expect(recognizeRequest(makeRecord(), '', image).image).toEqual(image);
+    expect(() => recognizeRequest(makeRecord(), '', null)).toThrow(/拍照|粘贴/);
+    expect(() => recognizeRequest(makeRecord(), 'x', { mimeType: 'image/bmp', dataBase64: 'aGVsbG8=' }))
+      .toThrow(/格式/);
+    expect(() => recognizeRequest(makeRecord(), 'x', { mimeType: 'image/png', dataBase64: 'abc' }))
+      .toThrow(/图片数据/);
+    expect(() => recognizeRequest(makeRecord(), 'x', {
+      mimeType: 'image/png',
+      dataBase64: 'A'.repeat(6 * 1024 * 1024 + 4),
+    })).toThrow(/过大/);
+  });
+
+  it('rejects out-of-scope fields, invalid enums, and out-of-range vitals', () => {
+    const request = recognizeRequest(makeRecord());
+    expect(validateAiResponse(recognized('basic.gender', '男'), request).suggestions[0]?.text).toBe('男');
+    expect(() => validateAiResponse(recognized('basic.gender', '男性'), request)).toThrow(/允许值/);
+    expect(() => validateAiResponse(recognized('diagnosis.confirmed.0', '肺炎'), request)).toThrow(/越界/);
+    expect(() => validateAiResponse(recognized('basic.name', '张三'), request)).toThrow(/越界/);
+    expect(() => validateAiResponse(recognized('pe.vitals.temperature', '99'), request)).toThrow(/可信范围/);
+  });
+
+  it('requires verified note evidence and only accepts image evidence with an image', () => {
+    const request = recognizeRequest(makeRecord());
+    expect(() => validateAiResponse(recognized(
+      'hpi.symptoms',
+      '咳嗽3天',
+      [{ source: 'note', quote: '不存在的原文' }],
+    ), request)).toThrow(/无法核实/);
+    const textOnly = recognizeRequest(makeRecord(), '患者诉咳嗽3天', null);
+    expect(() => validateAiResponse(recognized(
+      'hpi.symptoms',
+      '咳嗽3天',
+      [{ source: 'image', quote: '图片' }],
+    ), textOnly)).toThrow(/图片依据/);
+  });
+
+  it('does not replace existing content without explicit consent', () => {
+    const record = makeRecord();
+    record.hpi.symptoms = '原始症状';
+    const request = recognizeRequest(record, '咳嗽3天');
+    const result = createAiResult(validateAiResponse(recognized(
+      'hpi.symptoms',
+      '咳嗽3天',
+      [{ source: 'note', quote: '咳嗽3天' }],
+    ), request), request, 'deepseek-flash');
+    expect(() => adoptAiSuggestions(record, request, result, [0], false)).toThrow(/已有内容/);
+    const next = adoptAiSuggestions(record, request, result, [0], true);
+    expect(next.hpi.symptoms).toBe('咳嗽3天');
+    expect(RECORD_CORE.fieldState(next, 'hpi.symptoms').source).toBe('ai');
+    expect(RECORD_CORE.fieldReviewValid(next, 'hpi.symptoms')).toBe(false);
+  });
+
+  it('synchronizes PE checked state and ROS fact state when adopted', () => {
+    const record = makeRecord();
+    const request = recognizeRequest(record, '查体记录');
+    const responseBody = {
+      suggestions: [
+        { path: 'pe.chest.heartAuscultation', text: '心律不齐，可闻及早搏', evidence: [] },
+        { path: 'ros.resp.fever.status', text: 'asked_positive', evidence: [] },
+        { path: 'ros.gi.nausea.status', text: 'asked_negative', evidence: [] },
+      ],
+      issues: [],
+      questions: [],
+    };
+    const result = createAiResult(validateAiResponse(responseBody, request), request, 'deepseek-flash');
+    const next = adoptAiSuggestions(record, request, result, [0, 1, 2], false);
+
+    expect(next.pe.chest.heartAuscultation).toBe('心律不齐，可闻及早搏');
+    expect(SCHEMA.peChecked(next, 'chest', 'heartAuscultation')).toBe(true);
+    expect(SCHEMA.rosFactState(next.ros.resp?.fever)).toBe('asked_positive');
+    expect(SCHEMA.rosFactState(next.ros.gi?.nausea)).toBe('asked_negative');
+  });
+});

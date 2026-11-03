@@ -11,6 +11,7 @@ import java.util.concurrent.*;
 final class DeepSeekClient {
     interface Callback { void done(String id, JSONObject response); }
     interface Connections { HttpURLConnection open() throws IOException; }
+    static final int MAX_IMAGE_BASE64_CHARS = 6 * 1024 * 1024;
     private final Connections connections;
     DeepSeekClient() { this(() -> (HttpURLConnection) new URL("https://api.deepseek.com/chat/completions").openConnection()); }
     DeepSeekClient(Connections connections) { this.connections = connections; }
@@ -23,6 +24,25 @@ final class DeepSeekClient {
         RequestFailure(String code, String message) { super(message); this.code = code; }
     }
     static boolean validModel(String model) { return "deepseek-flash".equals(model) || "deepseek-v4-pro".equals(model); }
+    static boolean validImageMime(String mime) {
+        return "image/jpeg".equals(mime) || "image/png".equals(mime) || "image/gif".equals(mime) || "image/webp".equals(mime);
+    }
+    static boolean validImagePayload(String mime, String base64) {
+        return validImageMime(mime) && base64 != null && !base64.isEmpty()
+            && base64.length() <= MAX_IMAGE_BASE64_CHARS && base64.length() % 4 == 0
+            && base64.matches("[A-Za-z0-9+/]+={0,2}");
+    }
+    static JSONArray userContent(String user, String imageMime, String imageBase64) throws org.json.JSONException {
+        JSONArray content = new JSONArray().put(new JSONObject().put("type", "text").put("text", user));
+        if (imageMime != null || imageBase64 != null) {
+            if (!validImagePayload(imageMime, imageBase64)) throw new org.json.JSONException("Invalid image payload");
+            content.put(new JSONObject().put("type", "image_url")
+                .put("image_url", new JSONObject()
+                    .put("url", "data:" + imageMime + ";base64," + imageBase64)
+                    .put("detail", "high")));
+        }
+        return content;
+    }
     static String httpErrorCode(int code) {
         if (code == 401) return "unauthorized";
         if (code == 403) return "forbidden";
@@ -40,8 +60,13 @@ final class DeepSeekClient {
         return "DeepSeek 请求失败（HTTP " + code + "），请检查模型设置后重试";
     }
     synchronized boolean request(String id, String key, String model, String system, String user, Callback callback) {
+        return request(id, key, model, system, user, null, null, callback);
+    }
+    synchronized boolean request(String id, String key, String model, String system, String user,
+                                 String imageMime, String imageBase64, Callback callback) {
         if (closed || !active.isEmpty()) return false;
         if (!validModel(model) || id == null || !id.matches("[A-Za-z0-9_-]{1,80}") || system.length() > 12000 || user.length() > 50000) return false;
+        if ((imageMime != null || imageBase64 != null) && !validImagePayload(imageMime, imageBase64)) return false;
         active = id;
         executor.submit(() -> {
             JSONObject result = new JSONObject(); HttpURLConnection conn = null;
@@ -59,7 +84,7 @@ final class DeepSeekClient {
                     .put("thinking", new JSONObject().put("type", "disabled"))
                     .put("response_format", new JSONObject().put("type", "json_object"))
                     .put("messages", new JSONArray().put(new JSONObject().put("role", "system").put("content", system))
-                        .put(new JSONObject().put("role", "user").put("content", user)));
+                        .put(new JSONObject().put("role", "user").put("content", userContent(user, imageMime, imageBase64))));
                 byte[] bytes = body.toString().getBytes(StandardCharsets.UTF_8); conn.setFixedLengthStreamingMode(bytes.length);
                 try (OutputStream output = conn.getOutputStream()) { output.write(bytes); }
                 int code = conn.getResponseCode();

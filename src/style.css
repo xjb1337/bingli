@@ -2066,9 +2066,15 @@ footer .btn:disabled { opacity: .6; }
 .ai-sheet select, .ai-sheet textarea { box-sizing: border-box; width: 100%; min-height: 44px; background: var(--surface, #fff); color: inherit; border: 1px solid var(--line); border-radius: 10px; padding: 11px; font: inherit; }
 .ai-sheet textarea { min-height: 120px; resize: vertical; }
 .ai-sheet .ai-check { display: flex; align-items: flex-start; gap: 9px; line-height: 1.6; padding: 6px 0; }
+.ai-sheet .ai-check small { color: var(--text-soft); }
 .ai-check input { width: 20px; height: 20px; flex: 0 0 20px; margin: 2px 0; accent-color: var(--blue); }
 .ai-source, .ai-suggestion, .ai-review { border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin: 12px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ai-source { max-height: 260px; overflow-y: auto; font: inherit; font-size: 13px; }
+.ai-image-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 8px 0 4px; }
+.ai-image-preview, .ai-image-send { display: flex; align-items: center; gap: 12px; margin: 10px 0; padding: 10px; border: 1px solid var(--line); border-radius: 12px; }
+.ai-image-preview img, .ai-image-send img { width: min(42vw, 180px); max-height: 180px; object-fit: contain; border-radius: 8px; background: #f4f6f5; }
+.ai-image-preview p, .ai-image-send p { margin: 0 0 8px; }
+.ai-warning { padding: 10px 12px; border-left: 3px solid #b26a00; background: #fff7e6; border-radius: 8px; line-height: 1.65; font-size: 13px; }
 .ai-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .ai-compare p, .ai-review p { line-height: 1.7; white-space: pre-wrap; }
 .ai-compare small { color: var(--text-soft); }
@@ -2076,7 +2082,7 @@ footer .btn:disabled { opacity: .6; }
 .ai-sheet button { min-height: 44px; }
 .ai-sheet [hidden] { display: none !important; }
 #aiStatus { line-height: 1.65; overflow-wrap: anywhere; }
-@media (max-width: 480px) { .ai-compare { grid-template-columns: 1fr; } .ai-sheet { padding-left: 16px; padding-right: 16px; } }
+@media (max-width: 480px) { .ai-compare { grid-template-columns: 1fr; } .ai-sheet { padding-left: 16px; padding-right: 16px; } .ai-image-preview, .ai-image-send { align-items: flex-start; } }
 
 /* Long outlines must scroll inside the viewport on Android WebView. */
 .modal-title { flex-shrink: 0; }

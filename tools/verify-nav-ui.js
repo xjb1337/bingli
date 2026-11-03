@@ -125,13 +125,13 @@ cdp._id = 0;
     afterJump.step === 'pe' && /体格检查/.test(afterJump.title) && !afterJump.sheet,
     `step=${afterJump.step} 标题=${afterJump.title}`);
 
-  // 6. 再打开，能看出「既往史」排在「系统回顾」前面
+  // 6. 再打开，能看出「系统回顾」紧接在「体格检查」之后
   await ev(`document.querySelector('#stepBar').click()`);
   await sleep(200);
   const order = await ev(`Array.from(document.querySelectorAll('.nav-row')).map(r => r.dataset.navstep)`);
-  const iRob = order.indexOf('pmh');
+  const iPe = order.indexOf('pe');
   const iRos = order.indexOf('ros');
-  check('既往史排在系统回顾之前', iRob >= 0 && iRos === iRob + 1, `pmh=${iRob} ros=${iRos}`);
+  check('系统回顾紧接在体格检查之后', iPe >= 0 && iRos === iPe + 1, `pe=${iPe} ros=${iRos}`);
 
   // 7. 状态角标：空记录时录入步骤都标「还没填」，生成页不带角标
   const states = await ev(`(() => {
@@ -188,8 +188,8 @@ cdp._id = 0;
 
   // 11. 不要把我改动之前的顺序又改回去——这条是对着用户诉求的回归锁
   const finalOrder = await ev(`APP.STEPS.map(s => s.key).join('>')`);
-  check('步骤顺序是 basic>hpi>pmh>ros>personal>marriage>family>pe>aux>summary>output',
-    finalOrder === 'basic>hpi>pmh>ros>personal>marriage>family>pe>aux>summary>output', finalOrder);
+  check('步骤顺序是 basic>hpi>pmh>personal>marriage>family>pe>ros>aux>summary>output',
+    finalOrder === 'basic>hpi>pmh>personal>marriage>family>pe>ros>aux>summary>output', finalOrder);
 
   ws.close();
   proc.kill();

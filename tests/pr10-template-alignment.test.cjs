@@ -91,8 +91,8 @@ test('PR10-03 空系统回顾、专项评估、摘要、诊断依据与空可选
   record.ros.resp = { cough: { status: 'asked_positive', detail: '咳嗽3天' } };
   const withRos = GENERATOR.generate(record).text;
   const titles = sectionTitles(withRos);
-  assert.ok(titles.indexOf('系统回顾') > titles.indexOf('既往史'));
-  assert.ok(titles.indexOf('系统回顾') < titles.indexOf('个人史'));
+  assert.ok(titles.indexOf('系统回顾') > titles.indexOf('体格检查'));
+  assert.ok(titles.indexOf('系统回顾') < titles.indexOf('辅助检查'));
 });
 
 test('PR10-04 辅助检查按实验室/特殊/病理分组，保留原有 ↑↓ 且不新增箭头', () => {

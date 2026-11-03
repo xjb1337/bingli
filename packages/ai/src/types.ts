@@ -1,6 +1,8 @@
 import type { DabingliRecord } from '@dabingli/domain';
 
-export type AiOperation = 'organize' | 'polish' | 'check' | 'summary';
+export type AiOperation = 'organize' | 'polish' | 'check' | 'summary' | 'recognize';
+
+export type AiSuggestionKind = 'text' | 'choice' | 'number';
 
 export type AiErrorCode =
   | 'missing_key'
@@ -42,6 +44,12 @@ export interface AiRequest {
   allowed: string[];
   system: string;
   user: string;
+  image?: AiImagePayload;
+}
+
+export interface AiImagePayload {
+  mimeType: string;
+  dataBase64: string;
 }
 
 export interface AiEvidence {
@@ -53,6 +61,7 @@ export interface AiSuggestion {
   path: string;
   text: string;
   evidence: AiEvidence[];
+  kind?: AiSuggestionKind;
 }
 
 export interface AiIssue {
@@ -88,6 +97,7 @@ export interface AiAdoptedField {
 export interface AiTransportRequest {
   system: string;
   user: string;
+  image?: AiImagePayload;
 }
 
 export interface AiTransportResponse {

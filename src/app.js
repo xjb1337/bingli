@@ -62,19 +62,17 @@ const APP = (() => {
    * 步骤清单。
    *
    * 步骤顺序 == 病历章节顺序（见 GENERATOR.SECTION_ORDER），不是两套。
-   * 既往史在系统回顾之前：《诊断学》第10版第六篇的住院病历书写顺序是
-   * 「主诉／现病史／既往史／系统回顾／个人史／婚姻史／月经生育史／家族史」，
-   * 系统回顾是既往史的补充追问，排在它后面才讲得通。
+   * 本顺序由用户明确指定：系统回顾紧接在体格检查之后，不沿用教材的默认章序。
    */
   const STEPS = [
     { key: 'basic', name: '基本情况' },
     { key: 'hpi', name: '现病史' },
     { key: 'pmh', name: '既往史' },
-    { key: 'ros', name: '系统回顾' },
     { key: 'personal', name: '个人史' },
     { key: 'marriage', name: '婚姻与生育史' },
     { key: 'family', name: '家庭史' },
     { key: 'pe', name: '体格检查' },
+    { key: 'ros', name: '系统回顾' },
     { key: 'aux', name: '辅助检查' },
     { key: 'summary', name: '摘要与诊断' },
     { key: 'output', name: '生成病历' }
@@ -2226,7 +2224,7 @@ const APP = (() => {
     if (OUT_VIEW === 'discharge') {
       return '出院记录包括入院情况、诊疗经过、出院情况、出院诊断和出院医嘱；出院诊断需要单独填写并确认，不会自动沿用初步诊断。';
     }
-    return '大病历 = 一般项目 → 主诉 → 现病史 → 既往史 → 系统回顾 → 个人史 → 婚姻史 → 月经与生育史 → 家庭史 → 体格检查 → 辅助检查 → 摘要 → 诊断依据 → 初步诊断。';
+    return '大病历 = 一般项目 → 主诉 → 现病史 → 既往史 → 个人史 → 婚姻史 → 月经与生育史 → 家庭史 → 体格检查 → 系统回顾 → 辅助检查 → 摘要 → 诊断依据 → 初步诊断。';
   }
 
   /** 取某个生成视图的纯文本（始终按当前 record 现算，不用旧缓存） */
@@ -2448,9 +2446,9 @@ const APP = (() => {
     if (!path) return;
     const top = String(path).split('.')[0];
     const stepKey = {
-      basic: 'basic', hpi: 'hpi', pmh: 'pmh', ros: 'ros', personal: 'personal',
+      basic: 'basic', hpi: 'hpi', pmh: 'pmh', personal: 'personal',
       marriage: 'marriage', menstruation: 'marriage', childbirth: 'marriage',
-      family: 'family', pe: 'pe', auxiliary: 'aux', summary: 'summary',
+      family: 'family', pe: 'pe', ros: 'ros', auxiliary: 'aux', summary: 'summary',
       diagnosis: 'summary', soap: 'summary', discharge: 'summary'
     }[top];
     if (stepKey) {
@@ -2863,7 +2861,7 @@ const APP = (() => {
    * 生命体征输入侧的「可信范围」校验。
    *
    * 为什么要有：`GENERATOR.validate()` 里已经有一份同样的范围表（VITAL_RANGE），
-   * 但那要到第 11 步生成病历时才提示。学生在第 9 步把体温打成 375、脉搏打成 7，
+   * 但那要到生成病历时才提示。学生在查体页把体温打成 375、脉搏打成 7，
    * 一路点下去毫无阻碍，等看到警告时已经不知道是哪一个数字错了。
    *
    * 这里只做一件事：把输入框标红 + 在旁边说明「可信范围是 34～43」。
@@ -3162,14 +3160,20 @@ const APP = (() => {
           // 阳性 → 未问
           item.checked = false;
           item.negative = false;
+          item.status = 'not_asked';
+          item.factState = 'not_asked';
         } else if (item.negative) {
           // 阴性 → 阳性
           item.negative = false;
           item.checked = true;
+          item.status = 'asked_positive';
+          item.factState = 'asked_positive';
         } else {
           // 未问 → 阴性
           item.negative = true;
           item.checked = false;
+          item.status = 'asked_negative';
+          item.factState = 'asked_negative';
         }
         saveCurrent();
         // 更新按钮外观与详情区
@@ -3232,7 +3236,11 @@ const APP = (() => {
         const store = R.ros[ds.rosneg] || (R.ros[ds.rosneg] = {});
         sys.symptoms.forEach(sym => {
           const it = store[sym.key] || (store[sym.key] = { checked: false, negative: false, time: '', detail: '' });
-          if (!it.checked) it.negative = true;
+          if (!it.checked) {
+            it.negative = true;
+            it.status = 'asked_negative';
+            it.factState = 'asked_negative';
+          }
         });
         saveCurrent();
         render();
@@ -3410,7 +3418,9 @@ const APP = (() => {
         R.ros = {};
         SCHEMA.ROS.forEach(sys => {
           const store = R.ros[sys.key] = {};
-          sys.symptoms.forEach(sym => { store[sym.key] = { checked: false, negative: true, time: '', detail: '' }; });
+          sys.symptoms.forEach(sym => {
+            store[sym.key] = { checked: false, negative: true, status: 'asked_negative', factState: 'asked_negative', time: '', detail: '' };
+          });
         });
         saveCurrent();
         render();
@@ -4202,7 +4212,7 @@ const APP = (() => {
       return {saved, count: selected.length};
     },
     reviewAI(path) {
-      if (!Object.prototype.hasOwnProperty.call(AI_CORE.fields, path) || CORE.fieldState(R, path).source !== 'ai') return false;
+      if (!Object.prototype.hasOwnProperty.call(AI_CORE.labels, path) || CORE.fieldState(R, path).source !== 'ai') return false;
       CORE.markFieldReviewed(R, path, 'ai');
       if (path === 'summary') CORE.markDocumentReviewed(R, 'summary');
       saveCurrent(); render(); return true;

@@ -135,7 +135,7 @@ const findChrome = () => [
     return 1;
   })()`);
 
-  const PAGES = ['basic', 'hpi', 'pmh', 'ros', 'personal', 'marriage', 'family', 'pe', 'aux', 'summary', 'output'];
+  const PAGES = ['basic', 'hpi', 'pmh', 'personal', 'marriage', 'family', 'pe', 'ros', 'aux', 'summary', 'output'];
   const bad = [];
   const rows = [];
   /* 每页顺带记一笔：这一页本该出现的「有数据才渲染」控件，到底渲染出来没有。

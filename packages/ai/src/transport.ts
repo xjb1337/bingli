@@ -1,4 +1,5 @@
 import { AiError, AI_ERROR_MESSAGES, aiError, isKnownErrorCode, mapHttpStatus } from './errors';
+import { normalizeAiImage } from './core';
 import type {
   AiErrorCode,
   AiRequestOptions,
@@ -26,6 +27,15 @@ interface DeepSeekPayload {
   model?: unknown;
 }
 
+interface DeepSeekContentPart {
+  type: 'text' | 'image_url';
+  text?: string;
+  image_url?: {
+    url: string;
+    detail: 'high';
+  };
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -36,6 +46,24 @@ function isAbortError(error: unknown): boolean {
 
 function responseSize(text: string): number {
   return new TextEncoder().encode(text).byteLength;
+}
+
+/** DeepSeek multimodal content: a plain string without an image, parts with one. */
+export function buildDeepSeekContent(
+  request: AiTransportRequest,
+): string | DeepSeekContentPart[] {
+  const image = normalizeAiImage(request.image);
+  if (!image) return request.user;
+  return [
+    { type: 'text', text: request.user },
+    {
+      type: 'image_url',
+      image_url: {
+        url: `data:${image.mimeType};base64,${image.dataBase64}`,
+        detail: 'high',
+      },
+    },
+  ];
 }
 
 function parseDeepSeekResponse(text: string, fallbackModel: string): AiTransportResponse {
@@ -137,7 +165,7 @@ export class WebFetchTransport implements AiTransport {
           response_format: { type: 'json_object' },
           messages: [
             { role: 'system', content: request.system },
-            { role: 'user', content: request.user },
+            { role: 'user', content: buildDeepSeekContent(request) },
           ],
         }),
         credentials: 'omit',
@@ -251,6 +279,7 @@ export class AndroidBridgeTransport implements AiTransport {
     if (typeof window === 'undefined') throw aiError('request_failed');
     const status = await this.status();
     if (!status.configured) throw aiError('missing_key', '请先在 Android AI 设置中保存 API Key');
+    const image = normalizeAiImage(request.image);
 
     const id = this.requestId();
     return await new Promise<AiTransportResponse>((resolve, reject) => {
@@ -304,7 +333,11 @@ export class AndroidBridgeTransport implements AiTransport {
       }, options.timeoutMs ?? this.timeoutMs);
 
       try {
-        this.bridge.aiRequest(id, JSON.stringify({ system: request.system, user: request.user }));
+        this.bridge.aiRequest(id, JSON.stringify({
+          system: request.system,
+          user: request.user,
+          ...(image ? { image } : {}),
+        }));
       } catch {
         if (timedOut) settle(aiError('timeout'));
         else settle(aiError('request_failed'));

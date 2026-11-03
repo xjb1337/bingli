@@ -1218,6 +1218,52 @@ textarea[aria-invalid="true"] {
   font-weight: 700;
 }
 
+.ai-recognize {
+  display: grid;
+  gap: 8px;
+}
+
+.ai-field-label {
+  font-weight: 700;
+}
+
+.ai-image-preview {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-soft);
+}
+
+.ai-image-preview img {
+  width: min(42vw, 180px);
+  max-height: 180px;
+  object-fit: contain;
+  border-radius: 8px;
+  background: #f4f6f5;
+}
+
+.ai-image-preview p {
+  margin: 0 0 8px;
+}
+
+.ai-image-warning {
+  margin: 0;
+  padding: 10px 12px;
+  border-left: 3px solid #b26a00;
+  border-radius: 8px;
+  background: #fff7e6;
+  line-height: 1.65;
+  font-size: 0.86rem;
+}
+
+.ai-image-send {
+  margin-top: 10px;
+}
+
 .ai-preview,
 .ai-result,
 .ai-adopted {

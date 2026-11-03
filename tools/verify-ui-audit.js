@@ -243,7 +243,7 @@ function partial(area, detail) { PASSED.push({ area, detail, tone: 'warn' }); }
 
   // 评分自查已移除（用户要求：这只是写病历的工具，不需要自查打分）。
   // 这份列表要跟 APP.STEPS 保持一致，否则逐页扫描会去 goto 一个不存在的步骤。
-  const STEPS = ['basic', 'hpi', 'pmh', 'ros', 'personal', 'marriage', 'family', 'pe', 'aux', 'summary', 'output'];
+  const STEPS = ['basic', 'hpi', 'pmh', 'personal', 'marriage', 'family', 'pe', 'ros', 'aux', 'summary', 'output'];
 
   /* =====================================================================
    * 0. 空病历基线：12 页逐页拍照 + 布局体检
