@@ -4,9 +4,11 @@ import android.app.*;
 import android.os.*;
 import android.content.*;
 import android.net.Uri;
+import android.provider.MediaStore;
 import android.webkit.*;
 import android.view.*;
 import android.widget.*;
+import androidx.core.content.FileProvider;
 import java.io.*;
 import java.time.Clock;
 import com.xjb.bingli.migration.LegacyMigrator;
@@ -15,6 +17,7 @@ public class MainActivity extends Activity {
     private static final String ORIGIN = "https://appassets.androidplatform.net";
     private WebView web;
     private ValueCallback<Uri[]> chooser;
+    private Uri cameraUri;
     private String exportText;
     private UpdateManager updater;
     private AIKeyStore aiKeys;
@@ -62,8 +65,15 @@ public class MainActivity extends Activity {
             @Override public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
                 if (chooser != null) chooser.onReceiveValue(null);
                 chooser = callback;
-                Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("application/json").addCategory(Intent.CATEGORY_OPENABLE);
-                try { startActivityForResult(intent, 41); } catch (ActivityNotFoundException e) { chooser.onReceiveValue(null); chooser=null; }
+                cameraUri = null;
+                if (acceptsImages(params)) {
+                    if (params.isCaptureEnabled()) startImageCamera();
+                    else openImageGallery();
+                } else {
+                    Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("application/json").addCategory(Intent.CATEGORY_OPENABLE);
+                    try { startActivityForResult(intent, 41); }
+                    catch (ActivityNotFoundException e) { chooser.onReceiveValue(null); chooser=null; }
+                }
                 return true;
             }
         });
@@ -72,6 +82,38 @@ public class MainActivity extends Activity {
         if (migrator.getState() == LegacyMigrator.State.NONE) beginLegacyMigration();
         else if (migrator.getState() == LegacyMigrator.State.FAILED) loadRecovery();
         else loadMain();
+    }
+
+    private boolean acceptsImages(WebChromeClient.FileChooserParams params) {
+        String[] types = params.getAcceptTypes();
+        if (types == null) return false;
+        for (String type : types) {
+            if (type != null && type.toLowerCase(java.util.Locale.ROOT).startsWith("image/")) return true;
+        }
+        return false;
+    }
+    private void openImageGallery() {
+        Intent intent = new Intent(Intent.ACTION_GET_CONTENT).setType("image/*").addCategory(Intent.CATEGORY_OPENABLE);
+        try { startActivityForResult(intent, 43); }
+        catch (ActivityNotFoundException e) { chooser.onReceiveValue(null); chooser = null; }
+    }
+    private void startImageCamera() {
+        try {
+            File dir = new File(getCacheDir(), "camera");
+            if (!dir.exists() && !dir.mkdirs()) throw new IOException("无法创建相机缓存目录");
+            File[] old = dir.listFiles();
+            if (old != null) for (File file : old) file.delete();
+            File photo = new File(dir, "photo-" + System.currentTimeMillis() + ".jpg");
+            cameraUri = FileProvider.getUriForFile(this, getPackageName() + ".files", photo);
+            Intent intent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE)
+                .putExtra(MediaStore.EXTRA_OUTPUT, cameraUri)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            intent.setClipData(ClipData.newRawUri("病历照片", cameraUri));
+            startActivityForResult(intent, 43);
+        } catch (Exception e) {
+            cameraUri = null;
+            openImageGallery();
+        }
     }
 
     private WebResourceResponse assetResponse(Uri uri) {
@@ -150,10 +192,17 @@ public class MainActivity extends Activity {
         @JavascriptInterface public void aiCancel(String id) { aiClient.cancel(id); }
         @JavascriptInterface public void aiRequest(String id, String payload) {
             try {
-                if (payload == null || payload.length() > 65000) throw new IllegalArgumentException();
+                if (payload == null || payload.length() > 7 * 1024 * 1024) throw new IllegalArgumentException();
                 org.json.JSONObject p = new org.json.JSONObject(payload);
-                boolean accepted = aiClient.request(id, aiKeys.read(), aiKeys.model(), p.getString("system"), p.getString("user"), MainActivity.this::aiResult);
+                org.json.JSONObject image = p.optJSONObject("image");
+                if (p.has("image") && image == null) throw new IllegalArgumentException();
+                String imageMime = image == null ? null : image.optString("mimeType", null);
+                String imageBase64 = image == null ? null : image.optString("dataBase64", null);
+                boolean accepted = aiClient.request(id, aiKeys.read(), aiKeys.model(), p.getString("system"), p.getString("user"),
+                    imageMime, imageBase64, MainActivity.this::aiResult);
                 if (!accepted) aiResult(id, new org.json.JSONObject().put("ok", false).put("error", "已有请求进行中或参数无效，请稍后重试"));
+            } catch (IllegalArgumentException e) {
+                try { aiResult(id, new org.json.JSONObject().put("ok", false).put("code", "invalid_input").put("error", "AI 请求或图片参数无效，请重新选择后再试")); } catch (Exception ignored) { }
             } catch (Exception e) {
                 try { aiResult(id, new org.json.JSONObject().put("ok", false).put("code", "missing_key").put("error", "无法读取 AI 设置，请重新保存密钥")); } catch (Exception ignored) { }
             }
@@ -205,6 +254,11 @@ public class MainActivity extends Activity {
         super.onActivityResult(request,result,data);
         if (request == 41 && chooser != null) {
             chooser.onReceiveValue(result == RESULT_OK && data != null ? new Uri[]{data.getData()} : null); chooser=null;
+        }
+        if (request == 43 && chooser != null) {
+            Uri selected = result != RESULT_OK ? null : cameraUri != null ? cameraUri : data != null ? data.getData() : null;
+            chooser.onReceiveValue(selected == null ? null : new Uri[]{selected});
+            chooser = null; cameraUri = null;
         }
         if (request == 42) {
             String content = exportText; exportText=null;

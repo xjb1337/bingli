@@ -61,7 +61,7 @@ export function PeStep({ record, update, errors }: StepComponentProps) {
 
   return (
     <StepShell
-      eyebrow="第 8 / 11 步"
+      eyebrow="第 7 / 11 步"
       title="体格检查"
       description={STEP_DESCRIPTIONS.pe}
     >

@@ -57,8 +57,27 @@ const SettingsPage = lazy(() =>
   import('./pages/SettingsPage').then((module) => ({ default: module.SettingsPage })),
 );
 
+function LoadingState({ label, compact = false }: { label: string; compact?: boolean }) {
+  return (
+    <section className={`loading-state${compact ? ' is-compact' : ''}`} role="status" aria-live="polite" aria-busy="true">
+      <div className="loading-state-head">
+        <span className="loading-spinner" aria-hidden="true" />
+        <div>
+          <strong>{label}</strong>
+          <span>资料只在本机读取，请稍候。</span>
+        </div>
+      </div>
+      <div className="skeleton-stack" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+      </div>
+    </section>
+  );
+}
+
 function LazyContentFallback() {
-  return <p className="lazy-content-status" role="status">正在加载页面，请稍候。</p>;
+  return <LoadingState label="正在加载页面…" compact />;
 }
 
 type AppView = 'editor' | 'records' | 'settings';
@@ -208,9 +227,7 @@ export function App({
   if (!initial) {
     return (
       <main className="app-main">
-        <section className="workspace-page" aria-busy="true">
-          <p role="status">正在读取本机病历…</p>
-        </section>
+        <LoadingState label="正在读取本机病历…" />
       </main>
     );
   }
@@ -703,7 +720,16 @@ function EditorApp({
       <a className="skip-link" href="#main-content">跳到主要内容</a>
       <header className="app-header">
         <div className="brand">
-          <div className="brand-mark" aria-hidden="true">病</div>
+          <div className="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 48 48" fill="none">
+              <rect width="48" height="48" rx="12" fill="currentColor" />
+              <path d="M15 11h12l7 7v18a3 3 0 0 1-3 3H15a3 3 0 0 1-3-3V14a3 3 0 0 1 3-3Z" fill="#f7fffb" />
+              <path d="M27 11v7h7" fill="#b9eadb" />
+              <path d="M18 24h11M18 29h8M18 34h6" stroke="#0b6e66" strokeWidth="2.4" strokeLinecap="round" />
+              <circle cx="34" cy="34" r="7" fill="#7fe0c0" />
+              <path d="m31 34 2 2 4-5" stroke="#073f3a" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </div>
           <div>
             <div className="brand-title">大病历生成器</div>
             <div className="brand-subtitle">Web UI · {record.basic.name || '未命名病历'}</div>
@@ -737,7 +763,7 @@ function EditorApp({
 
       {alertNode ? <div className="global-notice">{alertNode}</div> : null}
 
-      <main id="main-content" className="app-main">
+      <main id="main-content" className={`app-main${view === 'editor' ? ' has-editor-footer' : ''}`}>
         {view === 'records' ? (
           <Suspense fallback={<LazyContentFallback />}>
             <RecordsPage

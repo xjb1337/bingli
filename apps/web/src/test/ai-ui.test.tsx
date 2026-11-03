@@ -172,6 +172,72 @@ describe('DeepSeek web security boundary', () => {
     expect(within(rawDetails as HTMLElement).getByText(/"sources"/)).toBeInTheDocument();
   });
 
+  it('offers camera, gallery and pasted-text recognition without auto-selecting results', async () => {
+    const requestSpy = vi.fn(async (_request: Parameters<AiTransport['request']>[0]) => ({
+      content: {
+        suggestions: [
+          { path: 'pe.vitals.temperature', text: '37.8', evidence: [] },
+          { path: 'basic.gender', text: '女', evidence: [] },
+        ],
+        issues: [],
+        questions: [],
+      },
+      model: 'deepseek-flash',
+    }));
+    const transport = fakeTransportFactory(requestSpy);
+    const onAdoptRecord = vi.fn(async (_next: ReturnType<typeof SCHEMA.emptyRecord>) => true);
+    const user = userEvent.setup();
+    const record = SCHEMA.emptyRecord();
+    record.id = 'recognize_ui_case';
+
+    render(
+      <AiAssistantPanel
+        record={record}
+        configured
+        securityContext="web"
+        model="deepseek-flash"
+        createTransport={() => transport.factory('sk-test-recognize')}
+        onOpenSettings={() => undefined}
+        onAdoptRecord={onAdoptRecord}
+        onConfirmField={async () => true}
+      />,
+    );
+
+    await user.selectOptions(screen.getByLabelText('AI 操作'), 'recognize');
+    const camera = screen.getByLabelText('拍照识别病历');
+    const gallery = screen.getByLabelText('选择病历图片');
+    expect(camera).toHaveAttribute('accept', 'image/*');
+    expect(camera).toHaveAttribute('capture', 'environment');
+    expect(gallery).toHaveAttribute('accept', 'image/*');
+    expect(screen.getByRole('button', { name: '拍照' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '选择图片' })).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText(/粘贴病历文字/), '体温 37.8℃，性别女');
+    await user.click(screen.getByRole('button', { name: '预览发送内容' }));
+    expect(screen.getByText(/图片会以压缩后的版本发送/)).toBeInTheDocument();
+    await user.click(screen.getByLabelText(/我已核对下方实际发送内容/));
+    await user.click(screen.getByRole('button', { name: '生成建议' }));
+    await screen.findByRole('heading', { name: '建议对照 · 尚未写入' });
+
+    expect(await screen.findByText('选择项 · 默认不勾选')).toBeInTheDocument();
+    const gender = screen.getByLabelText('选择性别');
+    const temperature = screen.getByLabelText('选择生命体征 · 体温');
+    expect(gender).not.toBeChecked();
+    expect(temperature).not.toBeChecked();
+    expect(onAdoptRecord).not.toHaveBeenCalled();
+    const sent = requestSpy.mock.calls[0]?.[0];
+    expect(sent?.image).toBeUndefined();
+    expect(sent?.user).toContain('识别病历图片/文字');
+
+    await user.click(gender);
+    await user.click(screen.getByRole('button', { name: '采纳勾选项' }));
+    await waitFor(() => expect(onAdoptRecord).toHaveBeenCalledTimes(1));
+    const adopted = onAdoptRecord.mock.calls[0]?.[0];
+    expect(adopted?.basic.gender).toBe('女');
+    expect(RECORD_CORE.fieldState(adopted ?? record, 'basic.gender').source).toBe('ai');
+    expect(RECORD_CORE.fieldReviewValid(adopted ?? record, 'basic.gender')).toBe(false);
+  });
+
   it('clears the entered key when the page component is remounted', async () => {
     const transport = fakeTransportFactory(async () => ({ content: aiContent(), model: 'deepseek-flash' }));
     const repository = createTestRepository();

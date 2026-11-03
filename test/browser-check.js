@@ -187,9 +187,9 @@ async function main() {
     `症状项=${rosChips} 阳性详情框=${rosPos} 负性批按钮=${rosNeg}`]);
   await shot('04-ros');
 
-  // 6. 步骤顺序：既往史必须排在系统回顾之前（病历章节顺序，不是两套）
+  // 6. 步骤顺序：系统回顾必须紧接在体格检查之后（用户指定，不是两套）
   const stepOrder = await evaluate('APP.STEPS.map(s => s.key).join(">")');
-  results.push(['步骤顺序', stepOrder === 'basic>hpi>pmh>ros>personal>marriage>family>pe>aux>summary>output', stepOrder]);
+  results.push(['步骤顺序', stepOrder === 'basic>hpi>pmh>personal>marriage>family>pe>ros>aux>summary>output', stepOrder]);
 
   // 7. 跳到体格检查
   await evaluate('APP._test.gotoStep("pe")');

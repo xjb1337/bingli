@@ -62,19 +62,17 @@ const APP = (() => {
    * 步骤清单。
    *
    * 步骤顺序 == 病历章节顺序（见 GENERATOR.SECTION_ORDER），不是两套。
-   * 既往史在系统回顾之前：《诊断学》第10版第六篇的住院病历书写顺序是
-   * 「主诉／现病史／既往史／系统回顾／个人史／婚姻史／月经生育史／家族史」，
-   * 系统回顾是既往史的补充追问，排在它后面才讲得通。
+   * 本顺序由用户明确指定：系统回顾紧接在体格检查之后，不沿用教材的默认章序。
    */
   const STEPS = [
     { key: 'basic', name: '基本情况' },
     { key: 'hpi', name: '现病史' },
     { key: 'pmh', name: '既往史' },
-    { key: 'ros', name: '系统回顾' },
     { key: 'personal', name: '个人史' },
     { key: 'marriage', name: '婚姻与生育史' },
     { key: 'family', name: '家庭史' },
     { key: 'pe', name: '体格检查' },
+    { key: 'ros', name: '系统回顾' },
     { key: 'aux', name: '辅助检查' },
     { key: 'summary', name: '摘要与诊断' },
     { key: 'output', name: '生成病历' }
@@ -2226,7 +2224,7 @@ const APP = (() => {
     if (OUT_VIEW === 'discharge') {
       return '出院记录包括入院情况、诊疗经过、出院情况、出院诊断和出院医嘱；出院诊断需要单独填写并确认，不会自动沿用初步诊断。';
     }
-    return '大病历 = 一般项目 → 主诉 → 现病史 → 既往史 → 系统回顾 → 个人史 → 婚姻史 → 月经与生育史 → 家庭史 → 体格检查 → 辅助检查 → 摘要 → 诊断依据 → 初步诊断。';
+    return '大病历 = 一般项目 → 主诉 → 现病史 → 既往史 → 个人史 → 婚姻史 → 月经与生育史 → 家庭史 → 体格检查 → 系统回顾 → 辅助检查 → 摘要 → 诊断依据 → 初步诊断。';
   }
 
   /** 取某个生成视图的纯文本（始终按当前 record 现算，不用旧缓存） */
@@ -2448,9 +2446,9 @@ const APP = (() => {
     if (!path) return;
     const top = String(path).split('.')[0];
     const stepKey = {
-      basic: 'basic', hpi: 'hpi', pmh: 'pmh', ros: 'ros', personal: 'personal',
+      basic: 'basic', hpi: 'hpi', pmh: 'pmh', personal: 'personal',
       marriage: 'marriage', menstruation: 'marriage', childbirth: 'marriage',
-      family: 'family', pe: 'pe', auxiliary: 'aux', summary: 'summary',
+      family: 'family', pe: 'pe', ros: 'ros', auxiliary: 'aux', summary: 'summary',
       diagnosis: 'summary', soap: 'summary', discharge: 'summary'
     }[top];
     if (stepKey) {
@@ -2863,7 +2861,7 @@ const APP = (() => {
    * 生命体征输入侧的「可信范围」校验。
    *
    * 为什么要有：`GENERATOR.validate()` 里已经有一份同样的范围表（VITAL_RANGE），
-   * 但那要到第 11 步生成病历时才提示。学生在第 9 步把体温打成 375、脉搏打成 7，
+   * 但那要到生成病历时才提示。学生在查体页把体温打成 375、脉搏打成 7，
    * 一路点下去毫无阻碍，等看到警告时已经不知道是哪一个数字错了。
    *
    * 这里只做一件事：把输入框标红 + 在旁边说明「可信范围是 34～43」。
@@ -3162,14 +3160,20 @@ const APP = (() => {
           // 阳性 → 未问
           item.checked = false;
           item.negative = false;
+          item.status = 'not_asked';
+          item.factState = 'not_asked';
         } else if (item.negative) {
           // 阴性 → 阳性
           item.negative = false;
           item.checked = true;
+          item.status = 'asked_positive';
+          item.factState = 'asked_positive';
         } else {
           // 未问 → 阴性
           item.negative = true;
           item.checked = false;
+          item.status = 'asked_negative';
+          item.factState = 'asked_negative';
         }
         saveCurrent();
         // 更新按钮外观与详情区
@@ -3232,7 +3236,11 @@ const APP = (() => {
         const store = R.ros[ds.rosneg] || (R.ros[ds.rosneg] = {});
         sys.symptoms.forEach(sym => {
           const it = store[sym.key] || (store[sym.key] = { checked: false, negative: false, time: '', detail: '' });
-          if (!it.checked) it.negative = true;
+          if (!it.checked) {
+            it.negative = true;
+            it.status = 'asked_negative';
+            it.factState = 'asked_negative';
+          }
         });
         saveCurrent();
         render();
@@ -3410,7 +3418,9 @@ const APP = (() => {
         R.ros = {};
         SCHEMA.ROS.forEach(sys => {
           const store = R.ros[sys.key] = {};
-          sys.symptoms.forEach(sym => { store[sym.key] = { checked: false, negative: true, time: '', detail: '' }; });
+          sys.symptoms.forEach(sym => {
+            store[sym.key] = { checked: false, negative: true, status: 'asked_negative', factState: 'asked_negative', time: '', detail: '' };
+          });
         });
         saveCurrent();
         render();
@@ -3811,6 +3821,7 @@ const APP = (() => {
       const dept = (SCHEMA.DEPARTMENTS.find(d => d.key === s.department) || {}).name || '通用';
       return `
         <div class="list-row">
+          <span class="list-avatar" aria-hidden="true">${esc((s.name || '病').trim().slice(0, 1))}</span>
           <div class="list-main" data-open="${esc(s.id)}">
             <div class="list-name">${esc(s.name)}
               <span class="list-meta">${esc(s.gender)} ${esc(AGE.display({ age: s.age, birthDate: s.birthDate, admitDate: s.admitDate }))}</span>
@@ -3828,10 +3839,18 @@ const APP = (() => {
     const wrap = document.createElement('div');
     wrap.className = 'modal-mask';
     wrap.innerHTML = `
-      <div class="modal">
-        <div class="modal-title">我的病历（${LIST.length}）</div>
+      <div class="modal list-modal">
+        <div class="modal-head">
+          <div><span class="modal-eyebrow">本机存储</span><div class="modal-title">我的病历 <span class="modal-count">${LIST.length}</span></div></div>
+          <button type="button" class="modal-close" data-close aria-label="关闭病历列表">关闭</button>
+        </div>
         ${alertHtml}
-        <div class="list-box">${rows || '<div class="empty">还没有保存的病历</div>'}</div>
+        <div class="list-box">${rows || `<div class="empty-state empty-state--records">
+          <span class="empty-state-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M9 11h7M9 15h5M14 3v5h5"/></svg></span>
+          <strong>还没有保存的病历</strong>
+          <p>先整理当前患者资料，保存后就会出现在这里。</p>
+          <button type="button" class="btn" data-new>新建第一份病历</button>
+        </div>`}</div>
         <div class="btn-row">
           <button class="btn" data-new>新建病历</button>
           <button class="btn btn-ghost" data-backup>导出备份</button>
@@ -4040,7 +4059,7 @@ const APP = (() => {
       · <b>替换</b>：清空当前列表，只保留导入的内容</div>
       <div class="btn-row" style="margin-top:12px">
         <button class="btn" data-import="merge">合并导入</button>
-        <button class="btn btn-ghost" data-import="replace">替换全部</button>
+        <button class="btn btn-danger" data-import="replace">替换全部</button>
         <button class="btn btn-ghost" data-close>取消</button>
       </div>
     `, wrap => {
@@ -4202,7 +4221,7 @@ const APP = (() => {
       return {saved, count: selected.length};
     },
     reviewAI(path) {
-      if (!Object.prototype.hasOwnProperty.call(AI_CORE.fields, path) || CORE.fieldState(R, path).source !== 'ai') return false;
+      if (!Object.prototype.hasOwnProperty.call(AI_CORE.labels, path) || CORE.fieldState(R, path).source !== 'ai') return false;
       CORE.markFieldReviewed(R, path, 'ai');
       if (path === 'summary') CORE.markDocumentReviewed(R, 'summary');
       saveCurrent(); render(); return true;

@@ -36,6 +36,7 @@ function successBody(text = '患者诉咳嗽3天。'): string {
 }
 
 const request = { system: 'system', user: '{"sources":[]}' };
+const image = { mimeType: 'image/jpeg', dataBase64: 'aGVsbG8=' };
 
 afterEach(() => {
   delete (globalThis as { window?: unknown }).window;
@@ -81,6 +82,34 @@ describe('WebFetchTransport', () => {
     const init = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as RequestInit;
     expect(init.headers).toMatchObject({ Authorization: 'Bearer sk-test-memory-only' });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('builds DeepSeek multimodal content parts for image requests', async () => {
+    const fetchImpl = vi.fn(async () => response(200, successBody())) as unknown as typeof fetch;
+    const transport = new WebFetchTransport({ apiKey: 'sk-test-image', fetchImpl });
+    await transport.request({ ...request, image });
+
+    const init = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as RequestInit;
+    const body = JSON.parse(String(init.body)) as {
+      messages: Array<{ role: string; content: unknown }>;
+    };
+    expect(body.messages[1]?.content).toEqual([
+      { type: 'text', text: request.user },
+      {
+        type: 'image_url',
+        image_url: { url: 'data:image/jpeg;base64,aGVsbG8=', detail: 'high' },
+      },
+    ]);
+  });
+
+  it('rejects an invalid image before making a network request', async () => {
+    const fetchImpl = vi.fn() as unknown as typeof fetch;
+    const transport = new WebFetchTransport({ apiKey: 'sk-test-image', fetchImpl });
+    await expect(transport.request({
+      ...request,
+      image: { mimeType: 'image/bmp', dataBase64: 'aGVsbG8=' },
+    })).rejects.toMatchObject({ code: 'invalid_input' });
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -169,6 +198,30 @@ describe('AndroidBridgeTransport', () => {
       code: 'rate_limited',
       message: AI_ERROR_MESSAGES.rate_limited,
     });
+  });
+
+  it('passes validated image fields through the Android bridge payload', async () => {
+    (globalThis as { window?: unknown }).window = {};
+    let payload: unknown;
+    const bridge: AndroidAiBridge = {
+      aiStatus: () => JSON.stringify({ configured: true, model: 'deepseek-flash' }),
+      aiRequest: (id, raw) => {
+        payload = JSON.parse(raw);
+        const receive = (window as unknown as Record<string, unknown>)[ANDROID_AI_RECEIVE] as (
+          id: string,
+          response: unknown,
+        ) => void;
+        receive(id, {
+          ok: true,
+          model: 'deepseek-flash',
+          content: { suggestions: [], issues: [], questions: [] },
+        });
+      },
+      aiCancel: vi.fn(),
+    };
+    const transport = new AndroidBridgeTransport({ bridge, requestId: () => 'req_image' });
+    await transport.request({ ...request, image });
+    expect(payload).toEqual({ ...request, image });
   });
 
   it('cancels native work on timeout', async () => {

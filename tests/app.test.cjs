@@ -564,18 +564,16 @@ test('折叠补充项在已有内容时自动展开，旧数据仍可编辑', ()
   assert.match(html, /value="已有地址"/);
 });
 
-test('录入步骤顺序与病历章节顺序一致：既往史在系统回顾之前', () => {
+test('录入步骤顺序与病历章节顺序一致：系统回顾紧接体格检查之后', () => {
   const app = boot();
   // vm 沙箱里的数组 prototype 与宿主不同，deepStrictEqual 会因原型不等而失败，
   // 所以先转成宿主数组再比。
   const keys = Array.from(app.run('APP.STEPS.map(s => s.key)'));
-  // 用户反馈过「顺序有误，应该先既往史再系统回顾」。
-  // 《诊断学》第10版的住院病历书写顺序也是既往史在前——系统回顾是
-  // 既往史的补充追问，排在它后面才讲得通。写死整个数组，是防止以后
+  // 用户明确要求系统回顾排在体格检查之后。写死整个数组，是防止以后
   // 有人改步骤时只顾一处、把顺序又改乱。
   assert.deepEqual(keys, [
-    'basic', 'hpi', 'pmh', 'ros', 'personal', 'marriage',
-    'family', 'pe', 'aux', 'summary', 'output'
+    'basic', 'hpi', 'pmh', 'personal', 'marriage', 'family',
+    'pe', 'ros', 'aux', 'summary', 'output'
   ]);
 });
 
@@ -610,7 +608,7 @@ test('录入步骤顺序与 SECTION_ORDER 的病史部分一一对应', () => {
 test('stepIndexOf 认得出步骤键，认不出来的一律回第 0 步', () => {
   const app = boot();
   assert.equal(app.run('APP._test.stepIndexOf("basic")'), 0);
-  assert.equal(app.run('APP._test.stepIndexOf("pe")'), 7);
+  assert.equal(app.run('APP._test.stepIndexOf("pe")'), 6);
   assert.equal(app.run('APP._test.stepIndexOf("output")'), 10);
   // 空串、旧键、拼错的键都不能让页面白屏
   assert.equal(app.run('APP._test.stepIndexOf("")'), 0);
@@ -622,7 +620,7 @@ test('刷新后回到上次停留的步骤，不必从第一步重新点', () =>
   const app = boot({
     initial: { 'dabingli.settings.v1': JSON.stringify({ rosMode: 'detail', fontScale: 1, lastStep: 'pe' }) }
   });
-  assert.equal(app.document.querySelector('#stepNum').textContent, '8/11');
+  assert.equal(app.document.querySelector('#stepNum').textContent, '7/11');
   assert.match(app.document.querySelector('#stepTitle').textContent, /体格检查/);
 });
 
