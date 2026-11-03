@@ -85,10 +85,17 @@ export function RecordsPage({
             </article>
           ))
         ) : (
-          <div className="empty-state">
+          <div className="empty-state empty-state--records">
+            <span className="empty-state-icon" aria-hidden="true">
+              <svg viewBox="0 0 48 48" fill="none">
+                <path d="M13 5h16l8 8v27a3 3 0 0 1-3 3H13a3 3 0 0 1-3-3V8a3 3 0 0 1 3-3Z" />
+                <path d="M29 5v8h8M17 22h14M17 28h10M17 34h7" />
+              </svg>
+            </span>
             <h3>还没有保存的病历</h3>
-            <p>新建一份病历，或从 JSON 备份导入。</p>
+            <p>先录入患者资料，保存后会在这里形成可按科室、主诉快速识别的档案。</p>
             <button type="button" className="button primary" onClick={onNew}>新建第一份病历</button>
+            <span className="empty-state-note">也可以从下方导入 JSON 备份</span>
           </div>
         )}
       </div>

@@ -3821,6 +3821,7 @@ const APP = (() => {
       const dept = (SCHEMA.DEPARTMENTS.find(d => d.key === s.department) || {}).name || '通用';
       return `
         <div class="list-row">
+          <span class="list-avatar" aria-hidden="true">${esc((s.name || '病').trim().slice(0, 1))}</span>
           <div class="list-main" data-open="${esc(s.id)}">
             <div class="list-name">${esc(s.name)}
               <span class="list-meta">${esc(s.gender)} ${esc(AGE.display({ age: s.age, birthDate: s.birthDate, admitDate: s.admitDate }))}</span>
@@ -3838,10 +3839,18 @@ const APP = (() => {
     const wrap = document.createElement('div');
     wrap.className = 'modal-mask';
     wrap.innerHTML = `
-      <div class="modal">
-        <div class="modal-title">我的病历（${LIST.length}）</div>
+      <div class="modal list-modal">
+        <div class="modal-head">
+          <div><span class="modal-eyebrow">本机存储</span><div class="modal-title">我的病历 <span class="modal-count">${LIST.length}</span></div></div>
+          <button type="button" class="modal-close" data-close aria-label="关闭病历列表">关闭</button>
+        </div>
         ${alertHtml}
-        <div class="list-box">${rows || '<div class="empty">还没有保存的病历</div>'}</div>
+        <div class="list-box">${rows || `<div class="empty-state empty-state--records">
+          <span class="empty-state-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M9 11h7M9 15h5M14 3v5h5"/></svg></span>
+          <strong>还没有保存的病历</strong>
+          <p>先整理当前患者资料，保存后就会出现在这里。</p>
+          <button type="button" class="btn" data-new>新建第一份病历</button>
+        </div>`}</div>
         <div class="btn-row">
           <button class="btn" data-new>新建病历</button>
           <button class="btn btn-ghost" data-backup>导出备份</button>
@@ -4050,7 +4059,7 @@ const APP = (() => {
       · <b>替换</b>：清空当前列表，只保留导入的内容</div>
       <div class="btn-row" style="margin-top:12px">
         <button class="btn" data-import="merge">合并导入</button>
-        <button class="btn btn-ghost" data-import="replace">替换全部</button>
+        <button class="btn btn-danger" data-import="replace">替换全部</button>
         <button class="btn btn-ghost" data-close>取消</button>
       </div>
     `, wrap => {

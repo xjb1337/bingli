@@ -309,7 +309,16 @@ export function AiAssistantPanel({
     >
       {!configured ? (
         <div className="ai-empty" role="note">
-          <p>{noKeyMessage(securityContext, loadingAndroidStatus)}</p>
+          <span className="ai-empty-icon" aria-hidden="true">
+            <svg viewBox="0 0 32 32" fill="none">
+              <path d="M16 4 18.4 12 26 16l-7.6 4L16 28l-2.4-8L6 16l7.6-4L16 4Z" />
+              <path d="m25 5 .8 2.2L28 8l-2.2.8L25 11l-.8-2.2L22 8l2.2-.8L25 5Z" />
+            </svg>
+          </span>
+          <div className="ai-empty-copy">
+            <strong>AI 助手尚未启用</strong>
+            <p>{noKeyMessage(securityContext, loadingAndroidStatus)}</p>
+          </div>
           <button type="button" className="button secondary" onClick={onOpenSettings}>
             {securityContext === 'android' ? '查看 Android AI 设置' : '前往设置输入密钥'}
           </button>
@@ -317,8 +326,8 @@ export function AiAssistantPanel({
       ) : (
         <div className="ai-controls">
           <div className="ai-model-row">
-            <span>模型：<code>{model}</code></span>
-            <span>{securityContext === 'android' ? '密钥由 Android Keystore 保管，网页不可读取' : '密钥仅保存在本页内存'}</span>
+            <span className="ai-model-pill">模型：<code>{model}</code></span>
+            <span className="ai-model-pill">{securityContext === 'android' ? '密钥由 Android Keystore 保管，网页不可读取' : '密钥仅保存在本页内存'}</span>
           </div>
           <div className="form-grid">
             <label className="ai-field">
@@ -360,7 +369,10 @@ export function AiAssistantPanel({
           ) : null}
           {operation === 'recognize' ? (
             <div className="ai-recognize">
-              <span className="ai-field-label">识别来源</span>
+              <div className="ai-section-head">
+                <strong>识别来源</strong>
+                <span>拍照、选图或粘贴文字</span>
+              </div>
               <input
                 ref={cameraInputRef}
                 type="file"
@@ -378,28 +390,43 @@ export function AiAssistantPanel({
                 hidden
                 onChange={(event) => void selectImage(event.target.files?.[0])}
               />
-              <div className="button-row">
+              <div className="ai-source-grid" role="group" aria-label="添加识别资料">
                 <button
                   type="button"
-                  className="button secondary"
+                  className="ai-source-card ai-source-card-primary"
+                  aria-label="拍照"
                   disabled={busy || processingImage}
                   onClick={() => cameraInputRef.current?.click()}
                 >
-                  拍照
+                  <span className="ai-source-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Z" /><circle cx="12" cy="13" r="3.5" /></svg>
+                  </span>
+                  <span><strong>拍照</strong><small>拍摄纸质病历</small></span>
                 </button>
                 <button
                   type="button"
-                  className="button ghost"
+                  className="ai-source-card"
+                  aria-label="选择图片"
                   disabled={busy || processingImage}
                   onClick={() => galleryInputRef.current?.click()}
                 >
-                  选择图片
+                  <span className="ai-source-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="8.5" cy="9" r="1.5" /><path d="m4 17 5-5 4 4 2-2 5 4" /></svg>
+                  </span>
+                  <span><strong>选择图片</strong><small>从相册选择</small></span>
                 </button>
               </div>
+              {processingImage ? (
+                <div className="ai-inline-loading" role="status">
+                  <span className="loading-spinner" aria-hidden="true" />
+                  <span>正在压缩并生成缩略图…</span>
+                </div>
+              ) : null}
               {recognizeImage ? (
                 <div className="ai-image-preview">
                   <img src={recognizeImage.previewDataUrl} alt="待发送病历图片缩略图" />
-                  <div>
+                  <div className="ai-image-copy">
+                    <strong>已加入待发送资料</strong>
                     <p>
                       {recognizeImage.name} · {Math.round(recognizeImage.dataBase64.length * 3 / 4 / 1024)} KB · 发送前已压缩
                     </p>
@@ -410,7 +437,8 @@ export function AiAssistantPanel({
                 </div>
               ) : null}
               <p className="ai-image-warning" role="note">
-                图片会以压缩后的版本发送，无法自动遮去姓名、病历号、床号等身份信息。请先确认图片只含允许外发的数据，并自行裁掉无关区域。最长边约 1600 像素、JPEG 质量约 85%。
+                <span className="ai-warning-icon" aria-hidden="true">!</span>
+                <span>图片会以压缩后的版本发送，无法自动遮去姓名、病历号、床号等身份信息。请先确认图片只含允许外发的数据，并自行裁掉无关区域。最长边约 1600 像素、JPEG 质量约 85%。</span>
               </p>
               <label className="ai-field">
                 <span>粘贴病历文字（可选，可与图片同时发送）</span>
@@ -423,7 +451,7 @@ export function AiAssistantPanel({
               </label>
             </div>
           ) : null}
-          <div className="button-row">
+          <div className="button-row ai-actions">
             <button type="button" className="button secondary" disabled={processingImage} onClick={prepare}>预览发送内容</button>
             {request ? (
               <button type="button" className="button primary" disabled={busy || !consent} onClick={() => void generate()}>
@@ -441,11 +469,17 @@ export function AiAssistantPanel({
                   : '我已核对下方实际发送内容，确认可以发送给 DeepSeek。'}</span>
               </label>
               <section className="ai-send-preview" aria-labelledby="ai-send-heading">
-                <h4 id="ai-send-heading">实际发送内容（{request.sources.length} 条资料）</h4>
+                <div className="ai-section-head">
+                  <h4 id="ai-send-heading">实际发送内容（{request.sources.length} 条资料）</h4>
+                  <span className="ai-badge">发送前确认</span>
+                </div>
                 {request.image && recognizeImage ? (
                   <div className="ai-image-preview ai-image-send">
                     <img src={recognizeImage.previewDataUrl} alt="将发送的病人图片缩略图" />
-                    <p className="ai-image-warning">图片为压缩后的版本，可能含患者身份信息，且无法自动脱敏。</p>
+                    <p className="ai-image-warning">
+                      <span className="ai-warning-icon" aria-hidden="true">!</span>
+                      <span>图片为压缩后的版本，可能含患者身份信息，且无法自动脱敏。</span>
+                    </p>
                   </div>
                 ) : null}
                 <ul className="ai-source-list">
@@ -469,6 +503,18 @@ export function AiAssistantPanel({
 
       {error ? <div className="ai-error" role="alert">{error}</div> : null}
       {status ? <p className="ai-status" role="status">{status}</p> : null}
+      {busy ? (
+        <div className="ai-loading" role="status" aria-live="polite">
+          <div className="ai-loading-head">
+            <span className="loading-spinner" aria-hidden="true" />
+            <div>
+              <strong>AI 正在整理资料</strong>
+              <span>请保持本页打开，生成期间不会写入病历。</span>
+            </div>
+          </div>
+          <div className="ai-skeleton" aria-hidden="true"><span /><span /><span /></div>
+        </div>
+      ) : null}
 
       {result ? (
         <section className="ai-result" aria-labelledby="ai-result-heading">
@@ -515,7 +561,12 @@ export function AiAssistantPanel({
                 </article>
               ))}
             </div>
-          ) : <p>没有可直接填写的建议。</p>}
+          ) : (
+            <div className="ai-empty-inline">
+              <strong>没有可直接填写的建议</strong>
+              <p>可以补充更具体的原文依据，或先返回病历继续核对。</p>
+            </div>
+          )}
           {result.issues.length ? (
             <div>
               <h5>待核实的问题</h5>
@@ -592,7 +643,12 @@ export function AiAssistantPanel({
               </li>
             ))}
           </ul>
-        ) : <p className="muted">尚未采纳 AI 内容。</p>}
+        ) : (
+          <div className="ai-empty-inline">
+            <strong>尚未采纳 AI 内容</strong>
+            <p>采纳后，这里会保留来源、时间和逐项核对状态。</p>
+          </div>
+        )}
       </section>
     </Card>
   );
