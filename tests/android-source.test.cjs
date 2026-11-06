@@ -47,3 +47,13 @@ test('P0-8 camera cache is cleared at lifecycle points and cancelled photos are 
   assert.match(cancelBranch,/deleteCameraPhoto\(\)/);
   assert.doesNotMatch(successBranch,/deleteCameraPhoto\(\)|clearCameraCache\(\)/);
 });
+
+test('P1-8 recognize requests get 8192 tokens and finish reasons map to stable codes',()=>{
+  const source=readClient();
+  assert.match(source,/MAX_TOKENS_RECOGNIZE\s*=\s*8192/);
+  assert.match(source,/MAX_TOKENS_DEFAULT\s*=\s*4096/);
+  assert.match(source,/content_filtered/);
+  assert.match(source,/内容被服务端安全策略拦截/);
+  assert.match(source,/truncated_response/);
+  assert.match(source,/request_failed/);
+});

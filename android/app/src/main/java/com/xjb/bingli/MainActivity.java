@@ -214,8 +214,11 @@ public class MainActivity extends Activity {
                 if (p.has("image") && image == null) throw new IllegalArgumentException();
                 String imageMime = image == null ? null : image.optString("mimeType", null);
                 String imageBase64 = image == null ? null : image.optString("dataBase64", null);
-                boolean accepted = aiClient.request(id, aiKeys.read(), aiKeys.model(), p.getString("system"), p.getString("user"),
-                    imageMime, imageBase64, MainActivity.this::aiResult);
+                String system = p.getString("system");
+                String user = p.getString("user");
+                boolean recognize = p.optBoolean("recognize", DeepSeekClient.isRecognizeRequest(system, user));
+                boolean accepted = aiClient.request(id, aiKeys.read(), aiKeys.model(), system, user,
+                    imageMime, imageBase64, recognize, MainActivity.this::aiResult);
                 if (!accepted) aiResult(id, new org.json.JSONObject().put("ok", false).put("error", "已有请求进行中或参数无效，请稍后重试"));
             } catch (IllegalArgumentException e) {
                 try { aiResult(id, new org.json.JSONObject().put("ok", false).put("code", "invalid_input").put("error", "AI 请求或图片参数无效，请重新选择后再试")); } catch (Exception ignored) { }

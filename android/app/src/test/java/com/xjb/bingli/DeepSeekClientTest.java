@@ -92,6 +92,63 @@ public class DeepSeekClientTest {
         } finally { client.close(); }
     }
 
+    // ---- P1-8: recognize requests get a larger token budget ----
+
+    @Test public void usesLargerTokenBudgetForRecognizeRequests() throws Exception {
+        FakeConnection conn = new FakeConnection(200, successResponse());
+        DeepSeekClient client = new DeepSeekClient(() -> conn);
+        try {
+            run(client, "deepseek-flash", "你是中文病历识别与填表助手。只返回 JSON。",
+                "{\"operation\":\"识别病历图片/文字\"}", null, null);
+            assertEquals(DeepSeekClient.MAX_TOKENS_RECOGNIZE, new JSONObject(conn.bodyText()).getInt("max_tokens"));
+        } finally { client.close(); }
+    }
+
+    @Test public void keepsDefaultTokenBudgetForOtherRequests() throws Exception {
+        FakeConnection conn = new FakeConnection(200, successResponse());
+        DeepSeekClient client = new DeepSeekClient(() -> conn);
+        try {
+            run(client, "deepseek-flash", "你是病历整理助手。", "{\"operation\":\"整理病历资料\"}", null, null);
+            assertEquals(DeepSeekClient.MAX_TOKENS_DEFAULT, new JSONObject(conn.bodyText()).getInt("max_tokens"));
+        } finally { client.close(); }
+    }
+
+    @Test public void recognizesRequestsFromSystemOrUserPrompt() {
+        assertTrue(DeepSeekClient.isRecognizeRequest("你是中文病历识别与填表助手。", "{}"));
+        assertTrue(DeepSeekClient.isRecognizeRequest("其他提示", "{\"operation\":\"识别病历图片/文字\"}"));
+        assertFalse(DeepSeekClient.isRecognizeRequest("你是病历整理助手。", "{\"operation\":\"整理病历资料\"}"));
+    }
+
+    // ---- P1-8: finish_reason branches ----
+
+    @Test public void mapsLengthFinishReasonToTruncatedResponse() throws Exception {
+        JSONObject result = failureForFinishReason("length");
+        assertFalse(result.getBoolean("ok"));
+        assertEquals("truncated_response", result.getString("code"));
+        assertTrue(result.getString("error").contains("未完整结束"));
+    }
+
+    @Test public void mapsContentFilterFinishReasonToContentFiltered() throws Exception {
+        JSONObject result = failureForFinishReason("content_filter");
+        assertFalse(result.getBoolean("ok"));
+        assertEquals("content_filtered", result.getString("code"));
+        assertTrue(result.getString("error").contains("安全策略"));
+    }
+
+    @Test public void mapsOtherNonStopFinishReasonsToRequestFailed() throws Exception {
+        JSONObject result = failureForFinishReason("tool_calls");
+        assertFalse(result.getBoolean("ok"));
+        assertEquals("request_failed", result.getString("code"));
+    }
+
+    private static JSONObject failureForFinishReason(String finishReason) throws Exception {
+        FakeConnection conn = new FakeConnection(200, responseWithFinish(finishReason));
+        DeepSeekClient client = new DeepSeekClient(() -> conn);
+        try {
+            return run(client, "deepseek-flash", "整理病历", "整理内容", null, null);
+        } finally { client.close(); }
+    }
+
     private static JSONObject run(DeepSeekClient client, String model, String system, String user,
                                   String imageMime, String imageBase64) throws Exception {
         CountDownLatch latch = new CountDownLatch(1);
@@ -107,6 +164,12 @@ public class DeepSeekClientTest {
         return new JSONObject().put("choices", new JSONArray().put(new JSONObject()
             .put("finish_reason", "stop")
             .put("message", new JSONObject().put("content", new JSONObject().put("ok", true).toString())))).toString();
+    }
+
+    private static String responseWithFinish(String finishReason) throws Exception {
+        return new JSONObject().put("choices", new JSONArray().put(new JSONObject()
+            .put("finish_reason", finishReason)
+            .put("message", new JSONObject().put("content", "{}")))).toString();
     }
 
     private static final class FakeConnection extends HttpURLConnection {
