@@ -226,3 +226,20 @@ test('P1-3 系统回顾详情先去尾标点再拼逗号', () => {
   assert.ok(!text.includes('，；'), '不应出现「，；」');
   assert.ok(!text.includes('。，'), '不应出现「。，」');
 });
+
+test('P1-4 男性生育史优先使用 children 字段', () => {
+  const { SCHEMA, GENERATOR } = bootGlobals();
+  const record = SCHEMA.emptyRecord();
+  record.basic.gender = '男';
+  record.childbirth.children = '1';
+  assert.equal(GENERATOR.buildChildbirth(record), '生育史：育有子女1人。');
+
+  record.childbirth.gravida = '5';
+  assert.equal(GENERATOR.buildChildbirth(record), '生育史：育有子女1人。');
+
+  const legacy = SCHEMA.emptyRecord();
+  legacy.basic.gender = '男';
+  legacy.childbirth.gravida = '2';
+  legacy.childbirth.alive = '1';
+  assert.equal(GENERATOR.buildChildbirth(legacy), '生育史：育有子女2人。');
+});

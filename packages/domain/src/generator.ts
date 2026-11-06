@@ -1238,7 +1238,10 @@ const GENERATOR = (() => {
       const mp = [];
       // 男性界面把「子女数」存进 gravida（历史字段复用），这里按「人」来写，
       // 绝不能走女性的「孕X产Y」——那会把父亲写成产妇。
-      if (String(c.gravida || '').trim()) mp.push(`育有子女${String(c.gravida).trim()}人`);
+      // 新字段 children 优先；旧存档没有 children 时才回退 gravida。
+      const childCount = String(c.children == null ? '' : c.children).trim()
+        || String(c.gravida == null ? '' : c.gravida).trim();
+      if (childCount) mp.push(`育有子女${childCount}人`);
       if (stripTail(c.details)) mp.push(stripTail(c.details));
       if (!mp.length) return '';
       return '生育史：' + mp.join('，') + '。';
