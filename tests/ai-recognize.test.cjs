@@ -117,8 +117,7 @@ test('识别：图片来源建议标记为依据未能自动核实，提示词�
   assert.match(q.system, /至少一条 source="note"/);
 });
 
-test('识别：已有内容默认不覆盖，勾选允许替换后才写入并标记 AI 未核对', () => {
-  const r = record(); r.hpi.symptoms = '原始症状';
+test('识别：已有内容默认不覆盖，勾选允许替换后才写入并标记 AI 未核对', () => {  const r = record(); r.hpi.symptoms = '原始症状';
   const q = recognize(r, '咳嗽3天');
   const result = AI.validate(response([suggestion('hpi.symptoms', '咳嗽3天', [{source: 'note', quote: '咳嗽3天'}])]), q);
   assert.throws(() => AI.apply(r, q, result, [0], false, 'deepseek-flash'), /已有/);
@@ -179,4 +178,21 @@ test('识别：非白名单选择项与空白值在写边界再次校验', () =>
   const blank = AI.validate(response([suggestion('basic.gender', '', [])]), q);
   assert.equal(blank.suggestions.length, 0);
   assert.match(blank.dropped[0].reason, /建议值无效|空白/);
+});
+
+test('识别：压缩字段目录控制提示词长度并保留旧版对象接口', () => {
+  const note = '"\n'.repeat(8000);
+  assert.equal(note.length, 16000);
+  const q = AI.prepare('recognize', record(), note, undefined, null);
+  assert.ok(q.user.length <= 42000);
+  const payload = JSON.parse(q.user);
+  assert.equal(Array.isArray(payload.targets), false);
+  assert.ok(payload.valueSets.some(values => values.includes('未初潮')));
+  assert.match(q.user, /呼吸系统/);
+  assert.match(q.system, /valueSets/);
+  const legacy = AI.recognizeTargets();
+  assert.ok(Array.isArray(legacy));
+  assert.equal(Array.isArray(legacy[0]), false);
+  assert.equal(typeof legacy[0].path, 'string');
+  assert.equal(typeof legacy[0].label, 'string');
 });

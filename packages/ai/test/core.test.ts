@@ -7,6 +7,7 @@ import {
   listAdoptedAiFields,
   normalizeRecognizeValue,
   prepareAiRequest,
+  recognitionTargets,
   validateAiResponse,
 } from '../src';
 
@@ -317,6 +318,34 @@ describe('AI image/text recognition boundary', () => {
     expect(result.suggestions[0]?.fromImage).toBe(true);
     expect(request.system).toContain('逐字摘录');
     expect(request.system).toContain('至少一条 source="note"');
+  });
+
+  it('keeps a 16000-character quoted note within the prompt budget', () => {
+    const note = '"\n'.repeat(8000);
+    expect(note).toHaveLength(16000);
+    const request = recognizeRequest(makeRecord(), note, null);
+    expect(request.user.length).toBeLessThanOrEqual(42000);
+    const payload = JSON.parse(request.user) as {
+      targets: Record<string, unknown>;
+      valueSets: string[][];
+      groupLabels: Record<string, string>;
+    };
+    expect(Array.isArray(payload.targets)).toBe(false);
+    expect(payload.valueSets).toContainEqual(['有', '无', '未初潮']);
+    expect(payload.groupLabels['ros.resp']).toContain('呼吸系统');
+    expect(request.user).not.toContain('pe.vitals.temperature');
+    expect(request.system).toContain('valueSets');
+  });
+
+  it('keeps recognitionTargets as the legacy object list for callers and tests', () => {
+    const targets = recognitionTargets();
+    expect(targets.length).toBeGreaterThan(300);
+    const temperature = targets.find((target) => target.path === 'pe.vitals.temperature');
+    expect(temperature).toMatchObject({ path: 'pe.vitals.temperature', kind: 'number' });
+    expect(typeof temperature?.label).toBe('string');
+    expect(typeof temperature?.min).toBe('number');
+    expect(typeof temperature?.max).toBe('number');
+    expect(Array.isArray(targets[0])).toBe(false);
   });
 
   it('does not replace existing content without explicit consent', () => {
