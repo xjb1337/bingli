@@ -534,6 +534,7 @@ export function AiAssistantPanel({
                     <small>{suggestion.kind === 'choice'
                       ? '选择项 · 默认不勾选'
                       : suggestion.kind === 'number' ? '数值项 · 待核对' : '文本项 · 待核对'}</small>
+                    {suggestion.fromImage ? <small className="ai-image-note">来自图片，依据未能自动核实</small> : null}
                   </label>
                   <div className="ai-compare">
                     <div>

@@ -1416,6 +1416,13 @@ textarea[aria-invalid="true"] {
   background: var(--surface);
 }
 
+.ai-image-note {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 500;
+}
+
 .ai-dropped {
   margin: 10px 0;
   padding: 8px 10px;

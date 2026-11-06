@@ -279,6 +279,66 @@ describe('DeepSeek web security boundary', () => {
     expect(screen.getByText(/缺少有效原文依据/)).toBeInTheDocument();
   });
 
+  it('marks image-derived suggestions as manually unverified', async () => {
+    const requestSpy = vi.fn(async (_request: Parameters<AiTransport['request']>[0]) => ({
+      content: {
+        suggestions: [{
+          path: 'pe.vitals.temperature',
+          text: '37.8',
+          evidence: [{ source: 'image', quote: '体温 37.8℃' }],
+        }],
+        issues: [],
+        questions: [],
+      },
+      model: 'deepseek-flash',
+    }));
+    const transport = fakeTransportFactory(requestSpy);
+    const user = userEvent.setup();
+    const record = SCHEMA.emptyRecord();
+    record.id = 'image_note_ui_case';
+
+    vi.stubGlobal('Image', class {
+      naturalWidth = 800;
+      naturalHeight = 600;
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      set src(_value: string) { setTimeout(() => this.onload?.(), 0); }
+    });
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+      fillStyle: '',
+      fillRect: vi.fn(),
+      drawImage: vi.fn(),
+    } as unknown as CanvasRenderingContext2D);
+    vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue('data:image/jpeg;base64,QUJD');
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:mock-image') });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn(() => undefined) });
+
+    render(
+      <AiAssistantPanel
+        record={record}
+        configured
+        securityContext="web"
+        model="deepseek-flash"
+        createTransport={() => transport.factory('sk-test-image-note')}
+        onOpenSettings={() => undefined}
+        onAdoptRecord={async () => true}
+        onConfirmField={async () => true}
+      />,
+    );
+
+    await user.selectOptions(screen.getByLabelText('AI 操作'), 'recognize');
+    const file = new File([new Uint8Array([1, 2, 3])], '病历.jpg', { type: 'image/jpeg' });
+    await user.upload(screen.getByLabelText('选择病历图片'), file);
+    expect(await screen.findByAltText('待发送病历图片缩略图')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '预览发送内容' }));
+    await user.click(screen.getByLabelText(/我已确认图片可能含患者身份信息/));
+    await user.click(screen.getByRole('button', { name: '生成建议' }));
+    await screen.findByRole('heading', { name: '建议对照 · 尚未写入' });
+
+    expect(screen.getByText('来自图片，依据未能自动核实')).toBeInTheDocument();
+    expect(requestSpy.mock.calls[0]?.[0].image).toBeDefined();
+  });
+
   it('clears the entered key when the page component is remounted', async () => {
     const transport = fakeTransportFactory(async () => ({ content: aiContent(), model: 'deepseek-flash' }));
     const repository = createTestRepository();
