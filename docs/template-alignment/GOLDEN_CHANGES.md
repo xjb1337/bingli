@@ -30,3 +30,5 @@
 ## v3.0.0.10 复核修复
 
 1. P1-2：入院记录表头 PID 只取住院号（`basic.recordNo`）。没有住院号时输出「／」，不再回退内部记录 id。`tests/golden/v1-respiratory/dabingli.txt` 的 `PID：legacy-v1-respiratory` 相应改为 `PID：／`。
+
+2. D1：有系统回顾正文时，“患者确认以上病史签名：＿＿＿＿”移到系统回顾末尾，家族史后不再出现；无系统回顾时仍接在家族史末尾。`tests/golden/v1-respiratory/dabingli.txt`、`tests/golden/v2-digestive/dabingli.txt` 随之调整。

@@ -260,3 +260,45 @@ test('P2-3 当天出院输出住院天数 0 天，缺日期或倒序不输出', 
   record.discharge.dischargeDate = '2026-10-01';
   assert.doesNotMatch(GENERATOR.buildDischargeRecord(record), /住院天数：/);
 });
+
+function consentRecord(withRos) {
+  const { SCHEMA } = bootGlobals();
+  const record = SCHEMA.emptyRecord();
+  record.basic.name = '测试患者';
+  record.basic.gender = '男';
+  record.basic.age = '45';
+  record.family.similarDisease = '否认家族类似疾病史';
+  if (withRos) {
+    record.ros.resp = {};
+    record.ros.resp.cough = { checked: true };
+  }
+  return record;
+}
+
+test('D1 有系统回顾时签名行接在系统回顾末尾且只出现一次', () => {
+  const { GENERATOR } = bootGlobals();
+  const record = consentRecord(true);
+  const generated = GENERATOR.generate(record);
+  const text = generated.text;
+  assert.equal((text.match(/患者确认以上病史签名/g) || []).length, 1, '签名行全文只能出现一次');
+  const familyBody = generated.sections['家族史'];
+  assert.ok(!familyBody.includes('患者确认以上病史签名'), '家族史后不应再出现签名行');
+  assert.ok(generated.sections['系统回顾'].endsWith('患者确认以上病史签名：＿＿＿＿'), '签名行应是系统回顾最后一行');
+
+  const plain = GENERATOR.generatePlain(record);
+  assert.equal((plain.match(/患者确认以上病史签名/g) || []).length, 1);
+  const ir = GENERATOR.buildDocumentIR(record, 'record');
+  const rosSection = ir.sections.find(section => section.title === '系统回顾');
+  const familySection = ir.sections.find(section => section.title === '家族史');
+  assert.equal(rosSection.paragraphs[rosSection.paragraphs.length - 1], '患者确认以上病史签名：＿＿＿＿');
+  assert.ok(!familySection.paragraphs.join('\n').includes('患者确认以上病史签名'));
+});
+
+test('D1 无系统回顾时签名行仍接在家族史末尾', () => {
+  const { GENERATOR } = bootGlobals();
+  const record = consentRecord(false);
+  const generated = GENERATOR.generate(record);
+  assert.equal((generated.text.match(/患者确认以上病史签名/g) || []).length, 1);
+  assert.ok(generated.sections['家族史'].endsWith('患者确认以上病史签名：＿＿＿＿'));
+  assert.ok(!generated.sections['系统回顾'], '没有系统回顾正文时不应生成该节');
+});

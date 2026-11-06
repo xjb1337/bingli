@@ -2953,11 +2953,13 @@ const GENERATOR = (() => {
     sections['现病史'] = buildAdmissionHPI(rec);
     sections['既往史'] = buildPMH(rec, { template: true });
     const ros = buildROS(rec, rosMode);
-    if (ros) sections['系统回顾'] = ros;
+    // 签名行跟在「最后一段病史」后面：系统回顾有正文时接在系统回顾末尾，
+    // 否则接在家族史末尾；不能两处都出现。
+    if (ros) sections['系统回顾'] = `${ros}\n${ADMISSION_CONSENT}`;
     sections['个人史'] = buildPersonal(rec, { template: true });
     sections['婚育史'] = buildAdmissionMarriageChildbirth(rec);
     const family = String(buildFamily(rec) || '').trim();
-    sections['家族史'] = family ? `${family}\n${ADMISSION_CONSENT}` : ADMISSION_CONSENT;
+    sections['家族史'] = ros ? family : (family ? `${family}\n${ADMISSION_CONSENT}` : ADMISSION_CONSENT);
     sections['体格检查'] = buildPE(rec, { template: true });
     sections['辅助检查'] = buildAuxiliary(rec, { template: true });
     sections['初步诊断'] = buildDiagnosis(rec);
