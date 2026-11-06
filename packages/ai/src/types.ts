@@ -17,6 +17,7 @@ export type AiErrorCode =
   | 'cancelled'
   | 'invalid_response'
   | 'truncated_response'
+  | 'content_filtered'
   | 'request_failed'
   | 'record_stale'
   | 'invalid_input'
@@ -106,6 +107,8 @@ export interface AiTransportRequest {
   system: string;
   user: string;
   image?: AiImagePayload;
+  /** Optional operation hint; transports fall back to the operation encoded in user JSON. */
+  operation?: AiOperation;
 }
 
 export interface AiTransportResponse {

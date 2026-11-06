@@ -36,7 +36,23 @@ function successBody(text = '患者诉咳嗽3天。'): string {
 }
 
 const request = { system: 'system', user: '{"sources":[]}' };
+const recognizeRequest = {
+  system: 'system',
+  user: JSON.stringify({ operation: '识别病历图片/文字', sources: [] }),
+};
 const image = { mimeType: 'image/jpeg', dataBase64: 'aGVsbG8=' };
+
+function finishBody(finishReason: string): string {
+  return JSON.stringify({
+    model: 'deepseek-flash',
+    choices: [{
+      finish_reason: finishReason,
+      message: {
+        content: JSON.stringify({ suggestions: [], issues: [], questions: [] }),
+      },
+    }],
+  });
+}
 
 afterEach(() => {
   delete (globalThis as { window?: unknown }).window;
@@ -128,6 +144,36 @@ describe('WebFetchTransport', () => {
     const body = JSON.parse(String(init.body)) as { model: string };
     expect(body.model).toBe('deepseek-v4-pro');
     await expect(transport.status()).resolves.toEqual({ configured: true, model: 'deepseek-v4-pro' });
+  });
+
+  it('uses 8192 tokens for recognition requests and 4096 otherwise', async () => {
+    const fetchImpl = vi.fn(async () => response(200, successBody())) as unknown as typeof fetch;
+    const transport = new WebFetchTransport({ apiKey: 'sk-test-tokens', fetchImpl });
+    await transport.request(recognizeRequest);
+    const recognitionInit = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as RequestInit;
+    expect((JSON.parse(String(recognitionInit.body)) as { max_tokens: number }).max_tokens).toBe(8192);
+    await transport.request(request);
+    const otherInit = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[1]?.[1] as RequestInit;
+    expect((JSON.parse(String(otherInit.body)) as { max_tokens: number }).max_tokens).toBe(4096);
+  });
+
+  it('maps finish_reason length, content_filter and other failures to stable codes', async () => {
+    const cases = [
+      ['length', 'truncated_response'],
+      ['content_filter', 'content_filtered'],
+      ['tool_calls', 'request_failed'],
+    ] as const;
+    for (const [reason, code] of cases) {
+      const transport = new WebFetchTransport({
+        apiKey: 'sk-test-finish',
+        fetchImpl: (async () => response(200, finishBody(reason))) as unknown as typeof fetch,
+      });
+      await expect(transport.request(request)).rejects.toMatchObject({
+        code,
+        message: AI_ERROR_MESSAGES[code],
+      });
+    }
+    expect(AI_ERROR_MESSAGES.content_filtered).toBe('内容被服务端安全策略拦截');
   });
 
   it('rejects an invalid image before making a network request', async () => {

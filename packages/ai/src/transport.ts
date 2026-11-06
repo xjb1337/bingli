@@ -1,5 +1,5 @@
 import { AiError, AI_ERROR_MESSAGES, aiError, isKnownErrorCode, mapHttpStatus } from './errors';
-import { normalizeAiImage } from './core';
+import { normalizeAiImage, AI_OPERATIONS } from './core';
 import type {
   AiErrorCode,
   AiRequestOptions,
@@ -38,6 +38,17 @@ interface DeepSeekContentPart {
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** Recognise requests get a larger completion budget; older callers only carry operation in user JSON. */
+function isRecognizeTransportRequest(request: AiTransportRequest): boolean {
+  if (request.operation === 'recognize') return true;
+  try {
+    const payload = JSON.parse(request.user);
+    return isObject(payload) && payload.operation === AI_OPERATIONS.recognize;
+  } catch {
+    return false;
+  }
 }
 
 function isAbortError(error: unknown): boolean {
@@ -83,9 +94,10 @@ function parseDeepSeekResponse(text: string, fallbackModel: string): AiTransport
     throw aiError('invalid_response', 'AI 返回候选数量异常，请重试');
   }
   const choice = payload.choices[0] as DeepSeekChoice | undefined;
-  if (!choice || choice.finish_reason !== 'stop') {
-    throw aiError('truncated_response');
-  }
+  if (!choice) throw aiError('invalid_response', 'AI 返回候选数量异常，请重试');
+  if (choice.finish_reason === 'length') throw aiError('truncated_response');
+  if (choice.finish_reason === 'content_filter') throw aiError('content_filtered');
+  if (choice.finish_reason !== 'stop') throw aiError('request_failed');
   const contentText = choice.message?.content;
   if (typeof contentText !== 'string' || !contentText.trim()) {
     throw aiError('invalid_response', 'AI 返回了空白内容，请重试');
@@ -153,6 +165,7 @@ export class WebFetchTransport implements AiTransport {
     try {
       // DeepSeek 只有 Flash 支持图像理解；含图片时本次请求固定走 Flash，不修改已保存的模型设置。
       const requestModel = request.image ? DEFAULT_DEEPSEEK_MODEL : this.model;
+      const maxTokens = isRecognizeTransportRequest(request) ? 8192 : 4096;
       const response = await this.fetchImpl(this.endpoint, {
         method: 'POST',
         headers: {
@@ -162,7 +175,7 @@ export class WebFetchTransport implements AiTransport {
         body: JSON.stringify({
           model: requestModel,
           stream: false,
-          max_tokens: 4096,
+          max_tokens: maxTokens,
           thinking: { type: 'disabled' },
           response_format: { type: 'json_object' },
           messages: [

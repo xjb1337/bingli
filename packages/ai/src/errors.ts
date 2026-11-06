@@ -13,6 +13,7 @@ export const AI_ERROR_MESSAGES: Readonly<Record<AiErrorCode, string>> = Object.f
   cancelled: '已取消 AI 请求',
   invalid_response: 'AI 返回格式异常，未写入病历；请重试',
   truncated_response: 'AI 结果未完整结束，未写入病历；请缩短资料后重试',
+  content_filtered: '内容被服务端安全策略拦截',
   request_failed: 'AI 请求无法完成，请重试',
   record_stale: '病历已改变，此 AI 结果已过期，无法写入；请重新生成',
   invalid_input: '请求内容无效，请检查后重试',
