@@ -1448,7 +1448,15 @@ const GENERATOR = (() => {
   function abnormalVitalFindings(r) {
     const vitals = vitalSnapshot((r.pe || {}).vitals || {});
     const rule = vitalAgeRule(r);
-    const age = Number.isFinite(ageYears(r)) ? Math.floor(ageYears(r)) : 0;
+    // 与 vitalAgeRule 使用同一口径：优先按出生日期/记录日期计算，避免只有出生日期时按 0 岁取 SBP 阈值。
+    let years = NaN;
+    if (typeof AGE !== 'undefined' && AGE && typeof AGE.resolveAge === 'function') {
+      const info = AGE.resolveAge(r);
+      if (info && info.ok && Number.isFinite(info.years)) years = info.years;
+    } else {
+      years = ageYears(r);
+    }
+    const age = Number.isFinite(years) ? Math.max(0, Math.floor(years)) : 0;
     const parts = [];
     if (vitals.temperature && (vitals.temperature.num >= 37.3 || vitals.temperature.num < 36.0)) {
       parts.push(`T ${vitals.temperature.raw}℃`);

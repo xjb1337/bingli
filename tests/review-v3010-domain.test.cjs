@@ -135,6 +135,20 @@ test('P0-4 儿童生命体征按 PALS 年龄分层判断', () => {
   assert.ok(!toddler.includes('BP 85'), `3岁 SBP85 不应列入低血压：${toddler}`);
 });
 
+test('P0-4 只有出生日期时仍按实际年龄取儿童 SBP 阈值', () => {
+  const { GENERATOR } = bootGlobals();
+  const record = vitalRecord('', { sbp: '72', dbp: '50' });
+  record.basic.birthDate = '2020-01-01';
+  record.basic.recordDate = '2023-06-01';
+  const summary = GENERATOR.draftSummary(record);
+  assert.ok(summary.includes('BP 72/50mmHg'), `3岁儿童 SBP72 应按 76 阈值判低血压：${summary}`);
+
+  const normal = vitalRecord('', { sbp: '78', dbp: '50' });
+  normal.basic.birthDate = '2020-01-01';
+  normal.basic.recordDate = '2023-06-01';
+  assert.ok(!GENERATOR.draftSummary(normal).includes('BP 78'), '3岁儿童 SBP78 不应列入低血压');
+});
+
 test('P0-4 成人阈值覆盖低体温与舒张压异常', () => {
   const { GENERATOR } = bootGlobals();
   const hypertension = GENERATOR.draftSummary(vitalRecord('45岁', { sbp: '130', dbp: '115' }));
