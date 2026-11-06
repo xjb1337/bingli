@@ -266,6 +266,11 @@ function EditorApp({
   const [androidStatusLoading, setAndroidStatusLoading] = useState(Boolean(androidBridge));
   const toastTimer = useRef<number | null>(null);
   const saveTimer = useRef<number | null>(null);
+  const saveFlushRef = useRef(false);
+  const recordRef = useRef(record);
+  const dirtyRef = useRef(dirty);
+  recordRef.current = record;
+  dirtyRef.current = dirty;
 
   function refreshAndroidAiStatus() {
     if (!androidBridge) return;
@@ -367,17 +372,19 @@ function EditorApp({
     return new WebFetchTransport({ apiKey });
   }
 
-  async function persistRecord(showToast = true): Promise<boolean> {
-    const revision = Number(record.meta.revision) || 0;
-    const saved = await repo.saveToLibrary(record, revision);
+  async function persistRecord(showToast = true, snapshot = recordRef.current): Promise<boolean> {
+    const revision = Number(snapshot.meta.revision) || 0;
+    const saved = await repo.saveToLibrary(snapshot, revision);
     if (!saved.ok) {
       setStorageAlert(saved.reason ?? '保存失败，请先导出备份。');
       notify(saved.reason ?? '保存失败', 'error');
       return false;
     }
-    const nextRecord = saved.record ?? record;
+    const nextRecord = saved.record ?? snapshot;
+    recordRef.current = nextRecord;
     setRecord(nextRecord);
     setDirty(false);
+    dirtyRef.current = false;
     const loaded = await repo.loadList();
     if (loaded.ok) {
       setList(loaded.list);
@@ -385,6 +392,18 @@ function EditorApp({
     }
     if (showToast) notify('已保存到本机', 'success');
     return true;
+  }
+
+  function flushPendingSave() {
+    if (!dirtyRef.current || saveFlushRef.current) return;
+    if (saveTimer.current !== null) {
+      window.clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    saveFlushRef.current = true;
+    void persistRecord(false, recordRef.current).finally(() => {
+      saveFlushRef.current = false;
+    });
   }
 
   async function attemptSave(showToast = true): Promise<boolean> {
@@ -637,12 +656,28 @@ function EditorApp({
     if (!dirty) return;
     if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(() => {
+      saveTimer.current = null;
       void persistRecord(false);
     }, 900);
     return () => {
       if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
     };
   });
+
+  useEffect(() => {
+    function handlePageHide() {
+      flushPendingSave();
+    }
+    function handleVisibilityChange() {
+      if (document.visibilityState === 'hidden') flushPendingSave();
+    }
+    window.addEventListener('pagehide', handlePageHide);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      window.removeEventListener('pagehide', handlePageHide);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
 
   useEffect(() => {
     document.documentElement.style.setProperty('--app-font-scale', String(settings.fontScale));

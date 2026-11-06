@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
   RECORD_CORE,
@@ -307,6 +307,26 @@ describe('localStorage fallback compatibility', () => {
 
     expect(screen.getByLabelText(/姓名/)).toHaveValue('重新加载患者');
     expect((await repository.loadList()).list[0]?.data.basic.name).toBe('重新加载患者');
+  });
+});
+
+describe('page lifecycle persistence', () => {
+  it('persists the latest edit immediately when pagehide fires before the 900ms debounce', async () => {
+    const repository = createTestRepository();
+    await renderApp(repository);
+
+    const name = screen.getByLabelText(/姓名/);
+    fireEvent.change(name, { target: { value: '关闭前患者' } });
+    expect(name).toHaveValue('关闭前患者');
+
+    fireEvent(window, new Event('pagehide'));
+
+    await waitFor(
+      async () => {
+        expect((await repository.loadCurrent()).record?.basic.name).toBe('关闭前患者');
+      },
+      { timeout: 500 },
+    );
   });
 });
 
