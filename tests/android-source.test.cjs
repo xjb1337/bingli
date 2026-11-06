@@ -57,3 +57,12 @@ test('P1-8 recognize requests get 8192 tokens and finish reasons map to stable c
   assert.match(source,/truncated_response/);
   assert.match(source,/request_failed/);
 });
+
+test('P1-11 bridge returns busy and invalid_input codes without falling back to missing_key',()=>{
+  const source=readMain();
+  assert.match(source,/put\("code",\s*"busy"\)/);
+  assert.match(source,/BridgeErrorMapper\.codeFor/);
+  const mapper=fs.readFileSync(path.join(javaRoot,'BridgeErrorMapper.java'),'utf8');
+  assert.match(mapper,/JSONException/);
+  assert.match(mapper,/invalid_input/);
+});

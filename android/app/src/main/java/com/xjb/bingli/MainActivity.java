@@ -217,13 +217,15 @@ public class MainActivity extends Activity {
                 String system = p.getString("system");
                 String user = p.getString("user");
                 boolean recognize = p.optBoolean("recognize", DeepSeekClient.isRecognizeRequest(system, user));
+                if (aiClient.busy()) {
+                    aiResult(id, new org.json.JSONObject().put("ok", false).put("code", "busy").put("error", "上一次请求还在进行，请稍后重试"));
+                    return;
+                }
                 boolean accepted = aiClient.request(id, aiKeys.read(), aiKeys.model(), system, user,
                     imageMime, imageBase64, recognize, MainActivity.this::aiResult);
-                if (!accepted) aiResult(id, new org.json.JSONObject().put("ok", false).put("error", "已有请求进行中或参数无效，请稍后重试"));
-            } catch (IllegalArgumentException e) {
-                try { aiResult(id, new org.json.JSONObject().put("ok", false).put("code", "invalid_input").put("error", "AI 请求或图片参数无效，请重新选择后再试")); } catch (Exception ignored) { }
+                if (!accepted) aiResult(id, new org.json.JSONObject().put("ok", false).put("code", "invalid_input").put("error", "AI 请求或图片参数无效，请重新选择后再试"));
             } catch (Exception e) {
-                try { aiResult(id, new org.json.JSONObject().put("ok", false).put("code", "missing_key").put("error", "无法读取 AI 设置，请重新保存密钥")); } catch (Exception ignored) { }
+                try { aiResult(id, new org.json.JSONObject().put("ok", false).put("code", BridgeErrorMapper.codeFor(e)).put("error", BridgeErrorMapper.messageFor(e))); } catch (Exception ignored) { }
             }
         }
         @JavascriptInterface public String versionName() { return BuildConfig.VERSION_NAME; }

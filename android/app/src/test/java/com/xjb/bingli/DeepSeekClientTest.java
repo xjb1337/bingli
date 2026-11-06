@@ -141,6 +141,15 @@ public class DeepSeekClientTest {
         assertEquals("request_failed", result.getString("code"));
     }
 
+    // ---- P1-11: bridge error mapping ----
+
+    @Test public void bridgeMapsMalformedJsonToInvalidInput() {
+        assertEquals("invalid_input", BridgeErrorMapper.codeFor(new JSONException("bad payload")));
+        assertEquals("invalid_input", BridgeErrorMapper.codeFor(new IllegalArgumentException("bad payload")));
+        assertEquals("missing_key", BridgeErrorMapper.codeFor(new IOException("vault failure")));
+        assertTrue(BridgeErrorMapper.messageFor(new JSONException("bad payload")).contains("参数无效"));
+    }
+
     private static JSONObject failureForFinishReason(String finishReason) throws Exception {
         FakeConnection conn = new FakeConnection(200, responseWithFinish(finishReason));
         DeepSeekClient client = new DeepSeekClient(() -> conn);
