@@ -62,6 +62,8 @@ export interface AiSuggestion {
   text: string;
   evidence: AiEvidence[];
   kind?: AiSuggestionKind;
+  /** True when the suggestion is based on an image and cannot be machine-verified. */
+  fromImage?: boolean;
 }
 
 export interface AiDroppedSuggestion {

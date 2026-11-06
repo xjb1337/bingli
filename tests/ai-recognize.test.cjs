@@ -96,6 +96,27 @@ test('识别：校验图片/文字引用，不合格建议逐条丢弃', () => {
   assert.match(badImage.dropped[0].reason, /图片依据/);
 });
 
+test('识别：纯文字来源必须逐字引用，数字与否定不一致逐条丢弃', () => {
+  const q = AI.prepare('recognize', record(), '患者诉咳嗽3天，无发热。', undefined, null);
+  const missing = AI.validate(response([suggestion('hpi.symptoms', '咳嗽3天', [])]), q);
+  assert.equal(missing.suggestions.length, 0);
+  assert.match(missing.dropped[0].reason, /缺少有效原文依据/);
+  const numberMismatch = AI.validate(response([suggestion('hpi.onset', '咳嗽5天', [{source: 'note', quote: '患者诉咳嗽3天，无发热。'}])]), q);
+  assert.equal(numberMismatch.suggestions.length, 0);
+  assert.match(numberMismatch.dropped[0].reason, /数字/);
+  const negation = AI.validate(response([suggestion('hpi.symptoms', '发热', [{source: 'note', quote: '无发热'}])]), q);
+  assert.equal(negation.suggestions.length, 0);
+  assert.match(negation.dropped[0].reason, /否定/);
+});
+
+test('识别：图片来源建议标记为依据未能自动核实，提示词要求逐字引用', () => {
+  const q = recognize();
+  const result = AI.validate(response([suggestion('hpi.symptoms', '咳嗽3天', [])]), q);
+  assert.equal(result.suggestions[0].fromImage, true);
+  assert.match(q.system, /逐字摘录/);
+  assert.match(q.system, /至少一条 source="note"/);
+});
+
 test('识别：已有内容默认不覆盖，勾选允许替换后才写入并标记 AI 未核对', () => {
   const r = record(); r.hpi.symptoms = '原始症状';
   const q = recognize(r, '咳嗽3天');

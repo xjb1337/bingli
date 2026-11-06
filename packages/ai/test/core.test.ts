@@ -278,6 +278,37 @@ describe('AI image/text recognition boundary', () => {
     expect(badImage.dropped[0]?.reason).toMatch(/图片依据/);
   });
 
+  it('drops text-only recognition suggestions without note evidence or with inconsistent facts', () => {
+    const request = recognizeRequest(makeRecord(), '患者诉咳嗽3天，无发热。', null);
+    const missing = validateAiResponse(recognized('hpi.symptoms', '咳嗽3天'), request);
+    expect(missing.suggestions).toHaveLength(0);
+    expect(missing.dropped[0]?.reason).toMatch(/缺少有效原文依据/);
+
+    const numberMismatch = validateAiResponse(recognized(
+      'hpi.onset',
+      '咳嗽5天',
+      [{ source: 'note', quote: '患者诉咳嗽3天，无发热。' }],
+    ), request);
+    expect(numberMismatch.suggestions).toHaveLength(0);
+    expect(numberMismatch.dropped[0]?.reason).toMatch(/数字/);
+
+    const negation = validateAiResponse(recognized(
+      'hpi.symptoms',
+      '发热',
+      [{ source: 'note', quote: '无发热' }],
+    ), request);
+    expect(negation.suggestions).toHaveLength(0);
+    expect(negation.dropped[0]?.reason).toMatch(/否定/);
+  });
+
+  it('marks image-based recognition suggestions as not machine-verifiable', () => {
+    const request = recognizeRequest(makeRecord());
+    const result = validateAiResponse(recognized('hpi.symptoms', '咳嗽3天'), request);
+    expect(result.suggestions[0]?.fromImage).toBe(true);
+    expect(request.system).toContain('逐字摘录');
+    expect(request.system).toContain('至少一条 source="note"');
+  });
+
   it('does not replace existing content without explicit consent', () => {
     const record = makeRecord();
     record.hpi.symptoms = '原始症状';
