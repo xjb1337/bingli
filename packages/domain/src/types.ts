@@ -224,6 +224,8 @@ export interface ChildbirthSection {
   premature: string;
   abortion: string;
   alive: string;
+  /** 子女数（男性婚育史用；旧数据可能误存在 gravida，生成时回退读取）。 */
+  children: string;
   gravida: string;
   para: string;
   details: string;
