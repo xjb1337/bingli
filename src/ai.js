@@ -215,15 +215,17 @@ const AI_ASSIST = (() => {
       if (APP.getRecord().id !== request.caseId || AI_CORE.baseline(APP.getRecord()) !== request.baseline) throw Error('病历已改变；本次结果已丢弃，请重新预览');
       result = AI_CORE.validate(response.content, request); model = response.model || model;
       const r = APP.getRecord();
+      const dropped = result.dropped || [];
+      const droppedHtml = dropped.length ? '<details class="ai-dropped"><summary>' + dropped.length + ' 条建议因格式问题未采用</summary><ul>' + dropped.map(d => '<li>' + (d.path ? esc(AI_CORE.labels[d.path] || d.path) + '：' : '') + esc(d.reason) + '</li>').join('') + '</ul></details>' : '';
       $('aiResult').innerHTML = '<div class="ai-result-heading"><h3>建议对照 · 尚未写入</h3><span class="ai-badge">未核对</span></div><p class="hint">引用真实不代表建议一定正确。逐项检查否定词、时间、药名、剂量和来源。</p>' + result.suggestions.map((s, i) => {
         const original = AI_CORE.displayValue(s.path, RECORD_CORE.getPath(r, s.path)) || '';
         const kindLabel = s.kind === 'choice' ? '选择项 · 默认不勾选' : s.kind === 'number' ? '数值项 · 待核对' : '文本项 · 待核对';
         return `<article class="ai-suggestion"><label class="ai-check"><input type="checkbox" data-ai-choice="${i}"><strong>${esc(AI_CORE.labels[s.path])}</strong><small>${kindLabel}</small></label><div class="ai-compare"><div><small>原内容</small><p>${esc(original || '（空白）')}</p></div><div><small>AI 建议 · 待核对</small><p>${esc(AI_CORE.displayValue(s.path, s.text))}</p></div></div><details><summary>查看原文依据</summary>${s.evidence.map(e => `<blockquote>${esc(e.quote)}</blockquote>`).join('')}</details></article>`;
-      }).join('') + (result.issues.length ? '<h3>待核实的问题</h3><ul>' + result.issues.map(i => `<li>${i.path ? esc(AI_CORE.labels[i.path]) + '：' : ''}${esc(i.message)}</li>`).join('') + '</ul>' : '') +
+      }).join('') + droppedHtml + (result.issues.length ? '<h3>待核实的问题</h3><ul>' + result.issues.map(i => `<li>${i.path ? esc(AI_CORE.labels[i.path]) + '：' : ''}${esc(i.message)}</li>`).join('') + '</ul>' : '') +
         (result.questions.length ? '<h3>建议补问</h3><ul>' + result.questions.map(q => '<li>' + esc(q) + '</li>').join('') + '</ul>' : '') +
         (result.suggestions.length ? '<label class="ai-check ai-consent-box"><input id="aiReplace" type="checkbox">允许用勾选建议替换已有内容（操作可撤销）</label><button id="aiApply" class="btn">采纳勾选项</button>' : '<div class="ai-empty-inline"><strong>没有可直接填写的建议</strong><p>可以补充更具体的原文依据，或先返回病历继续核对。</p></div>');
       if (result.suggestions.length) $('aiApply').onclick = apply;
-      status('生成完成；请核对后勾选采纳。AI 检查不能证明病历正确或完整');
+      status('生成完成；请核对后勾选采纳。AI 检查不能证明病历正确或完整' + (dropped.length ? '；' + dropped.length + ' 条建议因格式问题未采用' : ''));
     } catch (e) { result = null; status(e.message || '结果校验失败，未写入病历'); }
   }
   async function apply() {

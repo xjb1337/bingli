@@ -5,6 +5,7 @@ import {
   confirmAiField,
   createAiResult,
   listAdoptedAiFields,
+  normalizeRecognizeValue,
   prepareAiRequest,
   validateAiResponse,
 } from '../src';
@@ -201,28 +202,80 @@ describe('AI image/text recognition boundary', () => {
     })).toThrow(/过大/);
   });
 
-  it('rejects out-of-scope fields, invalid enums, and out-of-range vitals', () => {
+  it('drops one invalid recognition suggestion and keeps the valid ones', () => {
     const request = recognizeRequest(makeRecord());
-    expect(validateAiResponse(recognized('basic.gender', '男'), request).suggestions[0]?.text).toBe('男');
-    expect(() => validateAiResponse(recognized('basic.gender', '男性'), request)).toThrow(/允许值/);
-    expect(() => validateAiResponse(recognized('diagnosis.confirmed.0', '肺炎'), request)).toThrow(/越界/);
-    expect(() => validateAiResponse(recognized('basic.name', '张三'), request)).toThrow(/越界/);
-    expect(() => validateAiResponse(recognized('pe.vitals.temperature', '99'), request)).toThrow(/可信范围/);
+    const result = validateAiResponse({
+      suggestions: [
+        { path: 'basic.gender', text: '男', evidence: [] },
+        { path: 'pe.vitals.temperature', text: '99', evidence: [] },
+        { path: 'basic.age', text: '45岁', evidence: [] },
+      ],
+      issues: [],
+      questions: [],
+    }, request);
+    expect(result.suggestions.map((suggestion) => [suggestion.path, suggestion.text])).toEqual([
+      ['basic.gender', '男'],
+      ['basic.age', '45'],
+    ]);
+    expect(result.dropped).toEqual([
+      { path: 'pe.vitals.temperature', reason: expect.stringMatching(/可信范围/) },
+    ]);
+  });
+
+  it('normalizes supported units and rejects kPa, 斤 and ℉ with reasons', () => {
+    expect(normalizeRecognizeValue('pe.vitals.temperature', '37.8°C')).toBe('37.8');
+    expect(normalizeRecognizeValue('pe.vitals.temperature', '37.8 ℃')).toBe('37.8');
+    expect(normalizeRecognizeValue('basic.age', '45岁')).toBe('45');
+    expect(normalizeRecognizeValue('pe.vitals.pulse', '98%')).toBe('98');
+    expect(() => normalizeRecognizeValue('pe.vitals.pulse', '1,234次/分钟')).toThrow(/可信范围/);
+    expect(() => normalizeRecognizeValue('pe.vitals.sbp', '16 kPa')).toThrow(/kPa/);
+    expect(() => normalizeRecognizeValue('pe.vitals.weight', '120斤')).toThrow(/斤/);
+    expect(() => normalizeRecognizeValue('pe.vitals.temperature', '98.6℉')).toThrow(/℉/);
+  });
+
+  it('drops out-of-scope fields, invalid enums, and out-of-range vitals individually', () => {
+    const request = recognizeRequest(makeRecord());
+    const result = validateAiResponse({
+      suggestions: [
+        { path: 'basic.gender', text: '男性', evidence: [] },
+        { path: 'basic.gender', text: '男', evidence: [] },
+        { path: 'diagnosis.confirmed.0', text: '肺炎', evidence: [] },
+        { path: 'basic.name', text: '张三', evidence: [] },
+        { path: 'pe.vitals.temperature', text: '99', evidence: [] },
+      ],
+      issues: [],
+      questions: [],
+    }, request);
+    expect(result.suggestions).toHaveLength(1);
+    expect(result.suggestions[0]?.text).toBe('男');
+    expect(result.dropped.map((entry) => entry.path)).toEqual([
+      'basic.gender',
+      'diagnosis.confirmed.0',
+      'basic.name',
+      'pe.vitals.temperature',
+    ]);
+    expect(result.dropped[0]?.reason).toMatch(/允许值/);
+    expect(result.dropped[1]?.reason).toMatch(/越界/);
+    expect(result.dropped[3]?.reason).toMatch(/可信范围/);
   });
 
   it('requires verified note evidence and only accepts image evidence with an image', () => {
     const request = recognizeRequest(makeRecord());
-    expect(() => validateAiResponse(recognized(
+    const badQuote = validateAiResponse(recognized(
       'hpi.symptoms',
       '咳嗽3天',
       [{ source: 'note', quote: '不存在的原文' }],
-    ), request)).toThrow(/无法核实/);
+    ), request);
+    expect(badQuote.suggestions).toHaveLength(0);
+    expect(badQuote.dropped[0]?.reason).toMatch(/无法核实/);
     const textOnly = recognizeRequest(makeRecord(), '患者诉咳嗽3天', null);
-    expect(() => validateAiResponse(recognized(
+    const badImage = validateAiResponse(recognized(
       'hpi.symptoms',
       '咳嗽3天',
       [{ source: 'image', quote: '图片' }],
-    ), textOnly)).toThrow(/图片依据/);
+    ), textOnly);
+    expect(badImage.suggestions).toHaveLength(0);
+    expect(badImage.dropped[0]?.reason).toMatch(/图片依据/);
   });
 
   it('does not replace existing content without explicit consent', () => {

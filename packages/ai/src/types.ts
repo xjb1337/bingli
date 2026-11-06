@@ -64,6 +64,11 @@ export interface AiSuggestion {
   kind?: AiSuggestionKind;
 }
 
+export interface AiDroppedSuggestion {
+  path: string;
+  reason: string;
+}
+
 export interface AiIssue {
   path: string;
   message: string;
@@ -73,6 +78,7 @@ export interface AiValidatedContent {
   suggestions: AiSuggestion[];
   issues: AiIssue[];
   questions: string[];
+  dropped: AiDroppedSuggestion[];
 }
 
 export interface AiResult extends AiValidatedContent {

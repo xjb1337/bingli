@@ -39,30 +39,61 @@ test('识别：支持 text-only 和图片-only，格式/大小/base64 均有边�
   assert.throws(() => AI.prepare('organize', record(), '患者诉咳嗽3天', undefined, image()), /只有识别/);
 });
 
+test('识别：逐条丢弃不合格建议并保留合规项', () => {
+  const q = recognize();
+  const result = AI.validate(response([
+    suggestion('basic.gender', '男', []),
+    suggestion('pe.vitals.temperature', '99', []),
+    suggestion('basic.age', '45岁', []),
+  ]), q);
+  assert.deepEqual(result.suggestions.map(s => [s.path, s.text]), [['basic.gender', '男'], ['basic.age', '45']]);
+  assert.deepEqual(result.dropped, [{path: 'pe.vitals.temperature', reason: 'AI 返回的生命体征或年龄超出可信范围，未写入病历'}]);
+});
+
+test('识别：数值支持常见单位后缀，拒绝 kPa、斤、℉', () => {
+  assert.equal(AI.normalizeRecognizeValue('pe.vitals.temperature', '37.8°C'), '37.8');
+  assert.equal(AI.normalizeRecognizeValue('pe.vitals.temperature', '37.8 ℃'), '37.8');
+  assert.equal(AI.normalizeRecognizeValue('basic.age', '45岁'), '45');
+  assert.equal(AI.normalizeRecognizeValue('pe.vitals.pulse', '98%'), '98');
+  assert.throws(() => AI.normalizeRecognizeValue('pe.vitals.sbp', '16 kPa'), /kPa/);
+  assert.throws(() => AI.normalizeRecognizeValue('pe.vitals.weight', '120斤'), /斤/);
+  assert.throws(() => AI.normalizeRecognizeValue('pe.vitals.temperature', '98.6℉'), /℉/);
+});
+
 test('识别：白名单只允许可核对的字段，诊断/处方/身份/摘要均拒绝', () => {
   const q = recognize();
   for (const path of ['diagnosis.confirmed.0', 'soap.p.principle', 'basic.name', 'basic.phone', 'summary']) {
     const evidence = [{source: 'note', quote: '体温 37.8℃'}];
-    assert.throws(() => AI.validate(response([suggestion(path, '测试', evidence)]), q), /越界/);
+    const result = AI.validate(response([suggestion(path, '测试', evidence)]), q);
+    assert.equal(result.suggestions.length, 0);
+    assert.equal(result.dropped[0].path, path);
+    assert.match(result.dropped[0].reason, /越界/);
   }
-  assert.throws(() => AI.validate(response([suggestion('basic.name', '张三')]), q), /越界/);
 });
 
 test('识别：选择项严格匹配 schema 枚举，生命体征校验可信范围', () => {
   const q = recognize();
   assert.equal(AI.validate(response([suggestion('basic.gender', '男', [])]), q).suggestions[0].text, '男');
-  assert.throws(() => AI.validate(response([suggestion('basic.gender', '男性', [])]), q), /允许值/);
+  const badEnum = AI.validate(response([suggestion('basic.gender', '男性', [])]), q);
+  assert.equal(badEnum.suggestions.length, 0);
+  assert.match(badEnum.dropped[0].reason, /允许值/);
   assert.equal(AI.validate(response([suggestion('pe.vitals.temperature', '37.8')]), q).suggestions[0].kind, 'number');
-  assert.throws(() => AI.validate(response([suggestion('pe.vitals.temperature', '99')]), q), /可信范围/);
+  const badRange = AI.validate(response([suggestion('pe.vitals.temperature', '99')]), q);
+  assert.equal(badRange.suggestions.length, 0);
+  assert.match(badRange.dropped[0].reason, /可信范围/);
   assert.equal(AI.validate(response([suggestion('pe.vitals.temperature', '37.8℃')]), q).suggestions[0].text, '37.8');
 });
 
-test('识别：校验图片/文字引用，不存在的证据整单拒绝', () => {
+test('识别：校验图片/文字引用，不合格建议逐条丢弃', () => {
   const q = recognize();
   assert.doesNotThrow(() => AI.validate(response([suggestion('hpi.symptoms', '咳嗽3天', [{source: 'note', quote: '体温 37.8℃'}])]), q));
-  assert.throws(() => AI.validate(response([suggestion('hpi.symptoms', '咳嗽3天', [{source: 'note', quote: '不存在的原文'}])]), q), /无法核实/);
+  const badQuote = AI.validate(response([suggestion('hpi.symptoms', '咳嗽3天', [{source: 'note', quote: '不存在的原文'}])]), q);
+  assert.equal(badQuote.suggestions.length, 0);
+  assert.match(badQuote.dropped[0].reason, /无法核实/);
   const textOnly = AI.prepare('recognize', record(), '患者诉咳嗽3天', undefined, null);
-  assert.throws(() => AI.validate(response([suggestion('hpi.symptoms', '咳嗽3天', [{source: 'image', quote: '图片'}])]), textOnly), /图片依据/);
+  const badImage = AI.validate(response([suggestion('hpi.symptoms', '咳嗽3天', [{source: 'image', quote: '图片'}])]), textOnly);
+  assert.equal(badImage.suggestions.length, 0);
+  assert.match(badImage.dropped[0].reason, /图片依据/);
 });
 
 test('识别：已有内容默认不覆盖，勾选允许替换后才写入并标记 AI 未核对', () => {
@@ -124,5 +155,7 @@ test('识别：非白名单选择项与空白值在写边界再次校验', () =>
   const result = AI.validate(response([suggestion('basic.gender', '男', [])]), q);
   const tampered = {...result, suggestions: [{...result.suggestions[0], path: 'diagnosis.confirmed.0'}]};
   assert.throws(() => AI.apply(r, q, tampered, [0], true, ''), /越界/);
-  assert.throws(() => AI.validate(response([suggestion('basic.gender', '', [])]), q), /建议值无效|空白/);
+  const blank = AI.validate(response([suggestion('basic.gender', '', [])]), q);
+  assert.equal(blank.suggestions.length, 0);
+  assert.match(blank.dropped[0].reason, /建议值无效|空白/);
 });

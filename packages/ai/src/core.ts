@@ -7,6 +7,7 @@ import {
 import { AiError, aiError } from './errors';
 import type {
   AiAdoptedField,
+  AiDroppedSuggestion,
   AiEvidence,
   AiImagePayload,
   AiOperation,
@@ -305,7 +306,16 @@ export function normalizeRecognizeValue(path: string, value: unknown): string {
     throw aiError('invalid_response', 'AI 返回的选择项不在病历字段允许值中，未写入病历');
   }
   if (rule.kind === 'number') {
-    const number = Number(text.replace(/[，,\s]/g, '').replace(/(?:℃|次\/分|mmHg|cm|kg)$/, ''));
+    const unsupported = /kpa|斤|℉|°f/i.exec(text);
+    if (unsupported) {
+      throw aiError('invalid_response', `AI 返回的数值单位不受支持（${unsupported[0]}），未写入病历`);
+    }
+    const compact = text.replace(/[，,、\s]/g, '');
+    const digits = compact.replace(/(?:℃|°C|°|次\/分钟|次\/分|\/min|bpm|mmHg|cm|kg|岁|%)$/i, '');
+    if (!/^[+-]?\d+(?:\.\d+)?$/.test(digits)) {
+      throw aiError('invalid_response', 'AI 返回的数值格式无效，未写入病历');
+    }
+    const number = Number(digits);
     if (!Number.isFinite(number) || number < (rule.min ?? 0) || number > (rule.max ?? 9999)) {
       throw aiError('invalid_response', 'AI 返回的生命体征或年龄超出可信范围，未写入病历');
     }
@@ -599,7 +609,6 @@ function validateRecognizeSuggestion(
   ) {
     throw aiError('out_of_scope', 'AI 返回了越界或重复字段，未写入病历');
   }
-  seen.add(path);
   if (typeof raw.text !== 'string' || !raw.text.trim() || raw.text.length > 8000) {
     throw aiError('invalid_response', 'AI 返回的建议值无效');
   }
@@ -630,6 +639,7 @@ function validateRecognizeSuggestion(
       return { source: source.source, quote: candidate.quote };
     });
   }
+  seen.add(path);
   return { path, text, evidence, kind: rule.kind };
 }
 
@@ -647,9 +657,19 @@ export function validateAiResponse(raw: unknown, request: AiRequest): AiValidate
   }
   if (request.operation === 'recognize') {
     const seen = new Set<string>();
-    const suggestions = data.suggestions.map((suggestion) =>
-      validateRecognizeSuggestion(suggestion, request, seen),
-    );
+    const suggestions: AiSuggestion[] = [];
+    const dropped: AiDroppedSuggestion[] = [];
+    for (const candidate of data.suggestions) {
+      const path = isObject(candidate) && typeof candidate.path === 'string'
+        ? candidate.path.slice(0, 200)
+        : '';
+      try {
+        suggestions.push(validateRecognizeSuggestion(candidate, request, seen));
+      } catch (error) {
+        // 单条识别建议不合格时只丢弃该条并说明原因；仅顶层结构损坏才让整个结果失败。
+        dropped.push({ path, reason: errorMessage(error) });
+      }
+    }
     const issues = data.issues.map((candidate) => {
       if (
         !isObject(candidate)
@@ -670,6 +690,7 @@ export function validateAiResponse(raw: unknown, request: AiRequest): AiValidate
       suggestions,
       issues,
       questions: data.questions as string[],
+      dropped,
     };
   }
   const seen = new Set<string>();
@@ -692,6 +713,7 @@ export function validateAiResponse(raw: unknown, request: AiRequest): AiValidate
     suggestions,
     issues,
     questions: data.questions as string[],
+    dropped: [],
   };
 }
 
@@ -795,6 +817,9 @@ export function adoptAiSuggestions(
     { suggestions: result.suggestions, issues: [], questions: [] },
     request,
   );
+  if (checked.dropped.length) {
+    throw aiError('out_of_scope', 'AI 返回了越界或重复字段，未写入病历');
+  }
   const indices = Array.from(new Set(selected));
   if (!indices.length) throw aiError('invalid_selection', '请勾选要采纳的建议');
 
