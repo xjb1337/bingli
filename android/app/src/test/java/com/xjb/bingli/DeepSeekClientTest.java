@@ -5,7 +5,11 @@ import org.json.JSONException;
 import org.json.JSONObject;
 import static org.junit.Assert.*;
 import java.io.*;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 public class DeepSeekClientTest {
     @Test public void restrictModels() {
@@ -61,5 +65,65 @@ public class DeepSeekClientTest {
     }
     @Test(expected=IOException.class) public void rejectOversizedResponse() throws Exception {
         DeepSeekClient.readLimited(new ByteArrayInputStream(new byte[256 * 1024 + 1]));
+    }
+
+    // ---- P0-2: image requests force deepseek-flash for this request only ----
+
+    @Test public void usesFlashForImageRequestsEvenWhenProIsSelected() throws Exception {
+        FakeConnection conn = new FakeConnection(200, successResponse());
+        DeepSeekClient client = new DeepSeekClient(() -> conn);
+        try {
+            JSONObject result = run(client, "deepseek-v4-pro", "请识别", "识别内容", "image/jpeg", "aGVsbG8=");
+            JSONObject request = new JSONObject(conn.bodyText());
+            assertEquals("deepseek-flash", request.getString("model"));
+            assertEquals("deepseek-flash", result.getString("model"));
+            assertTrue(result.getBoolean("ok"));
+        } finally { client.close(); }
+    }
+
+    @Test public void keepsSelectedProModelForTextOnlyRequests() throws Exception {
+        FakeConnection conn = new FakeConnection(200, successResponse());
+        DeepSeekClient client = new DeepSeekClient(() -> conn);
+        try {
+            JSONObject result = run(client, "deepseek-v4-pro", "整理病历", "整理内容", null, null);
+            JSONObject request = new JSONObject(conn.bodyText());
+            assertEquals("deepseek-v4-pro", request.getString("model"));
+            assertEquals("deepseek-v4-pro", result.getString("model"));
+        } finally { client.close(); }
+    }
+
+    private static JSONObject run(DeepSeekClient client, String model, String system, String user,
+                                  String imageMime, String imageBase64) throws Exception {
+        CountDownLatch latch = new CountDownLatch(1);
+        JSONObject[] result = new JSONObject[1];
+        assertTrue(client.request("test_request", "sk-test-key", model, system, user, imageMime, imageBase64,
+            (id, response) -> { result[0] = response; latch.countDown(); }));
+        assertTrue(latch.await(10, TimeUnit.SECONDS));
+        assertNotNull(result[0]);
+        return result[0];
+    }
+
+    private static String successResponse() throws Exception {
+        return new JSONObject().put("choices", new JSONArray().put(new JSONObject()
+            .put("finish_reason", "stop")
+            .put("message", new JSONObject().put("content", new JSONObject().put("ok", true).toString())))).toString();
+    }
+
+    private static final class FakeConnection extends HttpURLConnection {
+        private final ByteArrayOutputStream body = new ByteArrayOutputStream();
+        private final int status;
+        private final String response;
+        FakeConnection(int status, String response) throws IOException {
+            super(new URL("https://example.test/chat/completions"));
+            this.status = status;
+            this.response = response;
+        }
+        String bodyText() throws IOException { return body.toString(StandardCharsets.UTF_8.name()); }
+        @Override public void connect() { }
+        @Override public void disconnect() { }
+        @Override public boolean usingProxy() { return false; }
+        @Override public OutputStream getOutputStream() { return body; }
+        @Override public int getResponseCode() { return status; }
+        @Override public InputStream getInputStream() { return new ByteArrayInputStream(response.getBytes(StandardCharsets.UTF_8)); }
     }
 }

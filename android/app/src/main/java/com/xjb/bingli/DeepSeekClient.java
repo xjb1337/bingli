@@ -66,7 +66,10 @@ final class DeepSeekClient {
                                  String imageMime, String imageBase64, Callback callback) {
         if (closed || !active.isEmpty()) return false;
         if (!validModel(model) || id == null || !id.matches("[A-Za-z0-9_-]{1,80}") || system.length() > 12000 || user.length() > 50000) return false;
-        if ((imageMime != null || imageBase64 != null) && !validImagePayload(imageMime, imageBase64)) return false;
+        boolean hasImage = imageMime != null || imageBase64 != null;
+        if (hasImage && !validImagePayload(imageMime, imageBase64)) return false;
+        // deepseek-v4-pro does not support image understanding: force Flash for this request only.
+        final String requestModel = hasImage ? "deepseek-flash" : model;
         active = id;
         executor.submit(() -> {
             JSONObject result = new JSONObject(); HttpURLConnection conn = null;
@@ -80,7 +83,7 @@ final class DeepSeekClient {
                 conn.setRequestMethod("POST"); conn.setDoOutput(true);
                 conn.setRequestProperty("Authorization", "Bearer " + key);
                 conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-                JSONObject body = new JSONObject().put("model", model).put("stream", false).put("max_tokens", 4096)
+                JSONObject body = new JSONObject().put("model", requestModel).put("stream", false).put("max_tokens", 4096)
                     .put("thinking", new JSONObject().put("type", "disabled"))
                     .put("response_format", new JSONObject().put("type", "json_object"))
                     .put("messages", new JSONArray().put(new JSONObject().put("role", "system").put("content", system))
@@ -99,7 +102,7 @@ final class DeepSeekClient {
                 String content = choice.getJSONObject("message").optString("content", "").trim();
                 if (content.isEmpty()) throw new RequestFailure("invalid_response", "AI 返回了空白内容，请重试");
                 // Only final JSON content enters the UI, never reasoning or raw HTTP errors.
-                result.put("ok", true).put("content", new JSONObject(content)).put("model", model);
+                result.put("ok", true).put("content", new JSONObject(content)).put("model", requestModel);
             } catch (Exception e) {
                 String code;
                 String message;
