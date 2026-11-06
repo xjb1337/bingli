@@ -1,0 +1,3 @@
+# 黄金样例与模板对齐文档固定为 LF，避免 core.autocrlf 造成检出后测试失败
+tests/golden/** text eol=lf
+docs/template-alignment/** text eol=lf
