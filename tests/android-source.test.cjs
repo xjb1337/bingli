@@ -21,3 +21,14 @@ test('P0-2 image requests force deepseek-flash in the request body and result on
     'request body and result model must both use the per-request model');
   assert.doesNotMatch(source,/aiKeys\.(save|write)/i);
 });
+
+test('P0-7 back gesture asks the web app first, flushes, then confirms exit',()=>{
+  const source=readMain();
+  assert.match(source,/window\.APP&&window\.APP\.handleBack&&APP\.handleBack\(\)/);
+  assert.match(source,/APP\._test\.flushPendingSave/);
+  assert.match(source,/退出大病历？/);
+  const back=source.slice(source.indexOf('public void onBackPressed'));
+  assert.match(back,/super\.onBackPressed\(\)/);
+  assert.match(source,/public class MainActivity extends Activity/);
+  assert.doesNotMatch(source,/androidx\.activity/);
+});

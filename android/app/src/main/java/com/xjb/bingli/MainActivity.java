@@ -295,8 +295,10 @@ public class MainActivity extends Activity {
         super.onDestroy();
     }
     @Override public void onBackPressed() {
-        web.evaluateJavascript("(()=>{if(typeof AI_ASSIST!=='undefined'&&AI_ASSIST.isOpen()){AI_ASSIST.close();return true;}if(typeof APP!=='undefined'&&APP._test.flushPendingSave)APP._test.flushPendingSave();return false;})()", value -> {
+        if (web == null) { super.onBackPressed(); return; }
+        web.evaluateJavascript("(function(){try{return !!(window.APP&&window.APP.handleBack&&APP.handleBack());}catch(e){return false;}})()", value -> {
             if ("true".equals(value) || isFinishing() || isDestroyed()) return;
+            web.evaluateJavascript("if(typeof APP!=='undefined' && APP._test && APP._test.flushPendingSave) APP._test.flushPendingSave()", null);
             new AlertDialog.Builder(this).setMessage("退出大病历？请确认页面没有保存失败提示。")
                 .setPositiveButton("退出",(d,w)->finish()).setNegativeButton("继续填写",null).show();
         });
