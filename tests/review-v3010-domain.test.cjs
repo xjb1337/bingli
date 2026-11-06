@@ -107,3 +107,43 @@ test('P0-3 女童写已绝经时 validate 给出 warning 并结构化登记', ()
   adult.menstruation.menopauseAge = '50';
   assert.equal(GENERATOR.validate(adult).filter(message => message.indexOf('【月经史】') === 0).length, 0);
 });
+
+function vitalRecord(age, vitals) {
+  const { SCHEMA } = bootGlobals();
+  const record = SCHEMA.emptyRecord();
+  record.basic.gender = '男';
+  record.basic.age = age;
+  record.pe.vitals = Object.assign({
+    temperature: '36.5', pulse: '80', respiration: '16', sbp: '110', dbp: '70'
+  }, vitals);
+  return record;
+}
+
+test('P0-4 儿童生命体征按 PALS 年龄分层判断', () => {
+  const { GENERATOR } = bootGlobals();
+  const infant = GENERATOR.draftSummary(vitalRecord('8月', { pulse: '130', respiration: '35', sbp: '85', dbp: '50' }));
+  assert.ok(!infant.includes('P 130'), `8月龄 P130 不应列入异常：${infant}`);
+  assert.ok(!infant.includes('R 35'), `8月龄 R35 不应列入异常：${infant}`);
+  assert.ok(!infant.includes('BP 85'), `8月龄 BP85/50 不应列入异常：${infant}`);
+
+  const infantHigh = GENERATOR.draftSummary(vitalRecord('8月', { pulse: '180' }));
+  assert.ok(infantHigh.includes('P 180次/分'), `8月龄 P180 应列入异常：${infantHigh}`);
+
+  const toddler = GENERATOR.draftSummary(vitalRecord('3岁', { pulse: '120', respiration: '24', sbp: '85' }));
+  assert.ok(!toddler.includes('P 120'), `3岁 P120 不应列入异常：${toddler}`);
+  assert.ok(!toddler.includes('R 24'), `3岁 R24 不应列入异常：${toddler}`);
+  assert.ok(!toddler.includes('BP 85'), `3岁 SBP85 不应列入低血压：${toddler}`);
+});
+
+test('P0-4 成人阈值覆盖低体温与舒张压异常', () => {
+  const { GENERATOR } = bootGlobals();
+  const hypertension = GENERATOR.draftSummary(vitalRecord('45岁', { sbp: '130', dbp: '115' }));
+  assert.ok(hypertension.includes('BP 130/115mmHg'), `成人 DBP115 应列入异常：${hypertension}`);
+
+  const hypothermia = GENERATOR.draftSummary(vitalRecord('45岁', { temperature: '35.0' }));
+  assert.ok(hypothermia.includes('T 35.0℃'), `成人 T35.0 应列入异常：${hypothermia}`);
+
+  const normal = GENERATOR.draftSummary(vitalRecord('45岁', { pulse: '88', sbp: '120', dbp: '80' }));
+  assert.ok(!normal.includes('P 88'), `成人 P88 不应列入异常：${normal}`);
+  assert.ok(!normal.includes('BP 120'), `成人 BP120/80 不应列入异常：${normal}`);
+});

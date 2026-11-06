@@ -1380,21 +1380,68 @@ const GENERATOR = (() => {
     return out;
   }
 
+  /**
+   * 异常生命体征的年龄分层阈值（P0-4）。
+   *
+   * 成人阈值来源：《诊断学》第10版「生命体征」正常范围。
+   * 儿童心率/呼吸/低血压参考 AHA PALS 2020 清醒状态参考范围（用户已确认 D2）：
+   *   <1岁 P100–160 R30–53 SBP<70；
+   *   1–<3岁 P90–150 R22–37 SBP<70+2×年龄；
+   *   3–<6岁 P80–140 R20–28 SBP<70+2×年龄；
+   *   6–<12岁 P70–120 R18–25 SBP<70+2×年龄（≥10岁取90）；
+   *   12–<14岁 P60–100 R12–20 SBP<90。
+   * 儿童高血压需按百分位表判断，本轮不自动判高血压；体温规则与成人相同。
+   */
+  const VITAL_ABNORMAL_BY_AGE = [
+    { maxAge: 1, pulse: [100, 160], respiration: [30, 53], sbpLow: () => 70 },
+    { maxAge: 3, pulse: [90, 150], respiration: [22, 37], sbpLow: age => 70 + 2 * age },
+    { maxAge: 6, pulse: [80, 140], respiration: [20, 28], sbpLow: age => 70 + 2 * age },
+    { maxAge: 12, pulse: [70, 120], respiration: [18, 25], sbpLow: age => Math.min(90, 70 + 2 * age) },
+    { maxAge: 14, pulse: [60, 100], respiration: [12, 20], sbpLow: () => 90 },
+    { maxAge: Infinity, adult: true, pulse: [60, 100], respiration: [12, 20], sbpLow: () => 90 }
+  ];
+
+  function vitalAgeRule(r) {
+    let years = NaN;
+    if (typeof AGE !== 'undefined' && AGE && typeof AGE.resolveAge === 'function') {
+      const info = AGE.resolveAge(r);
+      if (info && info.ok && Number.isFinite(info.years)) years = info.years;
+    } else {
+      years = ageYears(r);
+    }
+    const adult = VITAL_ABNORMAL_BY_AGE[VITAL_ABNORMAL_BY_AGE.length - 1];
+    if (!Number.isFinite(years)) return adult;
+    const age = Math.max(0, Math.floor(years));
+    for (const rule of VITAL_ABNORMAL_BY_AGE) {
+      if (age < rule.maxAge) return rule;
+    }
+    return adult;
+  }
+
   /** 摘要 / O 段共用的异常生命体征短语。 */
   function abnormalVitalFindings(r) {
     const vitals = vitalSnapshot((r.pe || {}).vitals || {});
+    const rule = vitalAgeRule(r);
+    const age = Number.isFinite(ageYears(r)) ? Math.floor(ageYears(r)) : 0;
     const parts = [];
-    if (vitals.temperature && vitals.temperature.num >= 37.3) {
+    if (vitals.temperature && (vitals.temperature.num >= 37.3 || vitals.temperature.num < 36.0)) {
       parts.push(`T ${vitals.temperature.raw}℃`);
     }
-    if (vitals.pulse && (vitals.pulse.num > 100 || vitals.pulse.num < 60)) {
+    if (vitals.pulse && (vitals.pulse.num > rule.pulse[1] || vitals.pulse.num < rule.pulse[0])) {
       parts.push(`P ${vitals.pulse.raw}次/分`);
     }
-    if (vitals.respiration && (vitals.respiration.num > 20 || vitals.respiration.num < 12)) {
+    if (vitals.respiration && (vitals.respiration.num > rule.respiration[1] || vitals.respiration.num < rule.respiration[0])) {
       parts.push(`R ${vitals.respiration.raw}次/分`);
     }
-    if (vitals.sbp && (vitals.sbp.num >= 140 || vitals.sbp.num < 90)) {
-      parts.push(`BP ${vitals.sbp.raw}/${vitals.dbp ? vitals.dbp.raw : '—'}mmHg`);
+    let bpAbnormal = false;
+    if (rule.adult) {
+      if (vitals.sbp && (vitals.sbp.num >= 140 || vitals.sbp.num < 90)) bpAbnormal = true;
+      if (vitals.dbp && (vitals.dbp.num >= 90 || vitals.dbp.num < 60)) bpAbnormal = true;
+    } else if (vitals.sbp && vitals.sbp.num < rule.sbpLow(age)) {
+      bpAbnormal = true;
+    }
+    if (bpAbnormal) {
+      parts.push(`BP ${vitals.sbp ? vitals.sbp.raw : '—'}/${vitals.dbp ? vitals.dbp.raw : '—'}mmHg`);
     }
     return parts;
   }
