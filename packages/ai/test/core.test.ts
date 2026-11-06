@@ -180,6 +180,13 @@ describe('AI image/text recognition boundary', () => {
     expect(request.system).toContain('asked_positive');
   });
 
+  it('offers 未初潮 as a whitelisted menstruation choice', () => {
+    const request = recognizeRequest(makeRecord(), '月经史：未初潮。');
+    expect(request.user).toContain('未初潮');
+    const validated = validateAiResponse(recognized('menstruation.applicable', '未初潮'), request);
+    expect(validated.suggestions[0]?.text).toBe('未初潮');
+  });
+
   it('supports text-only or image-only and enforces image type/size/base64 limits', () => {
     expect(recognizeRequest(makeRecord(), '患者诉咳嗽3天', null).image).toBeUndefined();
     expect(recognizeRequest(makeRecord(), '', image).image).toEqual(image);

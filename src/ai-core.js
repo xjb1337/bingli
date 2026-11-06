@@ -73,7 +73,7 @@ const AI_CORE = (() => {
     addChoice('personal.drinking', '饮酒史', ['无', '有', '已戒']);
     addText('personal.drinkingAmount', '饮酒情况');
     addChoice('marriage.status', '婚姻状况（婚育史）', S.MARITAL);
-    addChoice('menstruation.applicable', '是否有月经史', ['有', '无']);
+    addChoice('menstruation.applicable', '是否有月经史', ['有', '无', '未初潮']);
     addChoice('childbirth.applicable', '是否有生育史', ['有', '无']);
 
     (S.VITALS || []).forEach(item => addNumber('pe.vitals.' + item.key, '生命体征 · ' + item.label, item.min, item.max));

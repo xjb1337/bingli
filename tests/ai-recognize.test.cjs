@@ -22,6 +22,13 @@ test('识别：图片与文字进入同一预览，图片数据不重复塞进�
   assert.match(q.system, /asked_positive/);
 });
 
+test('识别：月经史白名单包含「未初潮」', () => {
+  const q = recognize(record(), '月经史：未初潮。');
+  assert.match(q.user, /未初潮/);
+  const result = AI.validate(response([suggestion('menstruation.applicable', '未初潮', [])]), q);
+  assert.equal(result.suggestions[0].text, '未初潮');
+});
+
 test('识别：支持 text-only 和图片-only，格式/大小/base64 均有边界校验', () => {
   assert.doesNotThrow(() => AI.prepare('recognize', record(), '患者诉咳嗽3天', undefined, null));
   assert.doesNotThrow(() => AI.prepare('recognize', record(), '', undefined, image()));
