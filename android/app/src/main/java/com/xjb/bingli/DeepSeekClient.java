@@ -32,6 +32,13 @@ final class DeepSeekClient {
             && base64.length() <= MAX_IMAGE_BASE64_CHARS && base64.length() % 4 == 0
             && base64.matches("[A-Za-z0-9+/]+={0,2}");
     }
+    static final int MAX_TOKENS_DEFAULT = 4096;
+    static final int MAX_TOKENS_RECOGNIZE = 8192;
+    /** Recognize requests are identified by the prompt produced by AI_CORE.prepare(). */
+    static boolean isRecognizeRequest(String system, String user) {
+        if (system != null && system.contains("病历识别与填表助手")) return true;
+        return user != null && user.contains("\"operation\":\"识别病历图片/文字\"");
+    }
     static JSONArray userContent(String user, String imageMime, String imageBase64) throws org.json.JSONException {
         JSONArray content = new JSONArray().put(new JSONObject().put("type", "text").put("text", user));
         if (imageMime != null || imageBase64 != null) {
@@ -60,13 +67,21 @@ final class DeepSeekClient {
         return "DeepSeek 请求失败（HTTP " + code + "），请检查模型设置后重试";
     }
     synchronized boolean request(String id, String key, String model, String system, String user, Callback callback) {
-        return request(id, key, model, system, user, null, null, callback);
+        return request(id, key, model, system, user, null, null, isRecognizeRequest(system, user), callback);
     }
     synchronized boolean request(String id, String key, String model, String system, String user,
                                  String imageMime, String imageBase64, Callback callback) {
+        return request(id, key, model, system, user, imageMime, imageBase64, isRecognizeRequest(system, user), callback);
+    }
+    synchronized boolean request(String id, String key, String model, String system, String user,
+                                 String imageMime, String imageBase64, boolean recognize, Callback callback) {
         if (closed || !active.isEmpty()) return false;
         if (!validModel(model) || id == null || !id.matches("[A-Za-z0-9_-]{1,80}") || system.length() > 12000 || user.length() > 50000) return false;
-        if ((imageMime != null || imageBase64 != null) && !validImagePayload(imageMime, imageBase64)) return false;
+        boolean hasImage = imageMime != null || imageBase64 != null;
+        if (hasImage && !validImagePayload(imageMime, imageBase64)) return false;
+        // deepseek-v4-pro does not support image understanding: force Flash for this request only.
+        final String requestModel = hasImage ? "deepseek-flash" : model;
+        final int maxTokens = recognize ? MAX_TOKENS_RECOGNIZE : MAX_TOKENS_DEFAULT;
         active = id;
         executor.submit(() -> {
             JSONObject result = new JSONObject(); HttpURLConnection conn = null;
@@ -80,7 +95,7 @@ final class DeepSeekClient {
                 conn.setRequestMethod("POST"); conn.setDoOutput(true);
                 conn.setRequestProperty("Authorization", "Bearer " + key);
                 conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-                JSONObject body = new JSONObject().put("model", model).put("stream", false).put("max_tokens", 4096)
+                JSONObject body = new JSONObject().put("model", requestModel).put("stream", false).put("max_tokens", maxTokens)
                     .put("thinking", new JSONObject().put("type", "disabled"))
                     .put("response_format", new JSONObject().put("type", "json_object"))
                     .put("messages", new JSONArray().put(new JSONObject().put("role", "system").put("content", system))
@@ -95,11 +110,14 @@ final class DeepSeekClient {
                 JSONArray choices = parsed.getJSONArray("choices");
                 if (choices.length() != 1) throw new RequestFailure("invalid_response", "AI 返回候选数量异常，请重试");
                 JSONObject choice = choices.getJSONObject(0);
-                if (!"stop".equals(choice.optString("finish_reason"))) throw new RequestFailure("truncated_response", "AI 结果未完整结束，未写入病历；请缩短资料后重试");
+                String finishReason = choice.optString("finish_reason", "");
+                if ("length".equals(finishReason)) throw new RequestFailure("truncated_response", "AI 结果未完整结束，未写入病历；请缩短资料后重试");
+                if ("content_filter".equals(finishReason)) throw new RequestFailure("content_filtered", "内容被服务端安全策略拦截");
+                if (!"stop".equals(finishReason)) throw new RequestFailure("request_failed", "AI 请求失败，未写入病历；请重试");
                 String content = choice.getJSONObject("message").optString("content", "").trim();
                 if (content.isEmpty()) throw new RequestFailure("invalid_response", "AI 返回了空白内容，请重试");
                 // Only final JSON content enters the UI, never reasoning or raw HTTP errors.
-                result.put("ok", true).put("content", new JSONObject(content)).put("model", model);
+                result.put("ok", true).put("content", new JSONObject(content)).put("model", requestModel);
             } catch (Exception e) {
                 String code;
                 String message;
