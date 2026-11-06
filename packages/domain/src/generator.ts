@@ -3605,12 +3605,50 @@ const GENERATOR = (() => {
     }
   }
 
+  /* ---------------------- 侧别占位符（P0-1） ---------------------- */
+
+  // 这些键只存放界面状态/来源信息，不会写进病历正文；扫描时排除，避免把
+  // 历史元数据里的占位符当成正文缺陷。
+  const SIDE_SCAN_SKIP = ['meta', 'documentMeta', 'peDefaults', 'peFactStates', 'peChecked', 'fieldStates', 'aiProvenance'];
+  const SIDE_SECTION_NAMES = {
+    basic: '一般项目', hpi: '现病史', ros: '系统回顾', pmh: '既往史',
+    personal: '个人史', marriage: '婚姻史', menstruation: '月经史', childbirth: '生育史',
+    family: '家族史', pe: '体格检查', auxiliary: '辅助检查', diagnosis: '初步诊断',
+    soap: '首次病程记录', discharge: '出院记录'
+  };
+
+  /** 扫描整份病历中尚未改成左/右的侧别占位符；TEMPLATES 不可用时安全降级。 */
+  function sidePlaceholderHits(r) {
+    if (typeof TEMPLATES === 'undefined' || !TEMPLATES || typeof TEMPLATES.findUnfilledPlaceholders !== 'function') return [];
+    const scan = {};
+    Object.keys(r || {}).forEach(key => {
+      if (SIDE_SCAN_SKIP.indexOf(key) < 0) scan[key] = r[key];
+    });
+    try {
+      return TEMPLATES.findUnfilledPlaceholders(scan) || [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function sidePlaceholderMessage(hits) {
+    const names = [];
+    hits.forEach(hit => {
+      const top = String(hit.path || '').split(/[.[]/)[0];
+      const name = SIDE_SECTION_NAMES[top] || top || '病历';
+      if (names.indexOf(name) < 0 && names.length < 5) names.push(name);
+    });
+    return `【模板】仍有 ${hits.length} 处侧别占位符（患侧/对侧/健侧）未改成左或右：${names.join('、')}。`;
+  }
+
   function validate(r) {
     const w = [];
     const b = r.basic || {};
     if (!b.name) w.push('【一般项目】缺少姓名。');
     if (!b.gender) w.push('【一般项目】缺少性别。');
     if (!b.age) w.push('【一般项目】缺少年龄。');
+    const sideHits = sidePlaceholderHits(r);
+    if (sideHits.length) w.push(sidePlaceholderMessage(sideHits));
     const cc = stripTail(b.chiefComplaint);
     if (!cc) {
       w.push('【主诉】未填写。');
@@ -3833,11 +3871,27 @@ const GENERATOR = (() => {
   function validateStructured(r) {
     const quality = qualityDiagnostics(r);
     const qualityMessages = new Set(quality.map(item => item.message));
-    const list = validate(r).filter(message => !qualityMessages.has(message)).map(message => {
+    const sideHits = sidePlaceholderHits(r);
+    const sideMessage = sideHits.length ? sidePlaceholderMessage(sideHits) : '';
+    const list = validate(r).filter(message => !qualityMessages.has(message) && message !== sideMessage).map(message => {
       const meta = warningMeta(message);
       return diagnostic({ ...meta, message });
     });
-    return list.concat(staleDocumentWarnings(r), quality).map(item => diagnostic(item));
+    const sidePaths = [];
+    sideHits.forEach(hit => {
+      if (hit.path && sidePaths.indexOf(hit.path) < 0) sidePaths.push(hit.path);
+    });
+    const side = sideHits.length ? diagnostic({
+      code: 'SIDE_PLACEHOLDER_UNFILLED',
+      severity: 'error',
+      ['doc' + 'ument']: 'record',
+      path: sideHits[0].path || 'record',
+      paths: sidePaths.length ? sidePaths : ['record'],
+      message: sideMessage,
+      action: '把占位符改成左或右',
+      evidence: sideHits.map(hit => ({ path: hit.path || '', text: hit.text || '' }))
+    }) : null;
+    return (side ? [side] : []).concat(list, staleDocumentWarnings(r), quality).map(item => diagnostic(item));
   }
 
   /* ------------------------ 文档中间表示（IR） ------------------------ */
