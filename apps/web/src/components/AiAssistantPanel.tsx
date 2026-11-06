@@ -327,6 +327,7 @@ export function AiAssistantPanel({
         <div className="ai-controls">
           <div className="ai-model-row">
             <span className="ai-model-pill">模型：<code>{model}</code></span>
+            <span className="ai-model-pill">图片识别固定使用 Flash（Pro 不支持图片）</span>
             <span className="ai-model-pill">{securityContext === 'android' ? '密钥由 Android Keystore 保管，网页不可读取' : '密钥仅保存在本页内存'}</span>
           </div>
           <div className="form-grid">

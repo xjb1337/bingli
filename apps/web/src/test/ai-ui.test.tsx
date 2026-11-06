@@ -385,4 +385,21 @@ describe('DeepSeek web security boundary', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('DeepSeek 服务暂不可用，请稍后重试');
     expect((await repository.loadCurrent()).record?.hpi.symptoms).toBe('');
   });
+
+  it('states that image recognition always uses Flash even when Pro is the selected model', () => {
+    render(
+      <AiAssistantPanel
+        record={SCHEMA.emptyRecord()}
+        configured
+        securityContext="web"
+        model="deepseek-pro"
+        createTransport={() => fakeTransportFactory(async () => ({ content: aiContent(), model: 'deepseek-flash' })).factory('sk-test')}
+        onOpenSettings={() => undefined}
+        onAdoptRecord={async () => true}
+        onConfirmField={async () => true}
+      />,
+    );
+
+    expect(screen.getByText('图片识别固定使用 Flash（Pro 不支持图片）')).toBeInTheDocument();
+  });
 });
