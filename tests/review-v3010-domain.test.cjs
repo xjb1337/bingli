@@ -184,3 +184,18 @@ test('P1-1 validate 校验年龄文本并结构化登记 AGE_INVALID', () => {
   ok.basic.age = '45';
   assert.equal(GENERATOR.validate(ok).filter(message => message.includes('无法识别或不合理')).length, 0);
 });
+
+test('P1-2 admissionPid 不把内部记录 id 当住院号', () => {
+  const { SCHEMA, GENERATOR } = bootGlobals();
+  const record = SCHEMA.emptyRecord();
+  record.id = 'legacy-v1-respiratory';
+  record.basic.name = '测试患者';
+  record.basic.gender = '男';
+  record.basic.age = '45';
+  record.basic.department = 'respiratory';
+  const text = GENERATOR.generate(record).text;
+  assert.ok(text.includes('PID：／'), `无记录号时 PID 应输出／：${text.split('\n')[1]}`);
+  assert.ok(!text.includes('PID：legacy-v1-respiratory'), '内部记录 id 不应出现在 PID');
+  record.basic.recordNo = 'ZY-0001';
+  assert.ok(GENERATOR.generate(record).text.includes('PID：ZY-0001'));
+});

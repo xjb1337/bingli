@@ -430,7 +430,9 @@ const GENERATOR = (() => {
   }
 
   function admissionPid(r) {
-    return stripTail((r.basic || {}).recordNo) || stripTail(r.id) || '';
+    // 版式统一用记录号作为 PID；没有记录号时输出「／」，
+    // 不能拿内部记录 id 兜底（会把 legacy-v1 之类的内部标识打印给患者）。
+    return stripTail((r.basic || {}).recordNo) || '';
   }
 
   function admissionHeaderLine(r) {

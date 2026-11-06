@@ -10,7 +10,7 @@
 | tests/golden/v3-obstetrics/dabingli.txt | 同上。系统回顾为空（原先输出“／”），按“可选空节不打印”的规则不再输出。原【月经与生育史】并入【婚育史】。尿蛋白定量归入“实验室检查”，B超归入“特殊检查”。 |
 
 ## 通用变更（三份入院记录 golden 都有）
-1. 新增标题【入院记录】和表头“PID/姓名/科室/病区/床号”。没有住院号时，PID 使用记录 id。
+1. 新增标题【入院记录】和表头“PID/姓名/科室/病区/床号”。没有住院号时，PID 输出「／」（不再回退内部记录 id）。
 2. 【一般项目】改为模板的两栏 11 项：姓名、职业、性别、婚姻、出生日期、出生地、年龄、病史陈述者（与可靠程度合并）、民族、入院时间、记录时间。工作单位、通讯地址、电话、籍贯、科别不在模板中，不再打印；科室移到表头。
 3. 现病史主体后追加“现为求进一步诊治，遂至我院就诊，拟“<首个初步诊断>”收住入院。”；一般情况另起一段，以“病来，”开头（原“发病以来”会被替换）。模板的书写规则不打印。
 4. 既往史以一句总述开头（如“患者既往体健。”），分项顺序按模板排列；“与本病相关病史/其它”为空时不打印。
@@ -26,3 +26,7 @@
 
 ## 对照文件
 虚构患者“虚构患者丙”（tests/fixtures/template-alignment/wzrm-neuro-fictional.json）：`docs/template-alignment/{before,after}/{dabingli,first-course,discharge}.txt`。重新生成：`node build.js && node tools/render-template-alignment.cjs <outdir>`。
+
+## v3.0.0.10 复核修复
+
+1. P1-2：入院记录表头 PID 只取住院号（`basic.recordNo`）。没有住院号时输出「／」，不再回退内部记录 id。`tests/golden/v1-respiratory/dabingli.txt` 的 `PID：legacy-v1-respiratory` 相应改为 `PID：／`。
