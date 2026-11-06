@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { RECORD_CORE, SCHEMA, type DabingliRecord } from '@dabingli/domain';
 import { MarriageStep } from '../pages/MarriageStep';
@@ -9,6 +9,12 @@ function femaleRecord(age: string, applicable = ''): DabingliRecord {
   record.basic.gender = '女';
   record.basic.age = age;
   record.menstruation.applicable = applicable;
+  return record;
+}
+
+function maleRecord(): DabingliRecord {
+  const record = RECORD_CORE.cloneValue(SCHEMA.emptyRecord()) as DabingliRecord;
+  record.basic.gender = '男';
   return record;
 }
 
@@ -49,5 +55,28 @@ describe('menstruation applicable options', () => {
     renderStep(femaleRecord('28岁'));
 
     expect(screen.queryByText('儿童可选『未初潮』')).not.toBeInTheDocument();
+  });
+});
+
+describe('male childbirth fields', () => {
+  it('shows a legacy gravida value as the child count and writes the new children field', () => {
+    const record = maleRecord();
+    record.childbirth.gravida = '2';
+    const update = renderStep(record);
+
+    const input = screen.getByLabelText('子女数');
+    expect(input).toHaveValue(2);
+
+    fireEvent.change(input, { target: { value: '3' } });
+    expect(update).toHaveBeenCalledWith('childbirth.children', '3');
+  });
+
+  it('prefers the dedicated children value over the legacy gravida value', () => {
+    const record = maleRecord();
+    record.childbirth.children = '1';
+    record.childbirth.gravida = '2';
+    renderStep(record);
+
+    expect(screen.getByLabelText('子女数')).toHaveValue(1);
   });
 });

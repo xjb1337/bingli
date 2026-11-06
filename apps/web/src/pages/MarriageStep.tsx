@@ -142,7 +142,15 @@ export function MarriageStep({ record, update, errors }: StepComponentProps) {
       ) : (
         <Card title="生育史（男性患者可选填）">
           <FormGrid>
-            <FieldRenderer path="childbirth.gravida" label="子女数" value={stringAt(record, 'childbirth.gravida')} onChange={update} kind="number" inputMode="numeric" error={errors['childbirth.gravida']} />
+            <FieldRenderer
+              path="childbirth.children"
+              label="子女数"
+              value={stringAt(record, 'childbirth.children') || stringAt(record, 'childbirth.gravida')}
+              onChange={update}
+              kind="number"
+              inputMode="numeric"
+              error={errors['childbirth.children'] ?? errors['childbirth.gravida']}
+            />
             <FieldRenderer path="childbirth.details" label="子女健康状况" value={stringAt(record, 'childbirth.details')} onChange={update} error={errors['childbirth.details']} />
           </FormGrid>
         </Card>
