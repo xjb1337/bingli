@@ -4254,8 +4254,42 @@ const APP = (() => {
     return afterSave(saveToLibrary(), finish);
   }
 
+  /**
+   * Android 实体返回键 / 手势的入口（原生通过 evaluateJavascript 调用）。
+   * 同步返回 boolean：true 表示页面已经消费了这次返回，false 交给原生继续处理（退出）。
+   * 顺序按「最上层覆盖物优先」：模态框 → 目录 → AI 面板 → 设置页 → 上一步。
+   */
+  function handleBack() {
+    const kids = (document.body && document.body.children) || [];
+    const findMask = cls => {
+      for (let i = kids.length - 1; i >= 0; i--) {
+        const node = kids[i];
+        const name = node && typeof node.className === 'string' ? node.className : '';
+        if (name.split(/\s+/).indexOf(cls) >= 0) return node;
+      }
+      return null;
+    };
+    // 1) 任意打开中的模态框（病历列表、导入预览、手动复制框等）
+    const modal = findMask('modal-mask');
+    if (modal) { modal.remove(); return true; }
+    // 2) 目录弹层
+    const nav = findMask('nav-mask');
+    if (nav) { nav.remove(); return true; }
+    // 3) AI 助手面板
+    if (typeof AI_ASSIST !== 'undefined' && AI_ASSIST && typeof AI_ASSIST.isOpen === 'function' && AI_ASSIST.isOpen()) {
+      AI_ASSIST.close();
+      return true;
+    }
+    // 4) 设置页：回到编辑页
+    if (settingsView) { closeSettings(); return true; }
+    // 5) 非第一步：回上一步（与点「上一步」一致，先保存当前草稿）
+    if (step > 0) { saveCurrent(); step--; render(); return true; }
+    return false;
+  }
+
   return {
     init, getRecord: () => R, STEPS,
+    handleBack,
     async applyAI(request, result, selected, allowReplace, model) {
       if (currentSaveBlocked || listSaveBlocked || remoteConflict) throw Error('请先处理页面上的保存异常或修订冲突');
       const next = AI_CORE.apply(R, request, result, selected, allowReplace, model);

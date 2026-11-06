@@ -56,10 +56,11 @@ function makeFakeDocument() {
         },
         contains(c) { return this._set.has(c); }
       },
-      appendChild(c) { this.children.push(c); return c; },
-      removeChild(c) { this.children = this.children.filter(x => x !== c); return c; },
-      remove() {},
+      appendChild(c) { c._parent = this; this.children.push(c); return c; },
+      removeChild(c) { this.children = this.children.filter(x => x !== c); c._parent = null; return c; },
+      remove() { if (this._parent) this._parent.removeChild(this); },
       setAttribute() {},
+      removeAttribute() {},
       hasAttribute() { return false; },
       addEventListener(type, fn) {
         const key = sel + '::' + type;
@@ -1095,4 +1096,41 @@ test('P0-6 系统剩余项全部标阴性后就地刷新，不跳顶且保留阳
   assert.match(group.innerHTML, /aria-label="咳痰：阴性"/, '其余症状应就地变为阴性');
   assert.equal(app.run('APP.getRecord().ros.resp.cough.checked'), true);
   assert.equal(app.run('APP.getRecord().ros.resp.sputum.negative'), true);
+});
+
+test('P0-7 handleBack：模态框、目录、AI、设置、上一步各层依次消费返回键', () => {
+  const app = boot();
+  // 1) 模态框（病历列表）
+  app.run('APP._test.openList()');
+  assert.ok(app.document.body.children.some(n => String(n.className).includes('modal-mask')), '列表应已打开');
+  assert.equal(app.run('APP.handleBack()'), true);
+  assert.ok(!app.document.body.children.some(n => String(n.className).includes('modal-mask')), '返回应关闭模态框');
+
+  // 2) 目录弹层
+  app.run('APP._test.openNav()');
+  assert.ok(app.document.body.children.some(n => String(n.className).includes('nav-mask')), '目录应已打开');
+  assert.equal(app.run('APP.handleBack()'), true);
+  assert.ok(!app.document.body.children.some(n => String(n.className).includes('nav-mask')), '返回应关闭目录');
+
+  // 3) AI 面板
+  app.sandbox.BingliAndroid = { aiRequest() {}, aiCancel() {}, aiSettings() {}, aiStatus: () => '{"configured":false}' };
+  app.run('AI_ASSIST.open()');
+  assert.equal(app.run('AI_ASSIST.isOpen()'), true);
+  assert.equal(app.run('APP.handleBack()'), true);
+  assert.equal(app.run('AI_ASSIST.isOpen()'), false, '返回应关闭 AI 面板');
+  delete app.sandbox.BingliAndroid;
+
+  // 4) 设置页
+  app.run('APP._test.openSettings()');
+  assert.equal(app.run('APP._test.isSettingsView()'), true);
+  assert.equal(app.run('APP.handleBack()'), true);
+  assert.equal(app.run('APP._test.isSettingsView()'), false, '返回应退出设置页');
+
+  // 5) 非第一步：回上一步
+  app.run('APP._test.gotoStep("hpi")');
+  assert.equal(app.run('APP.handleBack()'), true);
+  assert.equal(app.run('APP._test.getStepKey()'), 'basic');
+
+  // 6) 第一步：不消费，交给原生退出
+  assert.equal(app.run('APP.handleBack()'), false);
 });
