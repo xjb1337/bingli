@@ -1236,3 +1236,12 @@ test('P1-16 病历列表弹窗具备对话框语义且空状态只有一个新�
   const newButtons = (wrap.innerHTML.match(/data-new/g) || []).length;
   assert.equal(newButtons, 1, '空状态只保留一个新建病历按钮');
 });
+
+test('P1-15 深色模式对比度与 focus-visible 规则不再被覆盖', () => {
+  const html = fs.readFileSync(DIST, 'utf8');
+  assert.doesNotMatch(html, /var\(--accent-soft\)/, '未定义的 accent-soft 变量必须清除');
+  const dark = html.slice(html.lastIndexOf('@media (prefers-color-scheme: dark)'));
+  assert.match(dark, /\.btn-danger:hover\s*\{\s*background:\s*var\(--red-light\)/, '深色模式危险按钮悬停应用深色变量');
+  assert.match(dark, /\.topbar \.btn-icon:active\s*\{\s*background:\s*var\(--primary-soft\)/, '深色模式图标按钮按下应用深色变量');
+  assert.doesNotMatch(html, /input:focus,\s*\r?\n\s*textarea:focus,\s*\r?\n\s*select:focus\s*\{[^}]*outline:\s*none/, '输入框 focus 不应删除 focus-visible 轮廓');
+});
