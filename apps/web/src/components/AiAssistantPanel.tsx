@@ -563,6 +563,18 @@ export function AiAssistantPanel({
               <p>可以补充更具体的原文依据，或先返回病历继续核对。</p>
             </div>
           )}
+          {result.dropped.length ? (
+            <details className="ai-dropped">
+              <summary>{result.dropped.length} 条建议因格式问题未采用</summary>
+              <ul>
+                {result.dropped.map((entry, index) => (
+                  <li key={`${entry.path}-${index}`}>
+                    {entry.path ? `${AI_LABELS[entry.path] ?? entry.path}：` : ''}{entry.reason}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ) : null}
           {result.issues.length ? (
             <div>
               <h5>待核实的问题</h5>

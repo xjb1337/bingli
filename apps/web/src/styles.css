@@ -1416,6 +1416,24 @@ textarea[aria-invalid="true"] {
   background: var(--surface);
 }
 
+.ai-dropped {
+  margin: 10px 0;
+  padding: 8px 10px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+.ai-dropped summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.ai-dropped ul {
+  margin: 6px 0 0;
+  padding-left: 20px;
+}
+
 .ai-check {
   display: flex;
   min-height: 44px;

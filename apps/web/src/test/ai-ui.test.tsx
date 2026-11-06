@@ -238,6 +238,47 @@ describe('DeepSeek web security boundary', () => {
     expect(RECORD_CORE.fieldReviewValid(adopted ?? record, 'basic.gender')).toBe(false);
   });
 
+  it('shows dropped recognition suggestions with their reasons', async () => {
+    const transport = fakeTransportFactory(async () => ({
+      content: {
+        suggestions: [
+          { path: 'pe.vitals.temperature', text: '37.8', evidence: [{ source: 'note', quote: '体温 37.8℃' }] },
+          { path: 'pe.vitals.pulse', text: '80', evidence: [] },
+        ],
+        issues: [],
+        questions: [],
+      },
+      model: 'deepseek-flash',
+    }));
+    const user = userEvent.setup();
+    const record = SCHEMA.emptyRecord();
+    record.id = 'dropped_ui_case';
+
+    render(
+      <AiAssistantPanel
+        record={record}
+        configured
+        securityContext="web"
+        model="deepseek-flash"
+        createTransport={() => transport.factory('sk-test-dropped')}
+        onOpenSettings={() => undefined}
+        onAdoptRecord={async () => true}
+        onConfirmField={async () => true}
+      />,
+    );
+
+    await user.selectOptions(screen.getByLabelText('AI 操作'), 'recognize');
+    await user.type(screen.getByLabelText(/粘贴病历文字/), '体温 37.8℃，脉搏 80 次/分');
+    await user.click(screen.getByRole('button', { name: '预览发送内容' }));
+    await user.click(screen.getByLabelText(/我已核对下方实际发送内容/));
+    await user.click(screen.getByRole('button', { name: '生成建议' }));
+    await screen.findByRole('heading', { name: '建议对照 · 尚未写入' });
+
+    expect(screen.getByText('1 条建议因格式问题未采用')).toBeInTheDocument();
+    expect(screen.getByText(/生命体征 · 脉搏/)).toBeInTheDocument();
+    expect(screen.getByText(/缺少有效原文依据/)).toBeInTheDocument();
+  });
+
   it('clears the entered key when the page component is remounted', async () => {
     const transport = fakeTransportFactory(async () => ({ content: aiContent(), model: 'deepseek-flash' }));
     const repository = createTestRepository();
