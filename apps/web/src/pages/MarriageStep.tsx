@@ -1,3 +1,4 @@
+import { AGE, type DabingliRecord } from '@dabingli/domain';
 import { Collapsible } from '../components/Collapsible';
 import { FieldRenderer } from '../components/FieldRenderer';
 import { Card, FormGrid, StepShell } from '../components/StepShell';
@@ -7,6 +8,8 @@ import { STEP_DESCRIPTIONS } from '../steps';
 
 export function MarriageStep({ record, update, errors }: StepComponentProps) {
   const isFemale = record.basic.gender === '女';
+  const isChild = (AGE as unknown as { isChild: (value: DabingliRecord) => boolean }).isChild(record);
+  const showPrepubertyHint = isFemale && isChild && !stringAt(record, 'menstruation.applicable').trim();
 
   return (
     <StepShell
@@ -81,7 +84,9 @@ export function MarriageStep({ record, update, errors }: StepComponentProps) {
                 { value: '', label: '未选' },
                 { value: '有', label: '有月经' },
                 { value: '无', label: '已绝经' },
+                { value: '未初潮', label: '未初潮' },
               ]}
+              hint={showPrepubertyHint ? '儿童可选『未初潮』' : undefined}
               error={errors['menstruation.applicable']}
             />
             <FormGrid>
