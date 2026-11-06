@@ -32,3 +32,18 @@ test('P0-7 back gesture asks the web app first, flushes, then confirms exit',()=
   assert.match(source,/public class MainActivity extends Activity/);
   assert.doesNotMatch(source,/androidx\.activity/);
 });
+
+test('P0-8 camera cache is cleared at lifecycle points and cancelled photos are deleted immediately',()=>{
+  const source=readMain();
+  assert.match(source,/private void clearCameraCache\(\)/);
+  assert.ok((source.match(/clearCameraCache\(\)/g)||[]).length>=4,
+    'clearCameraCache must be declared and called from onCreate/startImageCamera/onStop/onDestroy');
+  assert.match(source,/onStop\(\)\s*\{[^}]*chooser\s*==\s*null\s*&&\s*cameraUri\s*==\s*null[^}]*clearCameraCache\(\)/s);
+  assert.match(source,/onDestroy\(\)\s*\{[^}]*clearCameraCache\(\)/s);
+  const resultMethod=source.slice(source.indexOf('@Override protected void onActivityResult'),source.indexOf('@Override protected void onStop()'));
+  const cameraBlock=resultMethod.slice(resultMethod.indexOf('if (request == 43)'),resultMethod.indexOf('if (request == 42)'));
+  const successBranch=cameraBlock.slice(cameraBlock.indexOf('if (result == RESULT_OK)'),cameraBlock.indexOf('} else {'));
+  const cancelBranch=cameraBlock.slice(cameraBlock.indexOf('} else {'));
+  assert.match(cancelBranch,/deleteCameraPhoto\(\)/);
+  assert.doesNotMatch(successBranch,/deleteCameraPhoto\(\)|clearCameraCache\(\)/);
+});

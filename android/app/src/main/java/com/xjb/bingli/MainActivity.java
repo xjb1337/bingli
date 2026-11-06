@@ -28,6 +28,7 @@ public class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        clearCameraCache();
         aiKeys = new AIKeyStore(this);
         aiClient = new DeepSeekClient();
         root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL);
@@ -101,8 +102,7 @@ public class MainActivity extends Activity {
         try {
             File dir = new File(getCacheDir(), "camera");
             if (!dir.exists() && !dir.mkdirs()) throw new IOException("无法创建相机缓存目录");
-            File[] old = dir.listFiles();
-            if (old != null) for (File file : old) file.delete();
+            clearCameraCache();
             File photo = new File(dir, "photo-" + System.currentTimeMillis() + ".jpg");
             cameraUri = FileProvider.getUriForFile(this, getPackageName() + ".files", photo);
             Intent intent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE)
@@ -114,6 +114,22 @@ public class MainActivity extends Activity {
             cameraUri = null;
             openImageGallery();
         }
+    }
+
+    /** Deletes every cached camera photo. Patient images must not outlive the session. */
+    private void clearCameraCache() {
+        File[] old = new File(getCacheDir(), "camera").listFiles();
+        if (old != null) for (File file : old) file.delete();
+    }
+
+    /** Deletes the single cancelled camera capture; never used after a successful capture. */
+    private void deleteCameraPhoto() {
+        Uri uri = cameraUri;
+        if (uri == null) return;
+        String segment = uri.getLastPathSegment();
+        if (segment == null) return;
+        File file = new File(new File(getCacheDir(), "camera"), new File(segment).getName());
+        if (file.exists()) file.delete();
     }
 
     private WebResourceResponse assetResponse(Uri uri) {
@@ -255,9 +271,18 @@ public class MainActivity extends Activity {
         if (request == 41 && chooser != null) {
             chooser.onReceiveValue(result == RESULT_OK && data != null ? new Uri[]{data.getData()} : null); chooser=null;
         }
-        if (request == 43 && chooser != null) {
-            Uri selected = result != RESULT_OK ? null : cameraUri != null ? cameraUri : data != null ? data.getData() : null;
-            chooser.onReceiveValue(selected == null ? null : new Uri[]{selected});
+        if (request == 43) {
+            if (result == RESULT_OK) {
+                // The WebView must still be able to read the captured file here.
+                if (chooser != null) {
+                    Uri selected = cameraUri != null ? cameraUri : data != null ? data.getData() : null;
+                    chooser.onReceiveValue(selected == null ? null : new Uri[]{selected});
+                }
+            } else {
+                // User cancelled the camera: the empty file is deleted immediately.
+                if (cameraUri != null) deleteCameraPhoto();
+                if (chooser != null) chooser.onReceiveValue(null);
+            }
             chooser = null; cameraUri = null;
         }
         if (request == 42) {
@@ -278,7 +303,12 @@ public class MainActivity extends Activity {
         web.evaluateJavascript("if(typeof APP!=='undefined' && APP._test.flushPendingSave) APP._test.flushPendingSave()", null);
         super.onPause();
     }
+    @Override protected void onStop() {
+        if (chooser == null && cameraUri == null) clearCameraCache();
+        super.onStop();
+    }
     @Override protected void onDestroy() {
+        clearCameraCache();
         if (aiClient != null) aiClient.close();
         if (updater != null) updater.close();
         if (chooser != null) { chooser.onReceiveValue(null); chooser = null; }
