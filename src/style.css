@@ -1043,6 +1043,8 @@ select {
 footer {
   position: fixed;
   bottom: 0;
+  height: var(--footer-height);
+  box-sizing: border-box;
   left: 0;
   right: 0;
   background: #fff;
@@ -2126,6 +2128,8 @@ footer .btn:disabled { opacity: .6; }
 body.settings-view .stepbar,
 body.settings-view .progress,
 body.settings-view footer { display: none; }
+/* 软键盘弹出时隐藏底栏，给输入框留出可视空间（P1-13）。 */
+body.kbd-open footer { display: none; }
 /* Android 15/16 enforces edge-to-edge for targetSdk 35. The WebView still
    lays out content behind the navigation bar, so an independent settings
    page must reserve a comfortable bottom reach area even though its fixed

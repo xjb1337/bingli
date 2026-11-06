@@ -3033,6 +3033,21 @@ const APP = (() => {
       }
     });
 
+    // 软键盘弹出时隐藏固定底栏，避免遮住正在编辑的输入框（P1-13）
+    document.addEventListener('focusin', e => {
+      const t = e.target;
+      const tag = t && t.tagName ? String(t.tagName).toUpperCase() : '';
+      if (tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') return;
+      document.body.classList.add('kbd-open');
+      if (typeof t.scrollIntoView === 'function') t.scrollIntoView({ block: 'center' });
+    });
+    document.addEventListener('focusout', e => {
+      const t = e.target;
+      const tag = t && t.tagName ? String(t.tagName).toUpperCase() : '';
+      if (tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') return;
+      setTimeout(() => document.body.classList.remove('kbd-open'), 100);
+    });
+
     // 点击事件（委托）
     document.addEventListener('click', e => {
       const t = e.target.closest('[data-seg],[data-setting-seg],[data-setting-font],[data-settings-action],[data-check],[data-ros],[data-rosneg],[data-pequick],[data-pecheck],[data-pall],[data-act],[data-addhint],[data-auxdel],[data-diagdel],[data-jump],[data-dismiss-alert],[data-export-corrupt],[data-discard-corrupt],[data-view],[data-checkjump],[data-arrdel],[data-arrstrdel],[data-focusadd],[data-focusdel],[data-tpl]');

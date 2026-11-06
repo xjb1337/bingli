@@ -1206,3 +1206,23 @@ test('P1-4 性别女改男且已有孕产数据时提示核对婚育史', () => 
   clickSeg(app, 'basic.gender', '男');
   assert.match(app.el('#toast').textContent, /请核对婚育史，孕产次不适用于男性/);
 });
+
+test('P1-13 输入框聚焦时隐藏底栏并居中滚动，失焦后延迟移除', () => {
+  const app = boot();
+  const body = app.document.body;
+  let scrolled = null;
+  const target = {
+    tagName: 'INPUT',
+    scrollIntoView(opts) { scrolled = opts; }
+  };
+
+  const before = app.timeouts.length;
+  app.document._listeners.get('doc::focusin')[0]({ target });
+  assert.equal(body.classList.contains('kbd-open'), true, 'focusin 后 body 应有 kbd-open');
+  assert.equal(scrolled && scrolled.block, 'center', '应把输入框滚动到视口中央');
+
+  app.document._listeners.get('doc::focusout')[0]({ target });
+  assert.equal(body.classList.contains('kbd-open'), true, '失焦后 100ms 内仍保留，等待键盘收起');
+  app.timeouts.slice(before).forEach(fn => fn());
+  assert.equal(body.classList.contains('kbd-open'), false, '延迟回调后应移除 kbd-open');
+});
