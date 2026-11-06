@@ -125,6 +125,8 @@ function boot(opts = {}) {
   // 这两条最可能覆盖损坏存档的路径在测试里根本走不到。
   const intervals = [];
   const timeouts = [];
+  // scrollTo 调用记录：验证「标记阴性后就地刷新、不跳回顶部」
+  const scrollCalls = [];
 
   const storage = {
     getItem: k => (memory.has(k) ? memory.get(k) : null),
@@ -160,7 +162,8 @@ function boot(opts = {}) {
     setInterval: fn => { intervals.push(fn); return intervals.length; },
     clearInterval: () => {},
     requestAnimationFrame: fn => { try { fn(); } catch (e) {} return 1; },
-    scrollTo: () => {},
+    scrollTo: arg => { scrollCalls.push(arg); },
+    scrollY: 0,
     scrollIntoView: () => {},
     alert: () => {},
     navigator: {},
@@ -202,6 +205,10 @@ function boot(opts = {}) {
     confirms,
     /** 定时器回调（自动保存用），测试里手动触发 */
     intervals,
+    /** setTimeout 回调（防抖/延迟移除 class 等），测试里手动触发 */
+    timeouts,
+    /** window.scrollTo 的调用记录 */
+    scrollCalls,
     /** window 上的事件回调（beforeunload 用），测试里手动触发 */
     fireWindow: type => (document._listeners.get('win::' + type) || []).forEach(fn => fn({})),
     /** 记录 CSS 变量 --fs-scale 的最终值 */
@@ -1066,4 +1073,26 @@ test('P1-14 系统回顾三态按钮带 aria-label 并随状态更新', () => {
 
   chip = clickRos(app, 'resp', 'cough');
   assert.equal(chip.getAttribute('aria-label'), '咳嗽：未问');
+});
+
+test('P0-6 系统剩余项全部标阴性后就地刷新，不跳顶且保留阳性', () => {
+  const app = boot();
+  app.run('APP._test.gotoStep("ros")');
+  // 先让「咳嗽」走完 未问→阴性→阳性，验证已阳性项不会被 rosneg 覆盖
+  clickRos(app, 'resp', 'cough');
+  clickRos(app, 'resp', 'cough');
+  const beforeCalls = app.scrollCalls.length;
+  app.sandbox.scrollY = 640;
+
+  clickAct(app, 'rosneg', { rosneg: 'resp' });
+
+  const calls = app.scrollCalls.slice(beforeCalls);
+  assert.ok(calls.length >= 1, '应恢复滚动位置');
+  assert.equal(calls[calls.length - 1].top, 640, 'scrollY 应保持不变');
+  const group = app.document.getElementById('ros-group-resp');
+  assert.equal(group.open, true, '该系统 <details> 应保持展开');
+  assert.match(group.innerHTML, /aria-label="咳嗽：阳性"/, '已标阳性症状要保持阳性');
+  assert.match(group.innerHTML, /aria-label="咳痰：阴性"/, '其余症状应就地变为阴性');
+  assert.equal(app.run('APP.getRecord().ros.resp.cough.checked'), true);
+  assert.equal(app.run('APP.getRecord().ros.resp.sputum.negative'), true);
 });

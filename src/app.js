@@ -864,7 +864,7 @@ const APP = (() => {
             <div class="hint">${/* 旧文案「默认全部为阴性」已经不成立：没勾不等于阴性。
                   现在必须明说「不点就不写」，否则用户会以为留空也没关系（其实会写「／」）。 */ ''}
               问过且没有的症状，点一下变<b>灰</b>记为阴性；有症状的点一下变<b>红</b>记为阳性。
-              <b>没点过 = 没问 = 病历里一个字都不写。</b>已标阴性 ${totalNeg}/${totalSym} 项。</div>
+              <b>没点过 = 没问 = 病历里一个字都不写。</b>已标阴性 <span data-ros-neg-total>${totalNeg}</span>/${totalSym} 项。</div>
           </div>
           <div class="ros-count">已选阳性 <b>${totalPos}</b> 项</div>
         </div>
@@ -888,28 +888,42 @@ const APP = (() => {
     SCHEMA.ROS.forEach(sys => {
       const store = R.ros[sys.key] || {};
       const posCount = sys.symptoms.filter(s => (store[s.key] || {}).checked).length;
-      const negCount = sys.symptoms.filter(s => {
-        const v = store[s.key] || {};
-        return !v.checked && v.negative;
-      }).length;
-      const chips = sys.symptoms.map(sym => {
-        const v = store[sym.key] || {};
-        // 三态样式：阳性（红，复用既有 .chip-sym.on）、阴性（灰，行内样式）、未问（默认白）
-        // 阴性态的样式写成行内是有意的：style.css 不归本文件改，
-        // 不新造 .neg 类名，免得与其他人正在改的 CSS 撞车（撞了就是"点了没反应"的死按钮）。
-        const cls = v.checked ? ' on' : '';
-        const negStyle = (!v.checked && v.negative)
-          ? ' style="background:var(--gray-2);border-color:var(--gray-4);color:var(--gray-5);text-decoration:line-through;"'
-          : '';
-        const mark = v.checked ? ' ✓' : (v.negative ? ' −' : '');
-        const stateText = v.checked ? '阳性' : (v.negative ? '阴性' : '未问');
-        return `<button type="button" class="chip chip-sym${cls}"${negStyle} data-ros="${sys.key}" data-sym="${sym.key}" aria-label="${esc(sym.label)}：${stateText}">
-          ${esc(sym.label)}${mark}
-        </button>`;
-      }).join('');
       // 默认展开含阳性项的系统，其余收起（避免一屏全是标题）
       html += `<details class="card ros-group" id="ros-group-${sys.key}" ${posCount ? 'open' : ''}>
-        <summary>
+        ${rosGroupInnerHtml(sys)}
+      </details>`;
+    });
+    return html;
+  }
+
+  /**
+   * 单个系统回顾卡片的内部结构（不含外层 <details>）。
+   * 抽出来是为了「本系统剩余项全部标为阴性」能就地替换这一张卡片，
+   * 不触发整页 render() 导致跳回顶部、丢掉展开状态。
+   */
+  function rosGroupInnerHtml(sys) {
+    const store = R.ros[sys.key] || {};
+    const posCount = sys.symptoms.filter(s => (store[s.key] || {}).checked).length;
+    const negCount = sys.symptoms.filter(s => {
+      const v = store[s.key] || {};
+      return !v.checked && v.negative;
+    }).length;
+    const chips = sys.symptoms.map(sym => {
+      const v = store[sym.key] || {};
+      // 三态样式：阳性（红，复用既有 .chip-sym.on）、阴性（灰，行内样式）、未问（默认白）
+      // 阴性态的样式写成行内是有意的：style.css 不归本文件改，
+      // 不新造 .neg 类名，免得与其他人正在改的 CSS 撞车（撞了就是"点了没反应"的死按钮）。
+      const cls = v.checked ? ' on' : '';
+      const negStyle = (!v.checked && v.negative)
+        ? ' style="background:var(--gray-2);border-color:var(--gray-4);color:var(--gray-5);text-decoration:line-through;"'
+        : '';
+      const mark = v.checked ? ' ✓' : (v.negative ? ' −' : '');
+      const stateText = v.checked ? '阳性' : (v.negative ? '阴性' : '未问');
+      return `<button type="button" class="chip chip-sym${cls}"${negStyle} data-ros="${sys.key}" data-sym="${sym.key}" aria-label="${esc(sym.label)}：${stateText}">
+          ${esc(sym.label)}${mark}
+        </button>`;
+    }).join('');
+    return `<summary>
           <span>${esc(sys.name)}</span>
           ${posCount ? `<span class="badge-pos">${posCount}</span>` : ''}
           ${negCount ? `<span class="tag-off" data-negcount="${sys.key}">阴性 ${negCount}</span>` : ''}
@@ -918,10 +932,18 @@ const APP = (() => {
           <button class="btn btn-ghost btn-sm" data-rosneg="${sys.key}">本系统剩余项全部标为阴性</button>
         </div>
         <div class="chips">${chips}</div>
-        <div class="ros-detail" data-ros-detail="${sys.key}"></div>
-      </details>`;
-    });
-    return html;
+        <div class="ros-detail" data-ros-detail="${sys.key}"></div>`;
+  }
+
+  /** 当前已标阴性的症状总数（顶部提示用） */
+  function rosTotalNegative() {
+    return SCHEMA.ROS.reduce((n, sys) => {
+      const store = R.ros[sys.key] || {};
+      return n + sys.symptoms.filter(s => {
+        const v = store[s.key] || {};
+        return !v.checked && v.negative;
+      }).length;
+    }, 0);
   }
 
   /** 系统回顾中某系统的阳性详情输入区 */
@@ -3251,7 +3273,20 @@ const APP = (() => {
           }
         });
         saveCurrent();
-        render();
+        // 就地刷新当前系统卡片，不调 render()：
+        // render() 末尾会 window.scrollTo({top:0})，刚点完的卡片瞬间离开视野，
+        // 用户得重新滚回去；整页重绘还会重置所有 <details> 的展开状态。
+        const scrollTop = window.scrollY;
+        const group = document.getElementById('ros-group-' + ds.rosneg);
+        if (group) {
+          group.open = true;
+          group.innerHTML = rosGroupInnerHtml(sys);
+        }
+        const negTotal = document.querySelector('[data-ros-neg-total]');
+        if (negTotal) negTotal.textContent = rosTotalNegative();
+        // 添加阴性计数角标会改变卡片高度；恢复点击前的视口位置，
+        // 防止浏览器的滚动锚定把整张卡片向下推离手指所在位置。
+        window.scrollTo({ top: scrollTop, behavior: 'instant' });
         return;
       }
 
@@ -3431,7 +3466,9 @@ const APP = (() => {
           });
         });
         saveCurrent();
+        const scrollTop = window.scrollY;
         render();
+        window.scrollTo({ top: scrollTop, behavior: 'instant' });
         toast('已全部标记为阴性（病历里会逐系统写「无…」）');
         break;
       }
