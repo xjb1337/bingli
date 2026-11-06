@@ -1585,7 +1585,9 @@ const SCHEMA = (() => {
       },
       // 月经史
       menstruation: {
-        applicable: '',          // '有' / '无' / ''
+        // '有' = 有月经；'无' = 已绝经；'未初潮' = 尚未月经来潮（儿童/青春期前）；
+        // '' = 未选择。旧数据里的 true/false 迁移时仍按原来的布尔语义处理，不在此转换。
+        applicable: '',
         age: '',
         cycle: '',
         duration: '',
@@ -1602,6 +1604,7 @@ const SCHEMA = (() => {
       },
       // 生育史
       childbirth: {
+        // '有' / '无' / ''（'' = 未选择；旧数据里的 true/false 仍按原来的布尔语义处理）
         applicable: '',
         // 教材要求的四项式：「足月分娩数-早产数-流产或人流数-存活数」
         fullTerm: '',

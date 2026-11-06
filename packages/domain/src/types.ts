@@ -198,7 +198,11 @@ export interface MarriageSection {
   [key: string]: unknown;
 }
 
+/** 月经史「月经情况」的取值：有月经 / 已绝经 / 未初潮 / 未选择。 */
+export type MenstruationApplicable = '有' | '无' | '未初潮' | '';
+
 export interface MenstruationSection {
+  /** '有' = 有月经；'无' = 已绝经；'未初潮' = 尚未月经来潮；'' = 未选择。 */
   applicable: string;
   age: string;
   cycle: string;

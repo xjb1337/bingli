@@ -32,6 +32,7 @@ import type {
   VitalDefinition,
 } from './types';
 
+// 月经史取值见 types.ts 的 MenstruationApplicable：'有' | '无' | '未初潮' | ''。
 export * from './types';
 
 export interface SchemaApi {
