@@ -147,3 +147,40 @@ test('P0-4 成人阈值覆盖低体温与舒张压异常', () => {
   assert.ok(!normal.includes('P 88'), `成人 P88 不应列入异常：${normal}`);
   assert.ok(!normal.includes('BP 120'), `成人 BP120/80 不应列入异常：${normal}`);
 });
+
+test('P1-1 ageWithUnit 对无法解析的年龄原样返回', () => {
+  const { GENERATOR } = bootGlobals();
+  assert.equal(GENERATOR.ageWithUnit({ age: 'abc' }), 'abc');
+  assert.equal(GENERATOR.ageWithUnit({ age: '-3' }), '-3');
+  assert.equal(GENERATOR.ageWithUnit({ age: '45' }), '45岁');
+  assert.equal(GENERATOR.ageWithUnit({ age: '1岁3个月' }), '1岁3个月');
+  assert.equal(GENERATOR.ageWithUnit({ age: '14日龄' }), '14日龄');
+});
+
+test('P1-1 subjectOf 对无效年龄按患者称呼', () => {
+  const { GENERATOR } = bootGlobals();
+  assert.equal(GENERATOR.subjectOf({ age: '-3' }), '患者');
+  assert.equal(GENERATOR.subjectOf({ age: 'abc' }), '患者');
+  assert.equal(GENERATOR.subjectOf({ age: '45' }), '患者');
+  assert.equal(GENERATOR.subjectOf({ age: '3' }), '患儿');
+});
+
+test('P1-1 validate 校验年龄文本并结构化登记 AGE_INVALID', () => {
+  const { SCHEMA, GENERATOR } = bootGlobals();
+  for (const age of ['-3', 'abc', '200']) {
+    const record = SCHEMA.emptyRecord();
+    record.basic.name = '测试患者';
+    record.basic.gender = '男';
+    record.basic.age = age;
+    const messages = GENERATOR.validate(record);
+    assert.ok(messages.includes(`【一般项目】年龄「${age}」无法识别或不合理，请核对。`), `${age} 应提示年龄不合理：${messages.join(' | ')}`);
+    const hit = GENERATOR.validateStructured(record).find(item => item.code === 'AGE_INVALID');
+    assert.ok(hit, `${age} 应结构化登记 AGE_INVALID`);
+    assert.equal(hit.severity, 'warning');
+  }
+  const ok = SCHEMA.emptyRecord();
+  ok.basic.name = '测试患者';
+  ok.basic.gender = '男';
+  ok.basic.age = '45';
+  assert.equal(GENERATOR.validate(ok).filter(message => message.includes('无法识别或不合理')).length, 0);
+});

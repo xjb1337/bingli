@@ -265,6 +265,11 @@ const GENERATOR = (() => {
     }
     const raw = stripTail(basic.age);
     if (!raw) return '';
+    // 解析失败时原样返回：宁可显示「abc」，也不能显示「abc岁」。
+    if (typeof AGE !== 'undefined' && AGE && typeof AGE.parseAge === 'function') {
+      const parsed = AGE.parseAge(raw);
+      if (!parsed.ok) return raw;
+    }
     // 「日龄」必须单独认：14日龄 只匹配到「日」也可，但「日龄岁」这种输出
     // 是把 14日龄 当成 14 岁又补了一个单位。日、天、周、月、时都算已有单位。
     return /[岁月天周时日]/.test(raw) ? raw : raw + '岁';
@@ -319,8 +324,23 @@ const GENERATOR = (() => {
    * @param {object} basic record.basic
    * @returns {string} '患儿' 或 '患者'
    */
-  function subjectOf(basic) {
-    return ageYears(basic) < 14 ? '患儿' : '患者';
+  function subjectOf(input) {
+    const rec = asRecord(input);
+    const basic = rec ? rec.basic : (input || {});
+    if (typeof AGE !== 'undefined' && AGE) {
+      if (rec && typeof AGE.resolveAge === 'function') {
+        const info = AGE.resolveAge(rec);
+        if (!info.ok) return '患者';
+        return info.years < 14 ? '患儿' : '患者';
+      }
+      const raw = stripTail(basic.age);
+      if (!raw) return '患者';
+      const parsed = typeof AGE.parseAge === 'function' ? AGE.parseAge(raw) : null;
+      if (!parsed || !parsed.ok) return '患者';
+      return parsed.years < 14 ? '患儿' : '患者';
+    }
+    const years = ageYears(input);
+    return Number.isFinite(years) && years >= 0 && years < 14 ? '患儿' : '患者';
   }
 
   /**
@@ -3707,6 +3727,15 @@ const GENERATOR = (() => {
     if (!b.name) w.push('【一般项目】缺少姓名。');
     if (!b.gender) w.push('【一般项目】缺少性别。');
     if (!b.age) w.push('【一般项目】缺少年龄。');
+    else if (!stripTail(b.birthDate) && typeof AGE !== 'undefined' && AGE && typeof AGE.parseAge === 'function') {
+      // 有出生日期时年龄可由日期推算，交给年龄-出生日期一致性检查；
+      // 只有手填年龄、没有出生日期时才直接判定文本本身是否可信。
+      const ageText = stripTail(b.age);
+      const parsed = AGE.parseAge(ageText);
+      if (!parsed.ok || parsed.years < 0 || parsed.years > 130) {
+        w.push(`【一般项目】年龄「${ageText}」无法识别或不合理，请核对。`);
+      }
+    }
     const sideHits = sidePlaceholderHits(r);
     if (sideHits.length) w.push(sidePlaceholderMessage(sideHits));
     // 月经史：'无' 表示已绝经。女童（<14 岁）不可能已绝经，只提示、不替用户改。
@@ -3835,6 +3864,7 @@ const GENERATOR = (() => {
     [/缺少姓名/, 'NAME_MISSING', 'record', ['basic.name'], 'error', '填写姓名'],
     [/缺少性别/, 'GENDER_MISSING', 'record', ['basic.gender'], 'error', '选择性别'],
     [/缺少年龄/, 'AGE_MISSING', 'record', ['basic.age', 'basic.birthDate'], 'error', '填写年龄或出生日期'],
+    [/【一般项目】年龄「.*」无法识别或不合理/, 'AGE_INVALID', 'record', ['basic.age'], 'warning', '核对年龄'],
     [/年龄写「.*」.*出生日期.*不一致/, 'AGE_BIRTHDATE_MISMATCH', 'record', ['basic.age', 'basic.birthDate', 'basic.admitDate'], 'warning', '核对年龄与出生日期'],
     [/【主诉】未填写/, 'CHIEF_COMPLAINT_MISSING', 'record', ['basic.chiefComplaint'], 'error', '填写主诉'],
     [/【主诉】文字偏长/, 'CHIEF_COMPLAINT_TOO_LONG', 'record', ['basic.chiefComplaint'], 'warning', '压缩到 20 字以内'],
