@@ -254,6 +254,7 @@ export function redactText(text: unknown, record: DabingliRecord): string {
     output = output.split(value).join('[已隐去]');
   });
   return output
+    .replace(/(患者姓名|姓名|病历号|住院号|门诊号|床号|ID号|身份证号?)\s*[:：]\s*[^\s，。；,;]+/g, '$1：[已隐去]')
     .replace(/(?<!\d)\d{17}[\dXx](?!\d)/g, '[身份证已隐去]')
     .replace(/(?<!\d)1[3-9]\d{9}(?!\d)/g, '[电话已隐去]');
 }

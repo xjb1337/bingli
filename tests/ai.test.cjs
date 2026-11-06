@@ -12,6 +12,14 @@ test('AI：已知身份及常见电话身份证不进入发送内容，病例标
   for (const privateText of ['张三', '测试路99号', 'ABC12345', '13812345678', '110101199001010011', r.id]) assert.ok(!q.user.includes(privateText));
   assert.equal(q.caseId, r.id);
 });
+test('AI：按标签直接隐去姓名、病历号、住院号、床号等值', () => {
+  const q = request(record(), '姓名：张三 住院号：12345 床号：8，咳嗽3天');
+  for (const privateText of ['张三', '12345', '床号：8']) assert.ok(!q.user.includes(privateText));
+  assert.match(q.user, /姓名：\[已隐去\]/);
+  assert.match(q.user, /住院号：\[已隐去\]/);
+  assert.match(q.user, /床号：\[已隐去\]/);
+  assert.match(q.user, /咳嗽3天/);
+});
 test('AI：空白笔记与空白病历拒绝请求，不用默认正常资料凑数', () => {
   assert.throws(() => request(record(), ''), /先输入/);
   assert.throws(() => AI.prepare('summary', record()), /尚无/);

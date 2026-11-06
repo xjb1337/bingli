@@ -39,7 +39,8 @@ const AI_CORE = (() => {
     const ids = ['name', 'phone', 'address', 'workUnit', 'recordNo', 'bedNo', 'nativePlace', 'birthPlace'];
     ids.map(k => String(b[k] || '').trim()).filter(v => v.length >= 2)
       .sort((a, b) => b.length - a.length).forEach(v => { out = out.split(v).join('[已隐去]'); });
-    return out.replace(/(?<!\d)\d{17}[\dXx](?!\d)/g, '[身份证已隐去]')
+    return out.replace(/(患者姓名|姓名|病历号|住院号|门诊号|床号|ID号|身份证号?)\s*[:：]\s*[^\s，。；,;]+/g, '$1：[已隐去]')
+      .replace(/(?<!\d)\d{17}[\dXx](?!\d)/g, '[身份证已隐去]')
       .replace(/(?<!\d)1[3-9]\d{9}(?!\d)/g, '[电话已隐去]');
   }
   function uniq(values) {

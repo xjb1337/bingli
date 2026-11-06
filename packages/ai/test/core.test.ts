@@ -53,6 +53,16 @@ describe('AI request boundary', () => {
     expect(request.baseline.contentHash).toMatch(/^[0-9a-f]{8}$/);
   });
 
+  it('redacts labelled identifiers and leaves clinical text untouched', () => {
+    const request = organizeRequest(makeRecord(), '姓名：张三 住院号：12345 床号：8，咳嗽3天');
+    expect(request.user).not.toContain('张三');
+    expect(request.user).not.toContain('12345');
+    expect(request.user).toContain('姓名：[已隐去]');
+    expect(request.user).toContain('住院号：[已隐去]');
+    expect(request.user).toContain('床号：[已隐去]');
+    expect(request.user).toContain('咳嗽3天');
+  });
+
   it('excludes unreviewed template, default, example and prior AI content', () => {
     const record = makeRecord();
     record.hpi.symptoms = '咳嗽3天';
