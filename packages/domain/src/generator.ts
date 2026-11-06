@@ -1160,8 +1160,21 @@ const GENERATOR = (() => {
     const m = r.menstruation || {};
     const b = r.basic || {};
     if (b.gender !== '女') return '';
+    if (m.applicable === '未初潮') {
+      const extra = stripTail(m.extra);
+      return extra ? `月经史：未初潮，${extra}。` : '月经史：未初潮。';
+    }
     if (m.applicable === '无') {
-      return /绝经|停经/.test(m.extra || '') ? `${stripTail(m.extra)}。` : '已绝经。';
+      const parts = [];
+      if (m.age) parts.push(`初潮${m.age}岁`);
+      if (m.menopauseAge) parts.push(`${m.menopauseAge}岁绝经`);
+      if (m.lmp) parts.push(`末次月经${m.lmp}`);
+      const extra = stripTail(m.extra);
+      if (extra) parts.push(extra);
+      if (!parts.length) return '已绝经。';
+      // 旧数据把「50岁绝经」直接写在 extra 里：只有这一项时保持旧输出形态。
+      if (!m.age && !m.menopauseAge && !m.lmp && /绝经|停经/.test(extra)) return `${extra}。`;
+      return '月经史：' + parts.join('，') + '。';
     }
     const parts = [];
     if (m.age) parts.push(`初潮${m.age}岁`);
@@ -3649,6 +3662,14 @@ const GENERATOR = (() => {
     if (!b.age) w.push('【一般项目】缺少年龄。');
     const sideHits = sidePlaceholderHits(r);
     if (sideHits.length) w.push(sidePlaceholderMessage(sideHits));
+    // 月经史：'无' 表示已绝经。女童（<14 岁）不可能已绝经，只提示、不替用户改。
+    if (typeof AGE !== 'undefined' && (r.menstruation || {}).applicable === '无') {
+      const ageInfo = AGE.resolveAge(r);
+      if (ageInfo && ageInfo.ok && Number.isFinite(ageInfo.years) && ageInfo.years < 14) {
+        const ageText = ageWithUnit(r) || `${Math.round(ageInfo.years * 10) / 10}岁`;
+        w.push(`【月经史】患儿 ${ageText}却写「已绝经」，请核对。`);
+      }
+    }
     const cc = stripTail(b.chiefComplaint);
     if (!cc) {
       w.push('【主诉】未填写。');
@@ -3776,6 +3797,7 @@ const GENERATOR = (() => {
     [/【系统回顾】尚未问诊/, 'ROS_UNTOUCHED', 'record', ['ros'], 'info', '逐系统问诊'],
     [/【婚姻史】未填写/, 'MARITAL_MISSING', 'record', ['basic.marital', 'marriage.status'], 'warning', '填写婚姻状态'],
     [/【婚姻史】.*两处不一致/, 'MARITAL_CONFLICT', 'record', ['basic.marital', 'marriage.status'], 'warning', '选择以哪个为准'],
+    [/【月经史】.*已绝经/, 'MENSTRUATION_CHILD_MENOPAUSE', 'record', ['menstruation.applicable', 'basic.age'], 'warning', '核对月经史'],
     [/【个人史】未填写/, 'PERSONAL_MISSING', 'record', ['personal'], 'warning', '补个人史'],
     [/【既往史】过敏史.*具体过敏原/, 'ALLERGY_CONFLICT', 'record', ['pmh.allergy', 'pmh.allergenChecks'], 'warning', '核对过敏史'],
     [/【个人史】吸烟/, 'SMOKING_CONFLICT', 'record', ['personal.smoking', 'personal.smokingAmount'], 'warning', '核对吸烟状态与数量'],
