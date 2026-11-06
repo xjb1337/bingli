@@ -102,6 +102,34 @@ describe('WebFetchTransport', () => {
     ]);
   });
 
+  it('forces deepseek-flash for image requests even when Pro is configured', async () => {
+    const fetchImpl = vi.fn(async () => response(200, successBody())) as unknown as typeof fetch;
+    const transport = new WebFetchTransport({
+      apiKey: 'sk-test-image',
+      model: 'deepseek-v4-pro',
+      fetchImpl,
+    });
+    const result = await transport.request({ ...request, image });
+    const init = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as RequestInit;
+    const body = JSON.parse(String(init.body)) as { model: string };
+    expect(body.model).toBe('deepseek-flash');
+    expect(result.model).toBe('deepseek-flash');
+  });
+
+  it('keeps the saved Pro model for requests without an image', async () => {
+    const fetchImpl = vi.fn(async () => response(200, successBody())) as unknown as typeof fetch;
+    const transport = new WebFetchTransport({
+      apiKey: 'sk-test-text',
+      model: 'deepseek-v4-pro',
+      fetchImpl,
+    });
+    await transport.request(request);
+    const init = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as RequestInit;
+    const body = JSON.parse(String(init.body)) as { model: string };
+    expect(body.model).toBe('deepseek-v4-pro');
+    await expect(transport.status()).resolves.toEqual({ configured: true, model: 'deepseek-v4-pro' });
+  });
+
   it('rejects an invalid image before making a network request', async () => {
     const fetchImpl = vi.fn() as unknown as typeof fetch;
     const transport = new WebFetchTransport({ apiKey: 'sk-test-image', fetchImpl });

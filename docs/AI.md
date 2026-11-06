@@ -17,6 +17,7 @@
 - 密钥由 `AIKeyStore` 使用 Android Keystore 的 AES/GCM 加密保存，只留在原生进程。
 - 网页通过 `BingliAndroid.aiStatus()` 只能拿到 `{configured, model}`，没有任何返回密钥的方法。
 - `AndroidBridgeTransport` 调用现有 `aiRequest(id, {system,user,image?})` / `aiCancel(id)` 桥接方法；请求 payload 不包含密钥。图片只传 MIME 与 base64，由原生 `DeepSeekClient` 组装成 DeepSeek 多模态 content parts。
+- 含图片的识别请求固定使用 `deepseek-flash`（`deepseek-v4-pro` 不支持图像理解），只影响本次请求，不修改已保存的模型设置。
 - 设置页在 Android 环境中隐藏网页密钥输入框，只提供原生设置入口、配置状态和模型名。
 - `DeepSeekClient` 固定请求 `https://api.deepseek.com/chat/completions`，不跟随重定向，并只把最终 JSON 内容交给网页。
 

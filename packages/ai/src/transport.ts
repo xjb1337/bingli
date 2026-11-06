@@ -151,6 +151,8 @@ export class WebFetchTransport implements AiTransport {
     }, options.timeoutMs ?? this.timeoutMs);
 
     try {
+      // DeepSeek 只有 Flash 支持图像理解；含图片时本次请求固定走 Flash，不修改已保存的模型设置。
+      const requestModel = request.image ? DEFAULT_DEEPSEEK_MODEL : this.model;
       const response = await this.fetchImpl(this.endpoint, {
         method: 'POST',
         headers: {
@@ -158,7 +160,7 @@ export class WebFetchTransport implements AiTransport {
           'Content-Type': 'application/json; charset=utf-8',
         },
         body: JSON.stringify({
-          model: this.model,
+          model: requestModel,
           stream: false,
           max_tokens: 4096,
           thinking: { type: 'disabled' },
@@ -175,7 +177,7 @@ export class WebFetchTransport implements AiTransport {
       });
       if (!response.ok) throw mapHttpStatus(response.status);
       const text = await response.text();
-      return parseDeepSeekResponse(text, this.model);
+      return parseDeepSeekResponse(text, requestModel);
     } catch (error) {
       if (error instanceof AiError) throw error;
       if (timedOut) throw aiError('timeout');

@@ -161,7 +161,7 @@ const AI_ASSIST = (() => {
     renderRecognizeImage(); pendingFields(); refreshModel(); $('aiClose').focus();
   }
   function refreshModel() {
-    try { const s = JSON.parse(bridge().aiStatus()); model = s.model || ''; $('aiModel').textContent = s.configured ? model : '尚未设置 API Key'; $('aiOnboarding').hidden = !!s.configured; return s.configured; }
+    try { const s = JSON.parse(bridge().aiStatus()); model = s.model || ''; $('aiModel').textContent = s.configured ? model + '（图片识别固定使用 Flash，Pro 不支持图片）' : '尚未设置 API Key'; $('aiOnboarding').hidden = !!s.configured; return s.configured; }
     catch (e) { status('无法读取 AI 设置'); return false; }
   }
   function prepare() {

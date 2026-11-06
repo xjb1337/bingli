@@ -19,7 +19,7 @@ APK 只在人工触发并经过 `release` 环境审批后由 GitHub Actions 构�
 
 ## DeepSeek 辅助填写
 
-从 App 底部进入 **AI 助手 → API 设置 / 测试连接**，输入自己的 DeepSeek API Key。默认 Flash，可切换 Pro。仅支持官方服务 `https://api.deepseek.com`；没有共享或内置密钥。
+从 App 底部进入 **AI 助手 → API 设置 / 测试连接**，输入自己的 DeepSeek API Key。默认 Flash，可切换 Pro；含图片的识别请求固定使用 Flash（Pro 不支持图片），不会修改已保存的模型设置。仅支持官方服务 `https://api.deepseek.com`；没有共享或内置密钥。
 
 五项功能：整理问诊笔记填入文本字段、润色选中段落、检查矛盾与补问、生成摘要草稿、识别病历图片/文字并填表。识别支持拍照、相册和粘贴文字；图片在发送前缩到最长边约 1600 像素的 JPEG，格式支持 JPEG/PNG/GIF/WebP。图片中的姓名、病历号等身份信息无法自动脱敏，必须查看缩略图和预览后单独确认发送。
 
