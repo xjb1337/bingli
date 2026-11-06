@@ -860,6 +860,12 @@ function clickAct(app, act, extra = {}) {
   app.document._listeners.get('doc::click')[0]({ target });
 }
 
+/** 点一个 segmented 选项。 */
+function clickSeg(app, path, val) {
+  const target = { dataset: { seg: path, val }, closest() { return this; } };
+  app.document._listeners.get('doc::click')[0]({ target });
+}
+
 test('生成摘要后改现病史，界面显示需更新并给出最新草稿', () => {
   const app = boot();
   app.run('const r = APP.getRecord(); r.basic.name = "张三"; r.basic.gender = "男"; r.basic.age = "58"; r.hpi.symptoms = "咳嗽3天"; APP._test.gotoStep("summary")');
@@ -999,4 +1005,27 @@ test('SOAP basis refresh uses current facts instead of saved basis details', () 
   assert.match(text, /新诊断/);
   assert.match(text, /新病史/);
   assert.doesNotMatch(text, /旧诊断|旧依据|旧概述/);
+});
+
+/* ======================= v3.0.0.10 审查修复（Android UI） ======================= */
+
+test('P0-3 月经史提供「未初潮」选项，儿童不自动替选', () => {
+  const app = boot();
+  app.run('const r = APP.getRecord(); r.basic.gender = "女"; r.basic.age = "3岁"; APP._test.gotoStep("marriage")');
+  let html = app.document.querySelector('#content').innerHTML;
+  assert.match(html, /data-seg="menstruation\.applicable" data-val="未初潮"/);
+  assert.match(html, /儿童可选「未初潮」/, '儿童应看到提示');
+  assert.equal(app.run('APP.getRecord().menstruation.applicable'), '', '不能自动替用户选');
+
+  clickSeg(app, 'menstruation.applicable', '未初潮');
+  assert.equal(app.run('APP.getRecord().menstruation.applicable'), '未初潮');
+  const text = app.run('GENERATOR.generate(APP.getRecord()).text');
+  assert.match(text, /月经史：未初潮/);
+});
+
+test('P0-3 成人月经史不显示儿童提示', () => {
+  const app = boot();
+  app.run('const r = APP.getRecord(); r.basic.gender = "女"; r.basic.age = "32岁"; APP._test.gotoStep("marriage")');
+  const html = app.document.querySelector('#content').innerHTML;
+  assert.doesNotMatch(html, /儿童可选「未初潮」/);
 });

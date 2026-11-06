@@ -1140,8 +1140,14 @@ const APP = (() => {
       <div class="card">
         <div class="card-title">月经史</div>
         ${seg('月经情况', 'menstruation.applicable', [
-          { value: '', text: '未选' }, { value: '有', text: '有月经' }, { value: '无', text: '已绝经' }
+          { value: '', text: '未选' }, { value: '有', text: '有月经' },
+          { value: '未初潮', text: '未初潮' }, { value: '无', text: '已绝经' }
         ])}
+        ${/* 儿童（<14 岁）不可能已绝经。只提示「未初潮」这个选项存在，不替用户选：
+              是否已经初潮是事实，工具不能凭空写。 */ ''}
+        ${AGE.isChild(R) && !getPath(R, 'menstruation.applicable')
+          ? '<div class="hint" data-child-menstruation-hint>儿童可选「未初潮」</div>'
+          : ''}
         ${textarea('月经史描述', 'menstruation.extra', {
           rows: 2,
           placeholder: '如：14岁初潮，周期28-30天，经期5天，经量中等，无痛经，末次月经2026-09-28',
