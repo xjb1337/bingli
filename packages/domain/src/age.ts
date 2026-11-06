@@ -94,7 +94,7 @@ const AGE = (() => {
       return {
         ok: true, kind: extraMonths ? 'ym' : 'years', value: years,
         years, months: y * 12 + extraMonths, days: Math.round(years * 365.2425),
-        totalDays: Math.round(years * 365.2425), text: formatAge({ years }), raw, reason: ''
+        totalDays: Math.round(years * 365.2425), text: formatAge({ years: y, months: y * 12 + extraMonths }), raw, reason: ''
       };
     }
 
@@ -154,7 +154,7 @@ const AGE = (() => {
    * 统一展示口径：
    *   < 30 天 → 「X日龄」
    *   < 12 月 → 「X月龄」
-   *   其余    → 「X岁」
+   *   其余    → 「X岁」；有零头月份时用儿科习惯写法「X岁X个月」，不写成小数岁
    * 这样列表页/生成器再拼单位也不会出现「14日龄岁」。
    */
   function formatAge(parts) {
@@ -164,7 +164,18 @@ const AGE = (() => {
     const years = Number(p.years);
     if (Number.isFinite(days) && days >= 0 && days < 30) return `${Math.round(days)}日龄`;
     if (Number.isFinite(months) && months >= 0 && months < 12) return `${Math.round(months)}月龄`;
-    if (Number.isFinite(years) && years >= 0) return `${trimNumber(years)}岁`;
+    if (Number.isFinite(years) && years >= 0) {
+      const totalMonths = (Number.isFinite(months) && months >= 0) ? months : years * 12;
+      let wholeYears = Math.floor(totalMonths / 12 + 1e-9);
+      let extraMonths = Math.round(totalMonths - wholeYears * 12);
+      if (extraMonths >= 12) {
+        wholeYears += 1;
+        extraMonths -= 12;
+      }
+      if (wholeYears >= 1 && extraMonths > 0) return `${wholeYears}岁${extraMonths}个月`;
+      if (wholeYears === 0 && extraMonths > 0) return `${extraMonths}月龄`;
+      return `${trimNumber(years)}岁`;
+    }
     if (Number.isFinite(months) && months >= 0) return `${Math.round(months)}月龄`;
     if (Number.isFinite(days) && days >= 0) return `${Math.round(days)}日龄`;
     return '';
