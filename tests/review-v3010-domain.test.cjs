@@ -199,3 +199,30 @@ test('P1-2 admissionPid 不把内部记录 id 当住院号', () => {
   record.basic.recordNo = 'ZY-0001';
   assert.ok(GENERATOR.generate(record).text.includes('PID：ZY-0001'));
 });
+
+test('P1-3 过敏原手写文本先去尾标点再拼「过敏」', () => {
+  const { SCHEMA, GENERATOR } = bootGlobals();
+  const record = SCHEMA.emptyRecord();
+  record.basic.name = '测试患者';
+  record.basic.gender = '男';
+  record.basic.age = '45';
+  record.pmh.allergy = '有';
+  record.pmh.allergenOther = '青霉素。';
+  const text = GENERATOR.generate(record).text;
+  assert.ok(text.includes('过敏史：青霉素过敏'), `应拼成青霉素过敏：${text}`);
+  assert.ok(!text.includes('青霉素。过敏'), '不应出现「青霉素。过敏」');
+});
+
+test('P1-3 系统回顾详情先去尾标点再拼逗号', () => {
+  const { SCHEMA, GENERATOR } = bootGlobals();
+  const record = SCHEMA.emptyRecord();
+  record.basic.name = '测试患者';
+  record.basic.gender = '男';
+  record.basic.age = '45';
+  record.ros.resp = record.ros.resp || {};
+  record.ros.resp.fever = { checked: true, time: '3天', detail: '最高39℃，' };
+  const text = GENERATOR.generate(record).text;
+  assert.ok(text.includes('发热3天，最高39℃'), `应拼成「发热3天，最高39℃」：${text}`);
+  assert.ok(!text.includes('，；'), '不应出现「，；」');
+  assert.ok(!text.includes('。，'), '不应出现「。，」');
+});

@@ -768,8 +768,8 @@ const GENERATOR = (() => {
         if (state === 'asked_positive') {
           asked = true;
           let s = sym.label;
-          if (v.time) s += v.time;
-          if (v.detail) s += '，' + v.detail;
+          if (v.time) s += stripTail(v.time);
+          if (stripTail(v.detail)) s += '，' + stripTail(v.detail);
           positives.push(s);
           entries.push({ symptomKey: sym.key, label: sym.label, text: s, state, path });
         } else if (state === 'asked_negative') {
@@ -911,7 +911,8 @@ const GENERATOR = (() => {
     //    未选 → 「／」，不许替学生否认。
     if (p.allergy === '有') {
       const allergens = Object.keys(p.allergenChecks || {}).filter(k => p.allergenChecks[k] && k !== '其他');
-      if (p.allergenOther) allergens.push(p.allergenOther);
+      const allergenOther = stripTail(p.allergenOther);
+      if (allergenOther) allergens.push(allergenOther);
       let s = allergens.length ? `${joinList(allergens)}过敏` : '有药物或食物过敏史';
       const reactions = Object.keys(p.allergenReactionChecks || {})
         .filter(k => p.allergenReactionChecks[k] && k !== '其他');
