@@ -59,7 +59,24 @@ export function GeneratedDocuments({
   );
   const firstInvalid = warnings.find((warning) => warning.severity === 'error') ?? warnings[0];
 
+  function sidePlaceholderCount(warning: DocumentWarning): number {
+    const evidenceCount = warning.evidence?.length ?? 0;
+    const pathCount = warning.paths?.length ?? 0;
+    const messageCount = Number(warning.message.match(/仍有\s*(\d+)\s*处/)?.[1] ?? 0);
+    return evidenceCount || pathCount || messageCount;
+  }
+
+  function confirmSidePlaceholders(): boolean {
+    const warning = warnings.find(
+      (item) => item.code === 'SIDE_PLACEHOLDER_UNFILLED' && item.severity === 'error',
+    );
+    if (!warning) return true;
+    const count = sidePlaceholderCount(warning);
+    return window.confirm(`病历里还有 ${count} 处（患侧/对侧/健侧）没改，确定要复制/下载吗？`);
+  }
+
   async function copy(text: string, title: string) {
+    if (!confirmSidePlaceholders()) return;
     try {
       if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(text);
@@ -80,6 +97,7 @@ export function GeneratedDocuments({
   }
 
   function download(text: string, title: string) {
+    if (!confirmSidePlaceholders()) return;
     const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
