@@ -15,6 +15,24 @@ function response(status: number, body = ''): Response {
   } as Response;
 }
 
+function streamResponse(chunks: Uint8Array[], onCancel = () => undefined): Response {
+  let index = 0;
+  return {
+    ok: true,
+    status: 200,
+    body: {
+      getReader: () => ({
+        read: async () => (index < chunks.length
+          ? { done: false, value: chunks[index++] }
+          : { done: true, value: undefined }),
+        cancel: async () => { onCancel(); },
+        releaseLock: () => undefined,
+      }),
+    },
+    text: async () => { throw new Error('stream body must not be buffered with text()'); },
+  } as unknown as Response;
+}
+
 function successBody(text = '患者诉咳嗽3天。'): string {
   return JSON.stringify({
     model: 'deepseek-flash',
@@ -174,6 +192,40 @@ describe('WebFetchTransport', () => {
       });
     }
     expect(AI_ERROR_MESSAGES.content_filtered).toBe('内容被服务端安全策略拦截');
+  });
+
+  it('reads a streamed response body and parses the assembled text', async () => {
+    const encoder = new TextEncoder();
+    const body = successBody();
+    const chunks = [
+      encoder.encode(body.slice(0, 40)),
+      encoder.encode(body.slice(40, 120)),
+      encoder.encode(body.slice(120)),
+    ];
+    const transport = new WebFetchTransport({
+      apiKey: 'sk-test-stream',
+      fetchImpl: (async () => streamResponse(chunks)) as unknown as typeof fetch,
+    });
+    const result = await transport.request(request);
+    expect(result.model).toBe('deepseek-flash');
+    expect(result.content).toMatchObject({ suggestions: [{ path: 'hpi.symptoms' }] });
+  });
+
+  it('cancels a streamed response as soon as it exceeds 256KiB', async () => {
+    const encoder = new TextEncoder();
+    const cancel = vi.fn();
+    const transport = new WebFetchTransport({
+      apiKey: 'sk-test-stream-limit',
+      fetchImpl: (async () => streamResponse([
+        encoder.encode('x'.repeat(128 * 1024)),
+        encoder.encode('x'.repeat(128 * 1024 + 1)),
+      ], cancel)) as unknown as typeof fetch,
+    });
+    await expect(transport.request(request)).rejects.toMatchObject({
+      code: 'invalid_response',
+      message: 'AI 返回内容过大，未写入病历',
+    });
+    expect(cancel).toHaveBeenCalledTimes(1);
   });
 
   it('rejects an invalid image before making a network request', async () => {

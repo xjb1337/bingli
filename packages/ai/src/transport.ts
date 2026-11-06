@@ -59,6 +59,45 @@ function responseSize(text: string): number {
   return new TextEncoder().encode(text).byteLength;
 }
 
+/** Read the response body incrementally and stop as soon as it exceeds the limit. */
+async function readResponseText(response: Response, maxBytes: number): Promise<string> {
+  const declared = Number(response.headers?.get('content-length') ?? '');
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    await response.body?.cancel().catch(() => undefined);
+    throw aiError('invalid_response', 'AI 返回内容过大，未写入病历');
+  }
+  if (!response.body) {
+    const text = await response.text();
+    if (responseSize(text) > maxBytes) throw aiError('invalid_response', 'AI 返回内容过大，未写入病历');
+    return text;
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let total = 0;
+  let text = '';
+  try {
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      if (!chunk.value) continue;
+      total += chunk.value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        throw aiError('invalid_response', 'AI 返回内容过大，未写入病历');
+      }
+      text += decoder.decode(chunk.value, { stream: true });
+    }
+    text += decoder.decode();
+    return text;
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch {
+      // The reader may already be closed after cancellation.
+    }
+  }
+}
+
 /** DeepSeek multimodal content: a plain string without an image, parts with one. */
 export function buildDeepSeekContent(
   request: AiTransportRequest,
@@ -189,7 +228,7 @@ export class WebFetchTransport implements AiTransport {
         signal: controller.signal,
       });
       if (!response.ok) throw mapHttpStatus(response.status);
-      const text = await response.text();
+      const text = await readResponseText(response, MAX_RESPONSE_BYTES);
       return parseDeepSeekResponse(text, requestModel);
     } catch (error) {
       if (error instanceof AiError) throw error;
