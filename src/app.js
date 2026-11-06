@@ -3948,9 +3948,9 @@ const APP = (() => {
     const wrap = document.createElement('div');
     wrap.className = 'modal-mask';
     wrap.innerHTML = `
-      <div class="modal list-modal">
+      <div class="modal list-modal" role="dialog" aria-modal="true" aria-labelledby="listTitle">
         <div class="modal-head">
-          <div><span class="modal-eyebrow">本机存储</span><div class="modal-title">我的病历 <span class="modal-count">${LIST.length}</span></div></div>
+          <div><span class="modal-eyebrow">本机存储</span><div class="modal-title" id="listTitle">我的病历 <span class="modal-count">${LIST.length}</span></div></div>
           <button type="button" class="modal-close" data-close aria-label="关闭病历列表">关闭</button>
         </div>
         ${alertHtml}
@@ -3958,7 +3958,6 @@ const APP = (() => {
           <span class="empty-state-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M9 11h7M9 15h5M14 3v5h5"/></svg></span>
           <strong>还没有保存的病历</strong>
           <p>先整理当前患者资料，保存后就会出现在这里。</p>
-          <button type="button" class="btn" data-new>新建第一份病历</button>
         </div>`}</div>
         <div class="btn-row">
           <button class="btn" data-new>新建病历</button>

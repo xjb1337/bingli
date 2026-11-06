@@ -1226,3 +1226,13 @@ test('P1-13 输入框聚焦时隐藏底栏并居中滚动，失焦后延迟移�
   app.timeouts.slice(before).forEach(fn => fn());
   assert.equal(body.classList.contains('kbd-open'), false, '延迟回调后应移除 kbd-open');
 });
+
+test('P1-16 病历列表弹窗具备对话框语义且空状态只有一个新建按钮', () => {
+  const app = boot();
+  app.run('APP._test.openList()');
+  const wrap = app.document.body.children[app.document.body.children.length - 1];
+  assert.match(wrap.innerHTML, /class="modal list-modal" role="dialog" aria-modal="true" aria-labelledby="listTitle"/);
+  assert.match(wrap.innerHTML, /id="listTitle"/);
+  const newButtons = (wrap.innerHTML.match(/data-new/g) || []).length;
+  assert.equal(newButtons, 1, '空状态只保留一个新建病历按钮');
+});
