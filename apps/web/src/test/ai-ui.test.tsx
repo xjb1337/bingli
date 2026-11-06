@@ -176,8 +176,8 @@ describe('DeepSeek web security boundary', () => {
     const requestSpy = vi.fn(async (_request: Parameters<AiTransport['request']>[0]) => ({
       content: {
         suggestions: [
-          { path: 'pe.vitals.temperature', text: '37.8', evidence: [] },
-          { path: 'basic.gender', text: '女', evidence: [] },
+          { path: 'pe.vitals.temperature', text: '37.8', evidence: [{ source: 'note', quote: '体温 37.8℃' }] },
+          { path: 'basic.gender', text: '女', evidence: [{ source: 'note', quote: '性别女' }] },
         ],
         issues: [],
         questions: [],
@@ -401,5 +401,50 @@ describe('DeepSeek web security boundary', () => {
     );
 
     expect(screen.getByText('图片识别固定使用 Flash（Pro 不支持图片）')).toBeInTheDocument();
+  });
+
+  it('displays the original ROS status with the same readable labels as Android', async () => {
+    const transport = fakeTransportFactory(async () => ({
+      content: {
+        suggestions: [
+          {
+            path: 'ros.resp.cough.status',
+            text: 'asked_negative',
+            evidence: [{ source: 'note', quote: '患者诉咳嗽3天' }],
+          },
+        ],
+        issues: [],
+        questions: [],
+      },
+      model: 'deepseek-flash',
+    }));
+    const user = userEvent.setup();
+    const record = SCHEMA.emptyRecord();
+    RECORD_CORE.setPath(record, 'ros.resp.cough.status', 'asked_positive');
+
+    render(
+      <AiAssistantPanel
+        record={record}
+        configured
+        securityContext="web"
+        model="deepseek-flash"
+        createTransport={() => transport.factory('sk-test-status')}
+        onOpenSettings={() => undefined}
+        onAdoptRecord={async () => true}
+        onConfirmField={async () => true}
+      />,
+    );
+
+    await user.selectOptions(screen.getByLabelText('AI 操作'), 'recognize');
+    await user.type(screen.getByLabelText(/粘贴病历文字/), '患者诉咳嗽3天');
+    await user.click(screen.getByRole('button', { name: '预览发送内容' }));
+    await user.click(screen.getByLabelText(/我已核对下方实际发送内容/));
+    await user.click(screen.getByRole('button', { name: '生成建议' }));
+    await screen.findByRole('heading', { name: '建议对照 · 尚未写入' });
+
+    const compare = screen.getByText('原内容').closest('.ai-compare');
+    expect(compare).not.toBeNull();
+    expect(within(compare as HTMLElement).getByText('阳性')).toBeInTheDocument();
+    expect(within(compare as HTMLElement).getByText('阴性')).toBeInTheDocument();
   });
 });

@@ -91,11 +91,6 @@ export interface AiAssistantPanelProps {
   onConfirmField: (path: string) => Promise<boolean>;
 }
 
-function fieldValue(record: DabingliRecord, path: string): string {
-  const value = RECORD_CORE.getPath(record, path);
-  return typeof value === 'string' ? value : '';
-}
-
 function noKeyMessage(securityContext: 'web' | 'android', loading: boolean): string {
   if (securityContext === 'android') {
     return loading
@@ -543,7 +538,7 @@ export function AiAssistantPanel({
                   <div className="ai-compare">
                     <div>
                       <small>原内容</small>
-                      <p>{fieldValue(record, suggestion.path) || '（空白）'}</p>
+                      <p>{displayAiValue(suggestion.path, RECORD_CORE.getPath(record, suggestion.path)) || '（空白）'}</p>
                     </div>
                     <div>
                       <small>AI 建议 · 待核对</small>
