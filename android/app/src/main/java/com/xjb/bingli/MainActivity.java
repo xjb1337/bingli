@@ -28,7 +28,6 @@ public class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
-        clearCameraCache();
         aiKeys = new AIKeyStore(this);
         aiClient = new DeepSeekClient();
         root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL);
@@ -102,7 +101,8 @@ public class MainActivity extends Activity {
         try {
             File dir = new File(getCacheDir(), "camera");
             if (!dir.exists() && !dir.mkdirs()) throw new IOException("无法创建相机缓存目录");
-            clearCameraCache();
+            File[] old = dir.listFiles();
+            if (old != null) for (File file : old) file.delete();
             File photo = new File(dir, "photo-" + System.currentTimeMillis() + ".jpg");
             cameraUri = FileProvider.getUriForFile(this, getPackageName() + ".files", photo);
             Intent intent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE)
@@ -114,22 +114,6 @@ public class MainActivity extends Activity {
             cameraUri = null;
             openImageGallery();
         }
-    }
-
-    /** Deletes every cached camera photo. Patient images must not outlive the session. */
-    private void clearCameraCache() {
-        File[] old = new File(getCacheDir(), "camera").listFiles();
-        if (old != null) for (File file : old) file.delete();
-    }
-
-    /** Deletes the single cancelled camera capture; never used after a successful capture. */
-    private void deleteCameraPhoto() {
-        Uri uri = cameraUri;
-        if (uri == null) return;
-        String segment = uri.getLastPathSegment();
-        if (segment == null) return;
-        File file = new File(new File(getCacheDir(), "camera"), new File(segment).getName());
-        if (file.exists()) file.delete();
     }
 
     private WebResourceResponse assetResponse(Uri uri) {
@@ -214,18 +198,13 @@ public class MainActivity extends Activity {
                 if (p.has("image") && image == null) throw new IllegalArgumentException();
                 String imageMime = image == null ? null : image.optString("mimeType", null);
                 String imageBase64 = image == null ? null : image.optString("dataBase64", null);
-                String system = p.getString("system");
-                String user = p.getString("user");
-                boolean recognize = p.optBoolean("recognize", DeepSeekClient.isRecognizeRequest(system, user));
-                if (aiClient.busy()) {
-                    aiResult(id, new org.json.JSONObject().put("ok", false).put("code", "busy").put("error", "上一次请求还在进行，请稍后重试"));
-                    return;
-                }
-                boolean accepted = aiClient.request(id, aiKeys.read(), aiKeys.model(), system, user,
-                    imageMime, imageBase64, recognize, MainActivity.this::aiResult);
-                if (!accepted) aiResult(id, new org.json.JSONObject().put("ok", false).put("code", "invalid_input").put("error", "AI 请求或图片参数无效，请重新选择后再试"));
+                boolean accepted = aiClient.request(id, aiKeys.read(), aiKeys.model(), p.getString("system"), p.getString("user"),
+                    imageMime, imageBase64, MainActivity.this::aiResult);
+                if (!accepted) aiResult(id, new org.json.JSONObject().put("ok", false).put("error", "已有请求进行中或参数无效，请稍后重试"));
+            } catch (IllegalArgumentException e) {
+                try { aiResult(id, new org.json.JSONObject().put("ok", false).put("code", "invalid_input").put("error", "AI 请求或图片参数无效，请重新选择后再试")); } catch (Exception ignored) { }
             } catch (Exception e) {
-                try { aiResult(id, new org.json.JSONObject().put("ok", false).put("code", BridgeErrorMapper.codeFor(e)).put("error", BridgeErrorMapper.messageFor(e))); } catch (Exception ignored) { }
+                try { aiResult(id, new org.json.JSONObject().put("ok", false).put("code", "missing_key").put("error", "无法读取 AI 设置，请重新保存密钥")); } catch (Exception ignored) { }
             }
         }
         @JavascriptInterface public String versionName() { return BuildConfig.VERSION_NAME; }
@@ -276,18 +255,9 @@ public class MainActivity extends Activity {
         if (request == 41 && chooser != null) {
             chooser.onReceiveValue(result == RESULT_OK && data != null ? new Uri[]{data.getData()} : null); chooser=null;
         }
-        if (request == 43) {
-            if (result == RESULT_OK) {
-                // The WebView must still be able to read the captured file here.
-                if (chooser != null) {
-                    Uri selected = cameraUri != null ? cameraUri : data != null ? data.getData() : null;
-                    chooser.onReceiveValue(selected == null ? null : new Uri[]{selected});
-                }
-            } else {
-                // User cancelled the camera: the empty file is deleted immediately.
-                if (cameraUri != null) deleteCameraPhoto();
-                if (chooser != null) chooser.onReceiveValue(null);
-            }
+        if (request == 43 && chooser != null) {
+            Uri selected = result != RESULT_OK ? null : cameraUri != null ? cameraUri : data != null ? data.getData() : null;
+            chooser.onReceiveValue(selected == null ? null : new Uri[]{selected});
             chooser = null; cameraUri = null;
         }
         if (request == 42) {
@@ -308,12 +278,7 @@ public class MainActivity extends Activity {
         web.evaluateJavascript("if(typeof APP!=='undefined' && APP._test.flushPendingSave) APP._test.flushPendingSave()", null);
         super.onPause();
     }
-    @Override protected void onStop() {
-        if (chooser == null && cameraUri == null) clearCameraCache();
-        super.onStop();
-    }
     @Override protected void onDestroy() {
-        clearCameraCache();
         if (aiClient != null) aiClient.close();
         if (updater != null) updater.close();
         if (chooser != null) { chooser.onReceiveValue(null); chooser = null; }
@@ -330,10 +295,8 @@ public class MainActivity extends Activity {
         super.onDestroy();
     }
     @Override public void onBackPressed() {
-        if (web == null) { super.onBackPressed(); return; }
-        web.evaluateJavascript("(function(){try{return !!(window.APP&&window.APP.handleBack&&APP.handleBack());}catch(e){return false;}})()", value -> {
+        web.evaluateJavascript("(()=>{if(typeof AI_ASSIST!=='undefined'&&AI_ASSIST.isOpen()){AI_ASSIST.close();return true;}if(typeof APP!=='undefined'&&APP._test.flushPendingSave)APP._test.flushPendingSave();return false;})()", value -> {
             if ("true".equals(value) || isFinishing() || isDestroyed()) return;
-            web.evaluateJavascript("if(typeof APP!=='undefined' && APP._test && APP._test.flushPendingSave) APP._test.flushPendingSave()", null);
             new AlertDialog.Builder(this).setMessage("退出大病历？请确认页面没有保存失败提示。")
                 .setPositiveButton("退出",(d,w)->finish()).setNegativeButton("继续填写",null).show();
         });

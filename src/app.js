@@ -902,7 +902,8 @@ const APP = (() => {
           ? ' style="background:var(--gray-2);border-color:var(--gray-4);color:var(--gray-5);text-decoration:line-through;"'
           : '';
         const mark = v.checked ? ' ✓' : (v.negative ? ' −' : '');
-        return `<button type="button" class="chip chip-sym${cls}"${negStyle} data-ros="${sys.key}" data-sym="${sym.key}">
+        const stateText = v.checked ? '阳性' : (v.negative ? '阴性' : '未问');
+        return `<button type="button" class="chip chip-sym${cls}"${negStyle} data-ros="${sys.key}" data-sym="${sym.key}" aria-label="${esc(sym.label)}：${stateText}">
           ${esc(sym.label)}${mark}
         </button>`;
       }).join('');
@@ -3193,6 +3194,7 @@ const APP = (() => {
           t.setAttribute('style', '');
         }
         t.innerHTML = esc(label) + (item.checked ? ' ✓' : (item.negative ? ' −' : ''));
+        t.setAttribute('aria-label', `${label}：${item.checked ? '阳性' : (item.negative ? '阴性' : '未问')}`);
         const box = document.querySelector(`[data-ros-detail="${ds.ros}"]`);
         if (box) box.innerHTML = renderRosDetail(ds.ros);
         // 选中阳性时自动展开该系统

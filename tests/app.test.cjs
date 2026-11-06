@@ -860,6 +860,25 @@ function clickAct(app, act, extra = {}) {
   app.document._listeners.get('doc::click')[0]({ target });
 }
 
+/** 点一个系统回顾三态按钮，返回带 aria-label 记录的桩元素。 */
+function clickRos(app, sys, sym) {
+  const attrs = {};
+  const target = {
+    dataset: { ros: sys, sym },
+    innerHTML: '',
+    classList: {
+      _set: new Set(),
+      toggle(c, force) { if (force) this._set.add(c); else this._set.delete(c); },
+      contains(c) { return this._set.has(c); }
+    },
+    setAttribute(name, value) { attrs[name] = String(value); },
+    getAttribute(name) { return attrs[name]; },
+    closest() { return this; }
+  };
+  app.document._listeners.get('doc::click')[0]({ target });
+  return target;
+}
+
 /** 点一个 segmented 选项。 */
 function clickSeg(app, path, val) {
   const target = { dataset: { seg: path, val }, closest() { return this; } };
@@ -1028,4 +1047,23 @@ test('P0-3 成人月经史不显示儿童提示', () => {
   app.run('const r = APP.getRecord(); r.basic.gender = "女"; r.basic.age = "32岁"; APP._test.gotoStep("marriage")');
   const html = app.document.querySelector('#content').innerHTML;
   assert.doesNotMatch(html, /儿童可选「未初潮」/);
+});
+
+test('P1-14 系统回顾三态按钮带 aria-label 并随状态更新', () => {
+  const app = boot();
+  app.run('APP._test.gotoStep("ros")');
+  const html = app.document.querySelector('#content').innerHTML;
+  assert.match(html, /aria-label="咳嗽：未问"/, '初始应标未问');
+  assert.match(html, /aria-label="发热：未问"/);
+
+  let chip = clickRos(app, 'resp', 'cough');
+  assert.equal(chip.getAttribute('aria-label'), '咳嗽：阴性');
+  assert.equal(app.run('APP.getRecord().ros.resp.cough.factState'), 'asked_negative');
+
+  chip = clickRos(app, 'resp', 'cough');
+  assert.equal(chip.getAttribute('aria-label'), '咳嗽：阳性');
+  assert.equal(app.run('APP.getRecord().ros.resp.cough.factState'), 'asked_positive');
+
+  chip = clickRos(app, 'resp', 'cough');
+  assert.equal(chip.getAttribute('aria-label'), '咳嗽：未问');
 });
