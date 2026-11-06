@@ -1186,3 +1186,23 @@ test('P0-1 没有侧别占位符时不弹确认', () => {
   assert.equal(app.confirms.length, 0);
   assert.equal(app.sandbox.copied.length, 1);
 });
+
+test('P1-4 男性子女数写入 childbirth.children，读取兼容旧 gravida', () => {
+  const app = boot();
+  app.run('const r = APP.getRecord(); r.basic.gender = "男"; r.childbirth.gravida = "3"; APP._test.gotoStep("marriage")');
+  const html = app.document.querySelector('#content').innerHTML;
+  assert.match(html, /data-path="childbirth\.children"[^>]*value="3"/, '旧 gravida 应作为子女数回显');
+
+  app.document._listeners.get('doc::input')[0]({
+    target: { dataset: { path: 'childbirth.children' }, value: '2', type: 'text' }
+  });
+  assert.equal(app.run('APP.getRecord().childbirth.children'), '2');
+  assert.equal(app.run('APP.getRecord().childbirth.gravida'), '3', '旧字段不应被覆盖');
+});
+
+test('P1-4 性别女改男且已有孕产数据时提示核对婚育史', () => {
+  const app = boot();
+  app.run('const r = APP.getRecord(); r.basic.gender = "女"; r.childbirth.gravida = "2"; r.childbirth.para = "1"; APP._test.gotoStep("basic")');
+  clickSeg(app, 'basic.gender', '男');
+  assert.match(app.el('#toast').textContent, /请核对婚育史，孕产次不适用于男性/);
+});

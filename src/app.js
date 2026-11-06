@@ -554,7 +554,7 @@ const APP = (() => {
 
   /** 文本输入 */
   function input(label, path, opts = {}) {
-    const val = getPath(R, path) || '';
+    const val = opts.value !== undefined ? opts.value : (getPath(R, path) || '');
     const type = opts.type || 'text';
     const ph = opts.placeholder ? ` placeholder="${esc(opts.placeholder)}"` : '';
     const hint = opts.hint ? `<div class="hint">${esc(opts.hint)}</div>` : '';
@@ -1136,6 +1136,12 @@ const APP = (() => {
     </div>`;
   }
 
+  function hasChildbirthPregnancyData() {
+    const c = R.childbirth || {};
+    return ['gravida', 'para', 'fullTerm', 'premature', 'abortion', 'alive', 'lastBirth']
+      .some(k => String(c[k] === undefined || c[k] === null ? '' : c[k]).trim() !== '');
+  }
+
   function renderMarriage() {
     const b = R.basic;
     const isFemale = b.gender === '女';
@@ -1231,7 +1237,7 @@ const APP = (() => {
       <div class="card">
         <div class="card-title">生育史（男性患者可选填）</div>
         <div class="row2">
-          ${input('子女数', 'childbirth.gravida', { type: 'number', inputmode: 'numeric', placeholder: '留空则不显示' })}
+          ${input('子女数', 'childbirth.children', { type: 'number', inputmode: 'numeric', placeholder: '留空则不显示', value: getPath(R, 'childbirth.children') || getPath(R, 'childbirth.gravida') || '' })}
           ${input('子女健康状况', 'childbirth.details', { placeholder: '如：子女体健' })}
         </div>
       </div>
@@ -3148,6 +3154,7 @@ const APP = (() => {
 
       // segmented 单选
       if (ds.seg !== undefined && ds.act === undefined) {
+        const prevGender = R.basic.gender;
         setPath(R, ds.seg, ds.val);
         saveCurrent();
         const needsRerender =
@@ -3161,6 +3168,9 @@ const APP = (() => {
         if (needsRerender) render();
         else {
           $$(`[data-seg="${ds.seg}"]`).forEach(b => b.classList.toggle('on', b.dataset.val === ds.val));
+        }
+        if (ds.seg === 'basic.gender' && ds.val === '男' && prevGender === '女' && hasChildbirthPregnancyData()) {
+          toast('请核对婚育史，孕产次不适用于男性');
         }
         return;
       }
