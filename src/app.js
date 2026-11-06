@@ -3652,11 +3652,13 @@ const APP = (() => {
         break;
       }
       case 'copyText': {
+        if (!confirmSidePlaceholders()) break;
         const cur = currentOutput();
         copyToClipboard(cur.text);
         break;
       }
       case 'downloadTxt': {
+        if (!confirmSidePlaceholders()) break;
         const cur = currentOutput();
         downloadText(cur.text, cur.label);
         break;
@@ -3723,6 +3725,41 @@ const APP = (() => {
     box.__t = setTimeout(() => box.classList.remove('show'), 1800);
   }
 
+  /**
+   * 查找「侧别占位符（患侧/对侧/健侧）未改成左或右」的 error 级提醒。
+   * 该检查由 GENERATOR.validateStructured 统一提供；旧版 domain 没有此函数时安全降级。
+   */
+  function sidePlaceholderWarning() {
+    try {
+      if (typeof GENERATOR === 'undefined' || !GENERATOR || typeof GENERATOR.validateStructured !== 'function') return null;
+      const list = GENERATOR.validateStructured(R) || [];
+      for (let i = 0; i < list.length; i++) {
+        const w = list[i];
+        if (w && w.code === 'SIDE_PLACEHOLDER_UNFILLED' && w.severity === 'error') return w;
+      }
+    } catch (e) { /* 校验失败不能挡住复制/下载 */ }
+    return null;
+  }
+
+  /** 侧别占位符处数：evidence 条数优先，其次 paths，最后解析文案里的「仍有 N 处」 */
+  function sidePlaceholderCount(w) {
+    if (w && Array.isArray(w.evidence) && w.evidence.length) return w.evidence.length;
+    if (w && Array.isArray(w.paths) && w.paths.length) return w.paths.length;
+    const m = String((w && w.message) || '').match(/仍有\s*(\d+)\s*处/);
+    return m ? Number(m[1]) : 1;
+  }
+
+  /**
+   * 复制/下载前提醒侧别占位符。只弹确认、不硬阻断：
+   * 用户在确认框点「确定」后照常复制，点「取消」则本次动作不执行。
+   */
+  function confirmSidePlaceholders() {
+    const w = sidePlaceholderWarning();
+    if (!w) return true;
+    const n = sidePlaceholderCount(w);
+    return window.confirm(`病历里还有 ${n} 处（患侧/对侧/健侧）没改，确定要复制/下载吗？`);
+  }
+
   async function copyToClipboard(text) {
     try {
       if (window.BingliAndroid) { window.BingliAndroid.copy(text); toast("已复制到剪贴板"); return; }
@@ -3786,6 +3823,8 @@ const APP = (() => {
       if (ev.target.hasAttribute('data-close') || ev.target === wrap) wrap.remove();
       const sec = ev.target.dataset.sec;
       if (sec) {
+        // 分段复制同样在最终复制动作前确认侧别占位符
+        if (!confirmSidePlaceholders()) return;
         copyToClipboard(`${sec}：${res.sections[sec]}`);
         wrap.remove();
       }

@@ -1134,3 +1134,55 @@ test('P0-7 handleBack：模态框、目录、AI、设置、上一步各层依次
   // 6) 第一步：不消费，交给原生退出
   assert.equal(app.run('APP.handleBack()'), false);
 });
+
+function bootWithSidePlaceholder(opts = {}) {
+  const app = boot(opts);
+  app.sandbox.copied = [];
+  app.sandbox.exported = [];
+  app.sandbox.BingliAndroid = {
+    copy: text => app.sandbox.copied.push(text),
+    export: (text, name, mime) => app.sandbox.exported.push({ text, name, mime })
+  };
+  app.run(`const r = APP.getRecord();
+    r.basic.name = '张三'; r.basic.gender = '男'; r.basic.age = '68岁';
+    r.basic.chiefComplaint = '突发（患侧）肢体无力3小时';
+    r.hpi.symptoms = '突发（患侧）肢体无力3小时';
+    APP._test.gotoStep('output');`);
+  return app;
+}
+
+test('P0-1 复制正文前提示侧别占位符处数，确认后照常复制', () => {
+  const app = bootWithSidePlaceholder();
+  clickAct(app, 'copyText');
+  assert.ok(app.confirms.some(msg => /病历里还有 2 处（患侧\/对侧\/健侧）没改，确定要复制\/下载吗？/.test(msg)), '应弹出侧别确认');
+  assert.equal(app.sandbox.copied.length, 1, '确认后仍应复制');
+});
+
+test('P0-1 下载正文前同样提示侧别占位符', () => {
+  const app = bootWithSidePlaceholder();
+  clickAct(app, 'downloadTxt');
+  assert.ok(app.confirms.some(msg => /病历里还有 2 处/.test(msg)), '下载前应确认');
+  assert.equal(app.sandbox.exported.length, 1);
+});
+
+test('P0-1 分段复制在最终复制动作前提示侧别占位符', () => {
+  const app = bootWithSidePlaceholder();
+  clickAct(app, 'copySection');
+  const wrap = app.document.body.children[app.document.body.children.length - 1];
+  const handlers = app.document._listeners.get('<created:div>::click') || [];
+  handlers[handlers.length - 1]({ target: { dataset: { sec: '主诉' }, hasAttribute: () => false, closest: () => null } });
+  assert.ok(app.confirms.some(msg => /病历里还有 2 处/.test(msg)), '分段复制前应确认');
+  assert.equal(app.sandbox.copied.length, 1);
+  assert.equal(app.sandbox.copied[0].startsWith('主诉：'), true);
+  wrap.remove();
+});
+
+test('P0-1 没有侧别占位符时不弹确认', () => {
+  const app = boot();
+  app.sandbox.copied = [];
+  app.sandbox.BingliAndroid = { copy: text => app.sandbox.copied.push(text) };
+  app.run(`const r = APP.getRecord(); r.basic.name='李四'; r.basic.gender='女'; r.basic.age='30岁'; r.hpi.symptoms='咳嗽3天'; APP._test.gotoStep('output');`);
+  clickAct(app, 'copyText');
+  assert.equal(app.confirms.length, 0);
+  assert.equal(app.sandbox.copied.length, 1);
+});
