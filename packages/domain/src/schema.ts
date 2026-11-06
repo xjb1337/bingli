@@ -1443,6 +1443,8 @@ const SCHEMA = (() => {
         conflicts: {},
         migratedFrom: null,
         migrationNotes: [],
+        // 迁移时无法按当前结构映射的旧值：{ '字段路径': 原值 }（由 core.normalizeRecord 写入）
+        legacyUnmapped: {},
         // 最近一次模板带入：{ key, name, at, fields:[{path, value}] }，用于「撤销本次带入」
         lastTemplateFill: null
       },

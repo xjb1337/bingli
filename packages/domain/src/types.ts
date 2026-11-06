@@ -85,6 +85,8 @@ export interface RecordMeta {
   conflicts?: Record<string, unknown>;
   migratedFrom?: string | null;
   migrationNotes?: string[];
+  /** 迁移时无法按当前结构映射的旧值：{ '字段路径': 原值 }，保证旧数据不丢失 */
+  legacyUnmapped?: Record<string, unknown>;
   lastTemplateFill?: unknown;
   [key: string]: unknown;
 }

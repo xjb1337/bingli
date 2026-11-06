@@ -49,21 +49,90 @@ const RECORD_CORE = (() => {
 
   /* ---------------------- 深度合并（补齐新增字段） ---------------------- */
 
+  /** 旧值是否有内容可保留（空串 / 空数组不算数据） */
+  function hasLegacyValue(v) {
+    if (v === undefined || v === null) return false;
+    if (typeof v === 'string') return v.trim() !== '';
+    if (Array.isArray(v)) return v.length > 0;
+    return true;
+  }
+
   /**
    * 用 defaults 的结构补齐 obj，保留 obj 已有值。
    * 注意：新增的嵌套对象会被补齐，但 obj 中多出来的键也会保留，
    * 这样旧版本里已填的内容不会因结构变化而丢失。
+   *
+   * 当默认值是对象、旧数据在同一路径上却不是对象时，不能把旧值硬塞进对象
+   * （否则会生成 {"0": ...} 这种错误结构），而是保留默认结构，并通过
+   * onMismatch(path, value) 把原值交给调用方登记到 meta.legacyUnmapped。
    */
-  function deepMerge(defaults, obj) {
-    if (Array.isArray(defaults)) return Array.isArray(obj) ? obj : defaults;
+  function deepMerge(defaults, obj, onMismatch, path) {
+    const p = path || '';
+    if (Array.isArray(defaults)) {
+      if (Array.isArray(obj)) return obj;
+      if (obj !== undefined && obj !== null && onMismatch && hasLegacyValue(obj)) onMismatch(p, obj);
+      return defaults;
+    }
     if (defaults && typeof defaults === 'object') {
+      if (obj !== undefined && obj !== null && !isObject(obj)) {
+        if (onMismatch && hasLegacyValue(obj)) onMismatch(p, obj);
+        return defaults;
+      }
       const out = {};
-      const src = (obj && typeof obj === 'object') ? obj : {};
-      Object.keys(defaults).forEach(k => { out[k] = deepMerge(defaults[k], src[k]); });
+      const src = isObject(obj) ? obj : {};
+      Object.keys(defaults).forEach(k => { out[k] = deepMerge(defaults[k], src[k], onMismatch, p ? p + '.' + k : k); });
       Object.keys(src).forEach(k => { if (!(k in out)) out[k] = src[k]; });
       return out;
     }
     return obj === undefined ? defaults : obj;
+  }
+
+  /**
+   * 旧版本存档里若干字段的形态与当前 schema 不同，deepMerge 之前先显式转换。
+   * 只做已知、可判定的转换；转换不了的非对象值由 deepMerge 的 onMismatch 兜底。
+   */
+  function adaptLegacyShapes(raw) {
+    if (!isObject(raw)) return raw;
+    const out = cloneValue(raw);
+
+    // diagnosis：旧版直接把诊断存成字符串数组 → 现在存 { confirmed: [...] }
+    if (Array.isArray(out.diagnosis)) {
+      out.diagnosis = { confirmed: out.diagnosis };
+    }
+
+    // pmh.allergy：旧版存布尔 → 现在存 '有' / '无'
+    if (isObject(out.pmh) && typeof out.pmh.allergy === 'boolean') {
+      out.pmh.allergy = out.pmh.allergy ? '有' : '无';
+    }
+
+    // 勾选表：旧版存字符串数组 → 现在存 { '名称': true }
+    const checkMapKeys = ['diseaseChecks', 'allergenChecks', 'allergenReactionChecks'];
+    [out.pmh, out.family].forEach(section => {
+      if (!isObject(section)) return;
+      checkMapKeys.forEach(key => {
+        if (!Array.isArray(section[key])) return;
+        const map = {};
+        section[key].forEach(item => {
+          if (typeof item === 'string' && item.trim()) map[item.trim()] = true;
+        });
+        section[key] = map;
+      });
+    });
+
+    // ROS：旧版用布尔 true 表示阳性 → 现在用三态对象
+    if (isObject(out.ros)) {
+      Object.keys(out.ros).forEach(sysKey => {
+        const sys = out.ros[sysKey];
+        if (!isObject(sys)) return;
+        Object.keys(sys).forEach(symKey => {
+          if (sys[symKey] === true) {
+            sys[symKey] = { checked: true, status: 'asked_positive' };
+          }
+        });
+      });
+    }
+
+    return out;
   }
 
   /* ---------------------- 只填空白的合并（套用模板用） ---------------------- */
@@ -647,7 +716,10 @@ const RECORD_CORE = (() => {
       isText(raw.basic[k]) ? raw.basic[k].trim() !== '' : raw.basic[k] !== undefined && raw.basic[k] !== null
     ) || (isObject(raw.hpi) && Object.values(raw.hpi).some(v => isText(v) && v.trim() !== ''));
 
-    const filled = deepMerge(emptyRecord(), raw);
+    const legacyUnmapped = {};
+    const filled = deepMerge(emptyRecord(), adaptLegacyShapes(raw), (path, value) => {
+      legacyUnmapped[path] = cloneValue(value);
+    });
 
     if (!lookLikeRecord(filled)) fail('不是有效的大病历存档（缺少基本信息/现病史/诊断等关键结构）');
     if (raw.schemaVersion !== undefined && raw.schemaVersion > SCHEMA_VERSION) {
@@ -665,6 +737,12 @@ const RECORD_CORE = (() => {
     if (!isObject(filled.meta.fieldStates)) filled.meta.fieldStates = {};
     if (!isObject(filled.meta.conflicts)) filled.meta.conflicts = {};
     if (!Array.isArray(filled.meta.migrationNotes)) filled.meta.migrationNotes = [];
+    if (!isObject(filled.meta.legacyUnmapped)) filled.meta.legacyUnmapped = {};
+    Object.keys(legacyUnmapped).forEach(path => {
+      filled.meta.legacyUnmapped[path] = legacyUnmapped[path];
+      const note = '旧数据字段 ' + path + ' 的类型与当前结构不符，原值已保留在 meta.legacyUnmapped：' + JSON.stringify(legacyUnmapped[path]);
+      if (!filled.meta.migrationNotes.includes(note)) filled.meta.migrationNotes.push(note);
+    });
     const rev = Number(filled.meta.revision);
     filled.meta.revision = Number.isFinite(rev) && rev >= 0 ? Math.floor(rev) : 0;
     const rawVersion = Number(raw.schemaVersion);
