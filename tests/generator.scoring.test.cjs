@@ -335,9 +335,9 @@ test('出院记录：明确带入并确认的出院诊断照常输出，且保�
 
 test('住院天数计算：跨月、非法日期、倒序都不出错', () => {
   assert.equal(GENERATOR.hospitalDays('2026-09-28', '2026-10-03'), 5);
-  assert.equal(GENERATOR.hospitalDays('', '2026-10-03'), 0);
-  assert.equal(GENERATOR.hospitalDays('2026-10-03', '2026-09-28'), 0);
-  assert.equal(GENERATOR.hospitalDays('不是日期', '2026-10-03'), 0);
+  assert.equal(GENERATOR.hospitalDays('', '2026-10-03'), null);
+  assert.equal(GENERATOR.hospitalDays('2026-10-03', '2026-09-28'), null);
+  assert.equal(GENERATOR.hospitalDays('不是日期', '2026-10-03'), null);
 });
 
 /* ======================= 6. 重点查体（第4页 15 分） ======================= */

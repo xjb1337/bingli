@@ -2707,10 +2707,13 @@ const GENERATOR = (() => {
   function hospitalDays(admitDate, dischargeDate) {
     const a = parseDateStrict(admitDate);
     const b = parseDateStrict(dischargeDate);
-    if (!a || !b) return 0;
+    // 缺日期或日期本身非法：无从计算，返回 null（调用方不输出住院天数行）。
+    if (!a || !b) return null;
     // 两端都是 UTC 零点，直接相减不受运行机器时区影响
     const diff = Math.round((b.stamp - a.stamp) / 86400000);
-    return diff > 0 ? diff : 0;
+    // 出院早于入院属于日期倒置，不给出负数天数，也不输出该行。
+    if (diff < 0) return null;
+    return diff;
   }
 
   /**
@@ -2749,7 +2752,7 @@ const GENERATOR = (() => {
     const disDate = stripTail(d.dischargeDate);
     if (disDate) general.push(`出院日期：${disDate}`);
     const days = hospitalDays(b.admitDate, d.dischargeDate);
-    if (days) general.push(`住院天数：${days}天`);
+    if (days !== null) general.push(`住院天数：${days}天`);
     add('一、一般情况', [general.length ? joinSentences([general.join('，')]) : '（待补充姓名、性别、年龄、入院及出院日期）']);
 
     /* ---------- 入院情况 ---------- */

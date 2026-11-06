@@ -243,3 +243,20 @@ test('P1-4 男性生育史优先使用 children 字段', () => {
   legacy.childbirth.alive = '1';
   assert.equal(GENERATOR.buildChildbirth(legacy), '生育史：育有子女2人。');
 });
+
+test('P2-3 当天出院输出住院天数 0 天，缺日期或倒序不输出', () => {
+  const { SCHEMA, GENERATOR } = bootGlobals();
+  const record = SCHEMA.emptyRecord();
+  record.basic.name = '测试患者';
+  record.basic.gender = '男';
+  record.basic.age = '45';
+  record.basic.admitDate = '2026-10-03';
+  record.discharge.dischargeDate = '2026-10-03';
+  assert.match(GENERATOR.buildDischargeRecord(record), /住院天数：0天/);
+
+  record.discharge.dischargeDate = '';
+  assert.doesNotMatch(GENERATOR.buildDischargeRecord(record), /住院天数：/);
+
+  record.discharge.dischargeDate = '2026-10-01';
+  assert.doesNotMatch(GENERATOR.buildDischargeRecord(record), /住院天数：/);
+});

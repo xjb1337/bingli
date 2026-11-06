@@ -185,7 +185,7 @@ test('无效日期不产生住院天数', () => {
     ['2026-05-32', '2026-06-05']
   ];
   bad.forEach(([a, b]) => {
-    assert.equal(GENERATOR.hospitalDays(a, b), 0,
+    assert.equal(GENERATOR.hospitalDays(a, b), null,
       `「${a}」→「${b}」不是有效日期，不该算出天数`);
   });
 });
@@ -213,10 +213,10 @@ test('无效日期会被 validate 点名，而不是悄悄当成 0 天', () => {
   assert.ok(w.some(x => /不是一个真实存在的日期/.test(x)), '应给出日期告警');
 });
 
-test('缺日期与倒序出院都维持原有行为', () => {
-  assert.equal(GENERATOR.hospitalDays('', '2026-10-03'), 0);
-  assert.equal(GENERATOR.hospitalDays('不是日期', '2026-10-03'), 0);
-  assert.equal(GENERATOR.hospitalDays('2026-10-03', '2026-09-28'), 0, '出院早于入院按 0 天');
+test('缺日期与倒序出院都返回 null（不输出天数）', () => {
+  assert.equal(GENERATOR.hospitalDays('', '2026-10-03'), null);
+  assert.equal(GENERATOR.hospitalDays('不是日期', '2026-10-03'), null);
+  assert.equal(GENERATOR.hospitalDays('2026-10-03', '2026-09-28'), null, '出院早于入院不产生天数');
 });
 
 test('住院天数不受运行机器时区影响', () => {
@@ -228,5 +228,5 @@ test('住院天数不受运行机器时区影响', () => {
 test('只匹配到字符串里一段的情况要被拒绝', () => {
   // 旧实现用 /(\d{4})\D?(\d{1,2})\D?(\d{1,2})/ 做非锚定搜索，
   // 「2026-09-28 出院」这种带尾巴的能算，但「xx2026-09-28」也会被算。
-  assert.equal(GENERATOR.hospitalDays('xx2026-09-28', '2026-10-03'), 0);
+  assert.equal(GENERATOR.hospitalDays('xx2026-09-28', '2026-10-03'), null);
 });
