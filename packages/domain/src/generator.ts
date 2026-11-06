@@ -2703,11 +2703,11 @@ const GENERATOR = (() => {
   }
 
   /**
-   * 住院天数：两个 'YYYY-MM-DD' 之差；算不出来返回 0。
+   * 住院天数：两个 'YYYY-MM-DD' 之差。
    *
    * 用 parseDateStrict 而不是 `new Date(...)`：无效日期不能算出天数。
-   * 返回 0 同时覆盖三种情形——同一天出院、出院早于入院、日期本身不合法，
-   * 调用方不显示「住院天数」即可，validate() 会单独说明是哪一种。
+   * 缺日期 / 日期非法 / 出院早于入院返回 null（调用方不输出「住院天数」行），
+   * 同一天出院返回 0（调用方显示「住院天数：0天」）；validate() 会单独说明哪一项有问题。
    */
   function hospitalDays(admitDate, dischargeDate) {
     const a = parseDateStrict(admitDate);
