@@ -154,7 +154,8 @@ const AGE = (() => {
    * 统一展示口径：
    *   < 30 天 → 「X日龄」
    *   < 12 月 → 「X月龄」
-   *   其余    → 「X岁」；有零头月份时用儿科习惯写法「X岁X个月」，不写成小数岁
+   *   学龄前（< 3 岁）有零头月份 → 儿科习惯写法「X岁X个月」，不写成小数岁
+   *   其余    → 「X岁」（成人保持整岁，避免「62岁7个月」这类非模板写法）
    * 这样列表页/生成器再拼单位也不会出现「14日龄岁」。
    */
   function formatAge(parts) {
@@ -172,7 +173,7 @@ const AGE = (() => {
         wholeYears += 1;
         extraMonths -= 12;
       }
-      if (wholeYears >= 1 && extraMonths > 0) return `${wholeYears}岁${extraMonths}个月`;
+      if (wholeYears >= 1 && wholeYears < 3 && extraMonths > 0) return `${wholeYears}岁${extraMonths}个月`;
       if (wholeYears === 0 && extraMonths > 0) return `${extraMonths}月龄`;
       return `${trimNumber(years)}岁`;
     }

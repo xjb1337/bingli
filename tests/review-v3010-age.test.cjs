@@ -25,6 +25,8 @@ test('P2-4 既有日龄/月龄/整岁口径不变', () => {
   assert.equal(AGE.formatAge({ days: 14 }), '14日龄');
   assert.equal(AGE.formatAge({ months: 7 }), '7月龄');
   assert.equal(AGE.formatAge({ years: 45 }), '45岁');
+  assert.equal(AGE.formatAge({ years: 62, months: 747 }), '62岁');
+  assert.equal(AGE.ageFromDates('1964-03-12', '2026-10-20').text, '62岁');
   assert.equal(AGE.display({ age: '14日龄' }), '14日龄');
   assert.equal(AGE.display({ age: '7月' }), '7月龄');
   assert.equal(GENERATOR.ageWithUnit({ age: '1岁3个月' }), '1岁3个月');
