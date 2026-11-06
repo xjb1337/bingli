@@ -302,3 +302,22 @@ test('D1 无系统回顾时签名行仍接在家族史末尾', () => {
   assert.ok(generated.sections['家族史'].endsWith('患者确认以上病史签名：＿＿＿＿'));
   assert.ok(!generated.sections['系统回顾'], '没有系统回顾正文时不应生成该节');
 });
+
+test('P2-2 空病历 S 段只有「患者。」且占位符不补句号', () => {
+  const { SCHEMA, GENERATOR } = bootGlobals();
+  const text = GENERATOR.buildFirstCourseRecord(SCHEMA.emptyRecord());
+  assert.match(text, /一、病历特点（S）\n患者。/);
+  assert.ok(!text.includes('／。'), '占位符「／」不应被补成「／。」');
+});
+
+test('P2-5 default_normal_pending_review 不输出默认正常描述', () => {
+  const { SCHEMA, GENERATOR } = bootGlobals();
+  const record = SCHEMA.emptyRecord();
+  record.basic.name = '测试患者';
+  record.basic.gender = '男';
+  record.basic.age = '45';
+  record.pe.checked.abdomen = { abdInspect: true };
+  record.peFactStates.abdomen = { abdInspect: 'default_normal_pending_review' };
+  const pe = GENERATOR.buildPE(record, { template: true });
+  assert.ok(!pe.includes('腹部平坦'), `未核对项不应写成默认正常：${pe}`);
+});

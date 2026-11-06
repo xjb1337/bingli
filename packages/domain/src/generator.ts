@@ -1549,6 +1549,9 @@ const GENERATOR = (() => {
     if (state === 'not_asked') return '';
     if (state === 'asked_positive') return own;
     if (state === 'asked_negative') return own || stripTail(SCHEMA.peNormalText(item));
+    // default_normal_pending_review 是「尚未核对」的默认值，不是已确认的正常；
+    // 只输出用户明确写下的内容，绝不替学生把未核对项写成「正常」。
+    if (state === 'default_normal_pending_review') return own;
     return own || stripTail(peValue(r, groupKey, item)) || stripTail(SCHEMA.peNormalText(item));
   }
 
@@ -2352,6 +2355,8 @@ const GENERATOR = (() => {
     const raw = String(text || '').trim();
     const t = stripTail(raw);
     if (!t) return '';
+    // 占位符本身不是句子，不能补成「／。」这种假句号。
+    if (/^[／/—–-]+$/.test(t)) return t;
     return /[。！？!?；;…]$/.test(raw) ? raw : t + '。';
   }
 
