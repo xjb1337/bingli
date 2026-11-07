@@ -11,6 +11,16 @@ on:
         description: 'Optional release notes appended to the GitHub Release and update.json'
         required: false
         type: string
+      version_name:
+        description: 'Optional versionName override (e.g. 3.1). Empty keeps 3.0.0.<run>'
+        required: false
+        type: string
+        default: ''
+      version_code:
+        description: 'Optional versionCode override (integer). Empty keeps 300000+run'
+        required: false
+        type: string
+        default: ''
 
 permissions: {}
 
@@ -110,9 +120,20 @@ jobs:
           set -euo pipefail
           chmod +x android/gradlew
           BASE_VERSION_CODE=300000
-          VERSION_CODE=$((BASE_VERSION_CODE + GITHUB_RUN_NUMBER))
+          if [ -n "${{ inputs.version_code }}" ]; then
+            VERSION_CODE="${{ inputs.version_code }}"
+          else
+            VERSION_CODE=$((BASE_VERSION_CODE + GITHUB_RUN_NUMBER))
+          fi
+          case "$VERSION_CODE" in
+            ''|*[!0-9]*) echo "versionCode 必须是正整数，收到: $VERSION_CODE"; exit 1 ;;
+          esac
           if [ "$VERSION_CODE" -gt 2100000000 ]; then echo "versionCode 超出 Android 整数范围"; exit 1; fi
-          VERSION_NAME="3.0.0.${GITHUB_RUN_NUMBER}"
+          if [ -n "${{ inputs.version_name }}" ]; then
+            VERSION_NAME="${{ inputs.version_name }}"
+          else
+            VERSION_NAME="3.0.0.${GITHUB_RUN_NUMBER}"
+          fi
           ./android/gradlew -p android assembleRelease -PversionCode="$VERSION_CODE" -PversionName="$VERSION_NAME" --stacktrace
           printf 'VERSION_CODE=%s\n' "$VERSION_CODE" >> "$GITHUB_ENV"
           printf 'VERSION_NAME=%s\n' "$VERSION_NAME" >> "$GITHUB_ENV"
