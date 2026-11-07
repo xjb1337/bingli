@@ -116,12 +116,14 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          VERSION_CODE_INPUT: ${{ inputs.version_code }}
+          VERSION_NAME_INPUT: ${{ inputs.version_name }}
         run: |
           set -euo pipefail
           chmod +x android/gradlew
           BASE_VERSION_CODE=300000
-          if [ -n "${{ inputs.version_code }}" ]; then
-            VERSION_CODE="${{ inputs.version_code }}"
+          if [ -n "${VERSION_CODE_INPUT}" ]; then
+            VERSION_CODE="${VERSION_CODE_INPUT}"
           else
             VERSION_CODE=$((BASE_VERSION_CODE + GITHUB_RUN_NUMBER))
           fi
@@ -129,8 +131,8 @@ jobs:
             ''|*[!0-9]*) echo "versionCode 必须是正整数，收到: $VERSION_CODE"; exit 1 ;;
           esac
           if [ "$VERSION_CODE" -gt 2100000000 ]; then echo "versionCode 超出 Android 整数范围"; exit 1; fi
-          if [ -n "${{ inputs.version_name }}" ]; then
-            VERSION_NAME="${{ inputs.version_name }}"
+          if [ -n "${VERSION_NAME_INPUT}" ]; then
+            VERSION_NAME="${VERSION_NAME_INPUT}"
           else
             VERSION_NAME="3.0.0.${GITHUB_RUN_NUMBER}"
           fi
