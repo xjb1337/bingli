@@ -2681,10 +2681,8 @@ const APP = (() => {
           <div class="settings-info-row"><span>运行环境</span><span>${isAndroid ? 'Android 本机应用' : '浏览器 / WebView'}</span></div>
           <div class="settings-actions">
             ${isAndroid ? '<button type="button" class="btn btn-ghost" data-settings-action="checkUpdates">检查更新</button>' : ''}
-            ${isAndroid ? '<button type="button" class="btn btn-ghost" data-settings-action="openAi">AI 助手</button>' : ''}
             <button type="button" class="btn btn-ghost" data-settings-action="resetFont">恢复默认字号</button>
           </div>
-          <div class="settings-note">AI 建议仍需逐项人工核对；本页面不会自动生成诊断或处方。</div>
         </section>
       </div>`;
   }
@@ -3069,10 +3067,6 @@ const APP = (() => {
           case 'checkUpdates':
             if (window.BingliAndroid && window.BingliAndroid.checkUpdates) window.BingliAndroid.checkUpdates();
             else toast('当前环境不支持检查更新');
-            break;
-          case 'openAi':
-            if (typeof AI_ASSIST !== 'undefined' && AI_ASSIST.open) AI_ASSIST.open();
-            else toast('当前环境未启用 AI 助手');
             break;
         }
         return;
@@ -4245,6 +4239,10 @@ const APP = (() => {
     $('#btnSave').addEventListener('click', saveWithFeedback);
     $('#btnList').addEventListener('click', openList);
     $('#btnSettings').addEventListener('click', openSettings);
+    $('#btnAi').addEventListener('click', () => {
+      if (typeof AI_ASSIST !== 'undefined' && AI_ASSIST.open && window.BingliAndroid && window.BingliAndroid.aiRequest) AI_ASSIST.open();
+      else toast('AI 助手需要 Android 原生桥接，请使用 Android 应用或新版网页工作台');
+    });
     // 整条 stepbar 都可以点开目录：手机上「目录 ▾」这几个字太小，
     // 手指落点低一两毫米就点空了，把标题行整条做成热区。
     // 只绑 stepBar 一处——btnNav 在它里面，再单独绑一次会冒泡成弹两层。
@@ -4352,6 +4350,11 @@ const APP = (() => {
 
   return {
     init, getRecord: () => R, STEPS,
+    getAiTarget: () => {
+      const key = (STEPS[step] || {}).key;
+      if (key === 'hpi') return 'hpi.symptoms';
+      return Object.keys(AI_CORE.fields).find(path => path.startsWith(key + '.')) || 'hpi.symptoms';
+    },
     handleBack,
     async applyAI(request, result, selected, allowReplace, model) {
       if (currentSaveBlocked || listSaveBlocked || remoteConflict) throw Error('请先处理页面上的保存异常或修订冲突');

@@ -2697,8 +2697,8 @@ textarea:focus {
 
   .header-actions {
     display: grid;
-    grid-auto-columns: minmax(0, 1fr);
-    grid-auto-flow: column;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-auto-flow: row;
     width: 100%;
     margin-left: 0;
   }

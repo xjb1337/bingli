@@ -14,6 +14,7 @@ import {
 } from '@dabingli/ai';
 import { App } from '../App';
 import { AiAssistantPanel } from '../components/AiAssistantPanel';
+import { STEPS } from '../steps';
 import appStyles from '../styles.css?raw';
 
 const testRepositories: IndexedDbRecordRepository[] = [];
@@ -61,10 +62,9 @@ async function renderApp(factory?: AiTransportFactory, repository = createTestRe
   return { ...view, repository };
 }
 
-async function goToOutput(user: ReturnType<typeof userEvent.setup>): Promise<void> {
-  const directory = screen.getByRole('complementary', { name: '步骤目录' });
-  await user.click(within(directory).getByRole('button', { name: /生成病历/ }));
-  await screen.findByRole('heading', { name: '生成病历' });
+async function goToAi(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  await user.click(screen.getByRole('button', { name: 'AI 助手' }));
+  await screen.findByRole('heading', { name: 'AI 助手' });
 }
 
 async function saveFromHeader(user: ReturnType<typeof userEvent.setup>): Promise<void> {
@@ -73,7 +73,7 @@ async function saveFromHeader(user: ReturnType<typeof userEvent.setup>): Promise
 }
 
 async function enterKey(user: ReturnType<typeof userEvent.setup>, key: string): Promise<void> {
-  await user.click(screen.getByRole('button', { name: '设置' }));
+  await goToAi(user);
   const input = await screen.findByLabelText('DeepSeek API Key');
   await user.clear(input);
   await user.type(input, key);
@@ -82,7 +82,7 @@ async function enterKey(user: ReturnType<typeof userEvent.setup>, key: string): 
 }
 
 async function runAdoption(user: ReturnType<typeof userEvent.setup>): Promise<void> {
-  await goToOutput(user);
+  await goToAi(user);
   await user.type(screen.getByLabelText(/问诊笔记/), '患者诉咳嗽3天');
   await user.click(screen.getByRole('button', { name: '预览发送内容' }));
   await user.click(screen.getByLabelText(/我已核对下方实际发送内容/));
@@ -126,11 +126,86 @@ beforeEach(() => {
 
 afterEach(async () => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   await Promise.all(testRepositories.splice(0).map((repository) => repository.close()));
   await Promise.all(testDatabaseNames.splice(0).map((name) => deleteIndexedDbDatabase(name)));
 });
 
 describe('DeepSeek web security boundary', () => {
+  it('opens the independent AI page from every step and returns to the same step', async () => {
+    const user = userEvent.setup();
+    await renderApp();
+    const expectedTargets: Record<string, string> = {
+      basic: 'basic.chiefComplaint', hpi: 'hpi.symptoms', pmh: 'pmh.diseaseDetail',
+      personal: 'personal.drugs', family: 'family.other',
+    };
+    for (const step of STEPS) {
+      const directory = screen.getByRole('complementary', { name: '步骤目录' });
+      await user.click(within(directory).getByRole('button', { name: new RegExp(step.name) }));
+      expect(screen.queryByLabelText('AI 操作')).not.toBeInTheDocument();
+      await goToAi(user);
+      expect(screen.getAllByRole('heading', { name: 'API 设置' })).toHaveLength(1);
+      expect(screen.queryByRole('complementary', { name: '步骤目录' })).not.toBeInTheDocument();
+      await user.type(screen.getByLabelText('DeepSeek API Key'), 'sk-context');
+      await user.selectOptions(screen.getByLabelText('AI 操作'), 'polish');
+      expect(screen.getByLabelText('润色字段')).toHaveValue(expectedTargets[step.key] ?? 'hpi.symptoms');
+      await user.click(screen.getByRole('button', { name: '清除内存中的密钥' }));
+      await user.click(screen.getByRole('button', { name: '返回编辑' }));
+      expect(within(screen.getByRole('complementary', { name: '步骤目录' }))
+        .getByRole('button', { name: new RegExp(step.name) })).toHaveAttribute('aria-current', 'step');
+    }
+    await user.click(screen.getByRole('button', { name: '设置' }));
+    await screen.findByRole('heading', { name: '设置' });
+    expect(screen.queryByLabelText('DeepSeek API Key')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'API 设置' })).not.toBeInTheDocument();
+    await goToAi(user);
+    await user.click(screen.getByRole('button', { name: '病历列表' }));
+    await screen.findByRole('heading', { name: '病历列表' });
+    await goToAi(user);
+  }, 15000);
+
+  it('tests the connection with fixed text, keeps configuration across views and clears the key in place', async () => {
+    const request = vi.fn(async (_request: Parameters<AiTransport['request']>[0]) => ({ content: { ok: true }, model: 'deepseek-flash' }));
+    const transport = fakeTransportFactory(request);
+    const user = userEvent.setup();
+    await renderApp(transport.factory);
+    await enterKey(user, 'sk-connection-test');
+    await goToAi(user);
+    expect(screen.getByLabelText('DeepSeek API Key')).toHaveValue('sk-connection-test');
+    expect(request).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: '测试连接' }));
+    expect(await screen.findByText('连接成功，响应模型：deepseek-flash')).toBeInTheDocument();
+    expect(request.mock.calls[0]?.[0]).toEqual({
+      system: '这是 API 连接测试。只返回 JSON 对象 {"ok":true}。',
+      user: '{"connection_test":true}',
+    });
+    await user.selectOptions(screen.getByLabelText('文本模型'), 'deepseek-v4-pro');
+    expect(screen.queryByText(/连接成功/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '清除内存中的密钥' }));
+    expect(screen.getByLabelText('DeepSeek API Key')).toHaveValue('');
+    expect(screen.getByRole('button', { name: '测试连接' })).toBeDisabled();
+    expect(screen.getByRole('note')).toHaveTextContent('本页顶部「API 设置」');
+  });
+
+  it('configures Android through the native bridge on the AI page without a key input', async () => {
+    let configured = false;
+    const aiSettings = vi.fn();
+    vi.stubGlobal('BingliAndroid', {
+      aiStatus: () => JSON.stringify({ configured, model: configured ? 'deepseek-v4-pro' : 'deepseek-flash' }),
+      aiSettings, aiRequest: vi.fn(), aiCancel: vi.fn(),
+    });
+    const user = userEvent.setup();
+    await renderApp();
+    await goToAi(user);
+    expect(screen.queryByLabelText('DeepSeek API Key')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '打开 Android AI 设置 / 测试连接' }));
+    expect(aiSettings).toHaveBeenCalledTimes(1);
+    configured = true;
+    await user.click(screen.getByRole('button', { name: '刷新状态' }));
+    expect(await screen.findByLabelText('AI 操作')).toBeInTheDocument();
+    expect(screen.getAllByText('deepseek-v4-pro').length).toBeGreaterThan(0);
+  });
+
   it('keeps touch targets at 44px and AI output wrapping at narrow widths', () => {
     expect(appStyles).toMatch(/button\s*\{[^}]*min-height:\s*44px/s);
     expect(appStyles).toMatch(/\.ai-panel details > summary\s*\{[^}]*min-height:\s*44px/s);
@@ -151,7 +226,6 @@ describe('DeepSeek web security boundary', () => {
         securityContext="web"
         model="deepseek-flash"
         createTransport={() => transport.factory('sk-test-preview')}
-        onOpenSettings={() => undefined}
         onAdoptRecord={async () => true}
         onConfirmField={async () => true}
       />,
@@ -197,7 +271,6 @@ describe('DeepSeek web security boundary', () => {
         securityContext="web"
         model="deepseek-flash"
         createTransport={() => transport.factory('sk-test-recognize')}
-        onOpenSettings={() => undefined}
         onAdoptRecord={onAdoptRecord}
         onConfirmField={async () => true}
       />,
@@ -261,7 +334,6 @@ describe('DeepSeek web security boundary', () => {
         securityContext="web"
         model="deepseek-flash"
         createTransport={() => transport.factory('sk-test-dropped')}
-        onOpenSettings={() => undefined}
         onAdoptRecord={async () => true}
         onConfirmField={async () => true}
       />,
@@ -320,7 +392,6 @@ describe('DeepSeek web security boundary', () => {
         securityContext="web"
         model="deepseek-flash"
         createTransport={() => transport.factory('sk-test-image-note')}
-        onOpenSettings={() => undefined}
         onAdoptRecord={async () => true}
         onConfirmField={async () => true}
       />,
@@ -348,7 +419,7 @@ describe('DeepSeek web security boundary', () => {
     first.unmount();
 
     await renderApp(transport.factory, repository);
-    await user.click(screen.getByRole('button', { name: '设置' }));
+    await goToAi(user);
     expect(await screen.findByLabelText('DeepSeek API Key')).toHaveValue('');
   });
 
@@ -425,7 +496,6 @@ describe('DeepSeek web security boundary', () => {
       securityContext: 'web' as const,
       model: 'deepseek-flash',
       createTransport: () => transport.factory('sk-test-stale'),
-      onOpenSettings: () => undefined,
       onAdoptRecord,
       onConfirmField: async () => true,
     };
@@ -456,9 +526,10 @@ describe('DeepSeek web security boundary', () => {
     await user.click(screen.getByRole('button', { name: /保存病历/ }));
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('已保存到本机'));
 
-    await goToOutput(user);
+    await goToAi(user);
     expect(screen.getByRole('note')).toHaveTextContent(/未配置 API Key/);
-    expect(screen.getByRole('button', { name: '前往设置输入密钥' })).toBeInTheDocument();
+    expect(screen.getByLabelText('DeepSeek API Key')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '测试连接' })).toBeDisabled();
     expect(transport.factorySpy).not.toHaveBeenCalled();
     expect((await repository.loadCurrent()).record?.basic.name).toBe('无密钥患者');
   });
@@ -477,7 +548,7 @@ describe('DeepSeek web security boundary', () => {
     await waitFor(async () => {
       expect((await repository.loadCurrent()).record?.basic.name).toBe('服务错误患者');
     });
-    await goToOutput(user);
+    await goToAi(user);
     await user.type(screen.getByLabelText(/问诊笔记/), '患者诉咳嗽3天');
     await user.click(screen.getByRole('button', { name: '预览发送内容' }));
     await user.click(screen.getByLabelText(/我已核对下方实际发送内容/));
@@ -495,7 +566,6 @@ describe('DeepSeek web security boundary', () => {
         securityContext="web"
         model="deepseek-pro"
         createTransport={() => fakeTransportFactory(async () => ({ content: aiContent(), model: 'deepseek-flash' })).factory('sk-test')}
-        onOpenSettings={() => undefined}
         onAdoptRecord={async () => true}
         onConfirmField={async () => true}
       />,
@@ -530,7 +600,6 @@ describe('DeepSeek web security boundary', () => {
         securityContext="web"
         model="deepseek-flash"
         createTransport={() => transport.factory('sk-test-status')}
-        onOpenSettings={() => undefined}
         onAdoptRecord={async () => true}
         onConfirmField={async () => true}
       />,

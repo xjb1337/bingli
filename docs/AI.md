@@ -6,7 +6,7 @@
 
 ### 浏览器 Web 版
 
-- 用户在「设置 → DeepSeek AI」输入自己的 API Key。密钥只存在于 `EditorApp` 的 React state 和当前请求 transport 的私有字段中。
+- 用户在「AI 助手 → API 设置」输入自己的 API Key。密钥只存在于 `EditorApp` 的 React state 和当前请求 transport 的私有字段中。
 - 刷新页面即清空，不做恢复；界面明确显示「仅保存在本页内存，刷新后需重新输入」。
 - 密钥不写入 localStorage、sessionStorage、IndexedDB、Cookie、URL、病历 JSON、导出文件、错误对象或 console。
 - `WebFetchTransport` 只把密钥放入 HTTPS 请求的 `Authorization: Bearer ...` 请求头，不放入 URL、请求 JSON、日志或错误消息。
@@ -18,8 +18,16 @@
 - 网页通过 `BingliAndroid.aiStatus()` 只能拿到 `{configured, model}`，没有任何返回密钥的方法。
 - `AndroidBridgeTransport` 调用现有 `aiRequest(id, {system,user,image?})` / `aiCancel(id)` 桥接方法；请求 payload 不包含密钥。图片只传 MIME 与 base64，由原生 `DeepSeekClient` 组装成 DeepSeek 多模态 content parts。
 - 含图片的识别请求固定使用 `deepseek-flash`（`deepseek-v4-pro` 不支持图像理解），只影响本次请求，不修改已保存的模型设置。
-- 设置页在 Android 环境中隐藏网页密钥输入框，只提供原生设置入口、配置状态和模型名。
+- AI 助手的「API 设置」在 Android 环境中只提供原生设置入口、配置状态和模型名，不显示网页密钥输入框。原生窗口可保存密钥、选择模型并测试连接；返回后可在 AI 面板刷新状态。
 - `DeepSeekClient` 固定请求 `https://api.deepseek.com/chat/completions`，不跟随重定向，并只把最终 JSON 内容交给网页。
+
+网页连接测试只通过现有 transport 发送固定测试文字，不包含患者资料；不自动发起测试。文本模型选择也只在内存中保留，图片识别仍固定使用 Flash。
+
+## 入口
+
+- Android 顶栏常驻「AI 助手」，直接打开 AI 面板；设置页不承担 AI 入口职责。
+- React 顶栏常驻「AI 助手」，可从任意步骤、病历列表或设置进入独立 AI 页，返回编辑仍停留在原步骤。生成页不再重复挂载面板。
+- 打开时按当前步骤预选可润色字段；现病史默认症状特点，无对应白名单段落时默认症状特点，可手动切换。
 
 ## 数据流
 
@@ -67,7 +75,7 @@ AI 不能写入正式诊断、处方、检查申请、患者身份、摘要或�
 
 | 情况 | 代码 | 中文提示 |
 |---|---|---|
-| 无密钥 | `missing_key` | 请先在设置中输入 DeepSeek API Key |
+| 无密钥 | `missing_key` | 请在 AI 助手顶部「API 设置」中输入 DeepSeek API Key |
 | HTTP 401 | `unauthorized` | API Key 无效，请检查 AI 设置后重试 |
 | HTTP 403 | `forbidden` | API Key 无权限，请检查 AI 设置后重试 |
 | HTTP 402 | `insufficient_balance` | DeepSeek 余额不足，请充值后重试 |
@@ -94,6 +102,6 @@ AI 不能写入正式诊断、处方、检查申请、患者身份、摘要或�
 - `packages/ai/src/transport.ts`：`WebFetchTransport`、`AndroidBridgeTransport`、超时与取消。
 - `packages/ai/src/errors.ts`：稳定错误码与中文提示。
 - `apps/web/src/components/AiAssistantPanel.tsx`：发送预览、建议对照、未核对标记和确认。
-- `apps/web/src/pages/SettingsPage.tsx`：内存密钥输入/清除和 Android 原生设置入口。
+- `apps/web/src/pages/AiPage.tsx`：独立 AI 页，顶部提供内存密钥输入/清除、文本模型选择、连接测试和 Android 原生设置入口。
 - `android/app/src/main/java/com/xjb/bingli/DeepSeekClient.java`：原生请求、取消、超时和错误代码。
 - `android/app/src/main/java/com/xjb/bingli/MainActivity.java`：现有 AI 桥接结果分发，不向网页返回密钥。

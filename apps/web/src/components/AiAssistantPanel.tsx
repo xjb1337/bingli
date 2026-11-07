@@ -86,7 +86,7 @@ export interface AiAssistantPanelProps {
   model: string;
   loadingAndroidStatus?: boolean;
   createTransport: () => AiTransport;
-  onOpenSettings: () => void;
+  initialTarget?: string;
   onAdoptRecord: (record: DabingliRecord) => Promise<boolean>;
   onConfirmField: (path: string) => Promise<boolean>;
 }
@@ -95,9 +95,9 @@ function noKeyMessage(securityContext: 'web' | 'android', loading: boolean): str
   if (securityContext === 'android') {
     return loading
       ? '正在读取 Android 安全存储中的 AI 配置…'
-      : 'Android 安全存储中尚未配置 API Key。普通填写、保存和文书生成不受影响。';
+      : 'Android 安全存储中尚未配置 API Key。请通过本页顶部「API 设置」打开原生配置；普通填写、保存和文书生成不受影响。';
   }
-  return '未配置 API Key。普通填写、保存和文书生成不受影响；AI 功能需要先在设置中输入密钥。';
+  return '未配置 API Key。普通填写、保存和文书生成不受影响；请在本页顶部「API 设置」中输入密钥。';
 }
 
 export function AiAssistantPanel({
@@ -107,12 +107,12 @@ export function AiAssistantPanel({
   model,
   loadingAndroidStatus = false,
   createTransport,
-  onOpenSettings,
+  initialTarget = 'hpi.symptoms',
   onAdoptRecord,
   onConfirmField,
 }: AiAssistantPanelProps) {
   const [operation, setOperation] = useState<AiOperation>('organize');
-  const [target, setTarget] = useState('hpi.symptoms');
+  const [target, setTarget] = useState(initialTarget);
   const [notes, setNotes] = useState('');
   const [recognizeText, setRecognizeText] = useState('');
   const [recognizeImage, setRecognizeImage] = useState<AiImageAttachment | null>(null);
@@ -302,6 +302,7 @@ export function AiAssistantPanel({
       description="AI 只会提出白名单字段建议，不会写入诊断或处方；识别出的生命体征、查体与选择项也必须逐项勾选并人工核对。"
       className="ai-panel"
     >
+      <p className="field-hint">当前润色字段：{AI_FIELDS[target]}；选择「润色本段」可调整。</p>
       {!configured ? (
         <div className="ai-empty" role="note">
           <span className="ai-empty-icon" aria-hidden="true">
@@ -314,9 +315,6 @@ export function AiAssistantPanel({
             <strong>AI 助手尚未启用</strong>
             <p>{noKeyMessage(securityContext, loadingAndroidStatus)}</p>
           </div>
-          <button type="button" className="button secondary" onClick={onOpenSettings}>
-            {securityContext === 'android' ? '查看 Android AI 设置' : '前往设置输入密钥'}
-          </button>
         </div>
       ) : (
         <div className="ai-controls">

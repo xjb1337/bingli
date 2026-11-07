@@ -31,12 +31,12 @@ async function main() {
   try {
     original = await ev('return JSON.parse(JSON.stringify(APP.getRecord()));');
     await ev('APP._test.openSettings();');
-    check('native AI bridge and assistant entry available from settings', await ev('return !!BingliAndroid.aiSettings && !!document.querySelector("[data-settings-action=\\"openAi\\"]");'));
+    check('native AI bridge and permanent assistant entry outside settings', await ev('return !!BingliAndroid.aiSettings && !!document.querySelector("#btnAi") && !document.querySelector("[data-settings-action=openAi]");'));
     await ev('APP._test.closeSettings();');
     console.log('Native config (no key exposed):', await ev('return JSON.parse(BingliAndroid.aiStatus());'));
     await ev(`window.__nativeAI = window.BingliAndroid;
       window.BingliAndroid = {aiStatus:()=>JSON.stringify({configured:true,model:'deepseek-flash'}),aiSettings:()=>{},aiRequest:(id,payload)=>{window.__wire={id,payload}},aiCancel:id=>{window.__canceled=id}};
-      const r=SCHEMA.emptyRecord();r.id='ai-synthetic-'+Date.now();r.basic.name='合成姓名';r.basic.phone='13812345678';r.hpi.symptoms='旧症状';APP._test.setRecord(r);APP._test.render();AI_ASSIST.open();
+      const r=SCHEMA.emptyRecord();r.id='ai-synthetic-'+Date.now();r.basic.name='合成姓名';r.basic.phone='13812345678';r.hpi.symptoms='旧症状';APP._test.setRecord(r);APP._test.render();document.querySelector('#btnAi').click();
       document.querySelector('#aiNotes').value='合成姓名电话13812345678。患者诉咳嗽3天，药名不详。';document.querySelector('#aiPrepare').click();`);
     check('preview redacts known identity', await ev(`const s=document.querySelector('#aiSources').textContent;return !s.includes('合成姓名')&&!s.includes('13812345678')&&s.includes('患者诉咳嗽3天');`));
     check('closing unsaved notes can be canceled', await ev(`const confirm=window.confirm;window.confirm=()=>false;document.querySelector('#aiClose').click();window.confirm=confirm;return AI_ASSIST.isOpen()&&document.querySelector('#aiNotes').value.includes('咳嗽3天');`));

@@ -3142,3 +3142,10 @@ body.settings-view main { padding-bottom: calc(var(--footer-height) + var(--safe
   #toast { color: var(--teal-900); background: rgba(237, 245, 241, .96); }
   .modal-mask, .nav-mask, .ai-mask { background: rgba(0, 0, 0, .66); }
 }
+
+/* 全局操作独立成行，给 AI 入口和病历标题留出窄屏空间。 */
+@media (max-width: 640px) {
+  .topbar { flex-wrap: wrap; }
+  .topbar .brand-copy { flex-basis: calc(100% - 60px); }
+  .topbar .btn-icon { flex: 1 1 0; min-width: 48px; }
+}

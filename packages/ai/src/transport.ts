@@ -332,7 +332,7 @@ export class AndroidBridgeTransport implements AiTransport {
     if (options.signal?.aborted) throw aiError('cancelled');
     if (typeof window === 'undefined') throw aiError('request_failed');
     const status = await this.status();
-    if (!status.configured) throw aiError('missing_key', '请先在 Android AI 设置中保存 API Key');
+    if (!status.configured) throw aiError('missing_key', '请在 AI 助手中打开「API 设置」并保存 API Key');
     const image = normalizeAiImage(request.image);
 
     const id = this.requestId();
