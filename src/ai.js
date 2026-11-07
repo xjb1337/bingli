@@ -91,7 +91,7 @@ const AI_ASSIST = (() => {
     panel.innerHTML = `<section class="ai-sheet" role="dialog" aria-modal="true" aria-labelledby="aiTitle" aria-describedby="aiIntro" aria-busy="false">
       <div class="ai-heading"><div class="ai-heading-copy"><span class="ai-eyebrow">DEEPSEEK · 填写辅助</span><h2 id="aiTitle">AI 病历助手</h2><p class="ai-subtitle">整理、润色或识别资料，确认后才写入病历。</p></div><button id="aiClose" type="button" class="btn btn-ghost ai-close">关闭</button></div>
       <div class="ai-note" id="aiIntro"><span class="ai-note-icon" aria-hidden="true">i</span><p>只处理你选择的资料。结果须核对后采纳；未问、未查、不详不得当成正常。联网内容将发送至 DeepSeek。识别结果只填病史、生命体征、查体与系统回顾等白名单字段，不写诊断或处方。</p></div>
-      <div class="ai-settings-row"><button id="aiSettings" class="btn btn-ghost">API 设置 / 测试连接</button><span id="aiModel"></span></div>
+      <div class="ai-settings-row"><button id="aiSettings" class="btn btn-ghost">API 设置 / 测试连接</button><button id="aiRefreshSettings" class="btn btn-ghost">刷新配置状态</button><span id="aiModel" role="status"></span></div>
       <div id="aiOnboarding" class="ai-onboarding" hidden>
         <strong>首次使用 AI</strong>
         <ol><li>打开「API 设置」，按教程创建 DeepSeek API Key。</li><li>粘贴密钥并保存，点击「保存并测试连接」。</li><li>回到这里预览资料，确认后再发送。</li></ol>
@@ -139,6 +139,8 @@ const AI_ASSIST = (() => {
     document.body.appendChild(panel);
     $('aiClose').onclick = () => close();
     $('aiSettings').onclick = () => bridge().aiSettings();
+    $('aiRefreshSettings').onclick = refreshModel;
+    if (APP.getAiTarget) $('aiTarget').value = APP.getAiTarget();
     const updateMode = () => {
       invalidate(); const op = $('aiOperation').value;
       $('aiTargetWrap').hidden = op !== 'polish'; $('aiNotesWrap').hidden = op !== 'organize';
@@ -161,7 +163,7 @@ const AI_ASSIST = (() => {
     renderRecognizeImage(); pendingFields(); refreshModel(); $('aiClose').focus();
   }
   function refreshModel() {
-    try { const s = JSON.parse(bridge().aiStatus()); model = s.model || ''; $('aiModel').textContent = s.configured ? model + '（图片识别固定使用 Flash，Pro 不支持图片）' : '尚未设置 API Key'; $('aiOnboarding').hidden = !!s.configured; return s.configured; }
+    try { const s = JSON.parse(bridge().aiStatus()); model = s.model || ''; $('aiModel').textContent = s.configured ? '已配置 · ' + model + '（图片识别固定使用 Flash，Pro 不支持图片）' : '未配置 API Key，请在本面板打开「API 设置」'; $('aiOnboarding').hidden = !!s.configured; return s.configured; }
     catch (e) { status('无法读取 AI 设置'); return false; }
   }
   function prepare() {
@@ -183,7 +185,7 @@ const AI_ASSIST = (() => {
   }
   function setBusy(value) {
     busy = value;
-    ['aiOperation', 'aiTarget', 'aiNotes', 'aiRecognizeText', 'aiPrepare', 'aiSend', 'aiSettings', 'aiUndo', 'aiCameraButton', 'aiGalleryButton', 'aiImageClear'].forEach(id => { if ($(id)) $(id).disabled = value || (id === 'aiPrepare' && processingImage); });
+    ['aiOperation', 'aiTarget', 'aiNotes', 'aiRecognizeText', 'aiPrepare', 'aiSend', 'aiSettings', 'aiRefreshSettings', 'aiUndo', 'aiCameraButton', 'aiGalleryButton', 'aiImageClear'].forEach(id => { if ($(id)) $(id).disabled = value || (id === 'aiPrepare' && processingImage); });
     if (panel) {
       const sheet = panel.querySelector('.ai-sheet');
       if (sheet) sheet.setAttribute('aria-busy', value ? 'true' : 'false');

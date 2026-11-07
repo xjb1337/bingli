@@ -1,7 +1,7 @@
 import type { AiErrorCode } from './types';
 
 export const AI_ERROR_MESSAGES: Readonly<Record<AiErrorCode, string>> = Object.freeze({
-  missing_key: '请先在设置中输入 DeepSeek API Key',
+  missing_key: '请在 AI 助手顶部「API 设置」中输入 DeepSeek API Key',
   unauthorized: 'API Key 无效，请检查 AI 设置后重试',
   forbidden: 'API Key 无权限，请检查 AI 设置后重试',
   insufficient_balance: 'DeepSeek 余额不足，请充值后重试',

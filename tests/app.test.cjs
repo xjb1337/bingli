@@ -239,6 +239,61 @@ const KEYS = {
   settings: 'dabingli.settings.v1'
 };
 
+test('AI 顶栏入口可从每个步骤及设置直接打开助手，保持当前病历与步骤', () => {
+  const app = boot();
+  app.run(`window.BingliAndroid = {aiRequest() {}};
+    window.aiOpenCount = 0; AI_ASSIST.open = () => { window.aiOpenCount++; };`);
+  const click = app.document._listeners.get('#btnAi::click')[0];
+  const steps = app.run('APP.STEPS.map(s => s.key)');
+  const expected = {basic: 'basic.chiefComplaint', hpi: 'hpi.symptoms', pmh: 'pmh.diseaseDetail', personal: 'personal.drugs', family: 'family.other'};
+  for (const key of steps) {
+    app.run(`APP._test.gotoStep(${JSON.stringify(key)})`);
+    const before = app.run('JSON.stringify(APP.getRecord())');
+    click({});
+    assert.equal(app.run('APP._test.getStepKey()'), key);
+    assert.equal(app.run('JSON.stringify(APP.getRecord())'), before);
+    assert.equal(app.run('APP.getAiTarget()'), expected[key] || 'hpi.symptoms');
+  }
+  app.run('APP._test.openSettings()');
+  assert.doesNotMatch(app.el('#content').innerHTML, /data-settings-action="openAi"/);
+  click({});
+  assert.equal(app.run('window.aiOpenCount'), steps.length + 1);
+  assert.equal(app.run('APP._test.isSettingsView()'), true);
+});
+
+test('AI 面板内可打开原生 API 设置并刷新模型状态，预选当前步骤字段', () => {
+  const app = boot();
+  const nodes = new Map();
+  app.document.createElement = () => ({
+    innerHTML: '',
+    querySelector(selector) {
+      if (!nodes.has(selector)) nodes.set(selector, {
+        value: '', textContent: '', hidden: false, focus() {}, setAttribute() {}, removeAttribute() {},
+        querySelectorAll: () => [],
+      });
+      return nodes.get(selector);
+    },
+    remove() {},
+  });
+  app.run(`window.configured = false; window.settingsOpened = 0;
+    window.BingliAndroid = {
+      aiStatus: () => JSON.stringify({configured: window.configured, model: window.configured ? 'deepseek-v4-pro' : 'deepseek-flash'}),
+      aiSettings: () => { window.settingsOpened++; }, aiRequest() {}
+    };
+    APP._test.gotoStep('pmh');`);
+  app.document._listeners.get('#btnAi::click')[0]({});
+  assert.equal(app.run('AI_ASSIST.isOpen()'), true);
+  assert.equal(nodes.get('#aiTarget').value, 'pmh.diseaseDetail');
+  assert.match(nodes.get('#aiModel').textContent, /未配置 API Key.*本面板/);
+  assert.equal(nodes.get('#aiOnboarding').hidden, false);
+  nodes.get('#aiSettings').onclick();
+  assert.equal(app.run('window.settingsOpened'), 1);
+  app.run('window.configured = true');
+  nodes.get('#aiRefreshSettings').onclick();
+  assert.match(nodes.get('#aiModel').textContent, /已配置.*deepseek-v4-pro/);
+  assert.equal(nodes.get('#aiOnboarding').hidden, true);
+});
+
 /* ======================= 启动与渲染 ======================= */
 
 test('产物可启动并渲染出界面', () => {

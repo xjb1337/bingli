@@ -18,6 +18,7 @@ import {
   type RecordListItem,
 } from '@dabingli/domain';
 import {
+  AI_FIELDS,
   AndroidBridgeTransport,
   WebFetchTransport,
   confirmAiField,
@@ -57,6 +58,10 @@ const SettingsPage = lazy(() =>
   import('./pages/SettingsPage').then((module) => ({ default: module.SettingsPage })),
 );
 
+const AiPage = lazy(() =>
+  import('./pages/AiPage').then((module) => ({ default: module.AiPage })),
+);
+
 function LoadingState({ label, compact = false }: { label: string; compact?: boolean }) {
   return (
     <section className={`loading-state${compact ? ' is-compact' : ''}`} role="status" aria-live="polite" aria-busy="true">
@@ -80,7 +85,7 @@ function LazyContentFallback() {
   return <LoadingState label="正在加载页面…" compact />;
 }
 
-type AppView = 'editor' | 'records' | 'settings';
+type AppView = 'editor' | 'records' | 'settings' | 'ai';
 
 interface InitialState {
   record: DabingliRecord;
@@ -261,6 +266,7 @@ function EditorApp({
     JSON.stringify(RECORD_CORE.buildExport(initial.list, undefined, { includeDraft: true, draft: initial.record }), null, 2),
   );
   const [apiKey, setApiKey] = useState('');
+  const [webAiModel, setWebAiModel] = useState('deepseek-flash');
   const androidBridge = useMemo(() => getAndroidAiBridge(), []);
   const [androidStatus, setAndroidStatus] = useState<AiTransportStatus | null>(null);
   const [androidStatusLoading, setAndroidStatusLoading] = useState(Boolean(androidBridge));
@@ -369,7 +375,7 @@ function EditorApp({
   function createAiTransport(): AiTransport {
     if (aiTransportFactory) return aiTransportFactory(apiKey);
     if (androidBridge) return new AndroidBridgeTransport({ bridge: androidBridge });
-    return new WebFetchTransport({ apiKey });
+    return new WebFetchTransport({ apiKey, model: webAiModel });
   }
 
   async function persistRecord(showToast = true, snapshot = recordRef.current): Promise<boolean> {
@@ -587,7 +593,7 @@ function EditorApp({
 
   const aiSecurityContext = androidBridge ? 'android' as const : 'web' as const;
   const aiConfigured = androidBridge ? androidStatus?.configured === true : apiKey.trim().length > 0;
-  const aiModel = androidBridge ? androidStatus?.model ?? 'deepseek-flash' : 'deepseek-flash';
+  const aiModel = androidBridge ? androidStatus?.model ?? 'deepseek-flash' : webAiModel;
   const step = STEPS[stepIndex] ?? STEPS[0];
   const stepKey: StepKey = step.key;
   const stepProps: StepComponentProps = {
@@ -636,17 +642,6 @@ function EditorApp({
         <OutputStep
           {...stepProps}
           settings={settings}
-          ai={{
-            record,
-            configured: aiConfigured,
-            securityContext: aiSecurityContext,
-            model: aiModel,
-            loadingAndroidStatus: androidBridge ? androidStatusLoading : false,
-            createTransport: createAiTransport,
-            onOpenSettings: () => setView('settings'),
-            onAdoptRecord: adoptAiRecord,
-            onConfirmField: confirmAiContent,
-          }}
         />
       );
       break;
@@ -785,6 +780,14 @@ function EditorApp({
           </button>
           <button
             type="button"
+            className={`button ghost${view === 'ai' ? ' is-active' : ''}`}
+            aria-current={view === 'ai' ? 'page' : undefined}
+            onClick={() => { refreshAndroidAiStatus(); setMobileNavOpen(false); setView('ai'); }}
+          >
+            AI 助手
+          </button>
+          <button
+            type="button"
             className={`button ghost${view === 'settings' ? ' is-active' : ''}`}
             onClick={() => setView('settings')}
           >
@@ -814,20 +817,32 @@ function EditorApp({
               onRestoreRecovery={restoreRecovery}
             />
           </Suspense>
+        ) : view === 'ai' ? (
+          <Suspense fallback={<LazyContentFallback />}>
+            <AiPage
+              record={record}
+              configured={aiConfigured}
+              securityContext={aiSecurityContext}
+              model={aiModel}
+              apiKey={apiKey}
+              onApiKeyChange={setApiKey}
+              onModelChange={setWebAiModel}
+              loadingAndroidStatus={androidBridge ? androidStatusLoading : false}
+              onOpenAndroidAiSettings={androidBridge?.aiSettings ? () => androidBridge.aiSettings?.() : undefined}
+              onRefreshAndroidStatus={androidBridge ? refreshAndroidAiStatus : undefined}
+              initialTarget={step.key === 'hpi' ? 'hpi.symptoms' : Object.keys(AI_FIELDS).find((path) => path.startsWith(`${step.key}.`)) ?? 'hpi.symptoms'}
+              createTransport={createAiTransport}
+              onAdoptRecord={adoptAiRecord}
+              onConfirmField={confirmAiContent}
+            />
+          </Suspense>
         ) : view === 'settings' ? (
           <Suspense fallback={<LazyContentFallback />}>
             <SettingsPage
               settings={settings}
               exportText={exportText}
               recovery={recovery}
-              apiKey={apiKey}
-              androidConfigured={androidStatus?.configured}
-              androidModel={androidStatus?.model}
-              androidStatusLoading={androidStatusLoading}
               onChange={saveSettings}
-              onApiKeyChange={setApiKey}
-              onOpenAndroidAiSettings={androidBridge ? () => androidBridge.aiSettings?.() : undefined}
-              onRefreshAndroidStatus={androidBridge ? refreshAndroidAiStatus : undefined}
               onImport={importJson}
               onDownload={exportJson}
               onRestoreRecovery={restoreRecovery}
