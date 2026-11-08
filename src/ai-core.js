@@ -33,15 +33,42 @@ const AI_CORE = (() => {
     delete copy.meta; delete copy.documentMeta; delete copy.updatedAt;
     return core().fingerprint(copy);
   }
+  function redactionDiff(text, record) {
+    let output = String(text || '');
+    const categories = new Set();
+    const labels = {
+      name: '姓名', phone: '电话', address: '地址', workUnit: '工作单位',
+      recordNo: '病历号', bedNo: '床号', nativePlace: '籍贯', birthPlace: '出生地',
+    };
+    Object.entries(labels)
+      .map(([key, label]) => ({ value: String((record.basic || {})[key] ?? '').trim(), label }))
+      .filter(({ value }) => value.length >= 2)
+      .sort((left, right) => right.value.length - left.value.length)
+      .forEach(({ value, label }) => {
+        if (output.includes(value)) {
+          categories.add(label);
+          output = output.split(value).join('[已隐去]');
+        }
+      });
+    output = output
+      .replace(/(患者姓名|姓名|病历号|住院号|门诊号|床号|ID号|身份证号?)\s*[:：]\s*[^\s，。；,;]+/g, (match, label) => {
+        const replacement = `${label}：[已隐去]`;
+        if (match !== replacement) categories.add(label === '患者姓名' ? '姓名' : label);
+        return replacement;
+      })
+      .replace(/(?<!\d)\d{17}[\dXx](?!\d)/g, () => {
+        categories.add('身份证');
+        return '[身份证已隐去]';
+      })
+      .replace(/(?<!\d)1[3-9]\d{9}(?!\d)/g, () => {
+        categories.add('电话');
+        return '[电话已隐去]';
+      });
+    return { text: output, categories: Array.from(categories) };
+  }
+
   function redact(text, record) {
-    let out = String(text || '');
-    const b = record.basic || {};
-    const ids = ['name', 'phone', 'address', 'workUnit', 'recordNo', 'bedNo', 'nativePlace', 'birthPlace'];
-    ids.map(k => String(b[k] || '').trim()).filter(v => v.length >= 2)
-      .sort((a, b) => b.length - a.length).forEach(v => { out = out.split(v).join('[已隐去]'); });
-    return out.replace(/(患者姓名|姓名|病历号|住院号|门诊号|床号|ID号|身份证号?)\s*[:：]\s*[^\s，。；,;]+/g, '$1：[已隐去]')
-      .replace(/(?<!\d)\d{17}[\dXx](?!\d)/g, '[身份证已隐去]')
-      .replace(/(?<!\d)1[3-9]\d{9}(?!\d)/g, '[电话已隐去]');
+    return redactionDiff(text, record).text;
   }
   function uniq(values) {
     const seen = new Set();
@@ -369,7 +396,7 @@ const AI_CORE = (() => {
   }
   return {
     fields, labels, operations, recognizeRules, ROS_STATUSES, ROS_STATUS_LABELS,
-    IMAGE_MIMES, MAX_IMAGE_BASE64, baseline, redact, prepare, system,
+    IMAGE_MIMES, MAX_IMAGE_BASE64, baseline, redact, redactionDiff, prepare, system,
     recognizeSystem, validate, apply, normalizeImagePayload, normalizeRecognizeValue,
     displayValue, recognizeTargets
   };

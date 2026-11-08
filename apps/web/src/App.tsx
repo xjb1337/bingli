@@ -834,6 +834,7 @@ function EditorApp({
               createTransport={createAiTransport}
               onAdoptRecord={adoptAiRecord}
               onConfirmField={confirmAiContent}
+              onJumpToPath={jumpToPath}
             />
           </Suspense>
         ) : view === 'settings' ? (
