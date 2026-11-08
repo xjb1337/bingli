@@ -573,6 +573,41 @@ test('非法设置被纠正，不会撑坏界面', () => {
   assert.equal(applied, '1', `实际应用的字号缩放：${applied}`);
 });
 
+test('设置页 A− / A＋ 全范围及恢复默认字号保持设置视图与病历数据', () => {
+  const app = boot();
+  app.run('window.BingliAndroid = {}; APP._test.openSettings()');
+  const record = app.run('JSON.stringify(APP.getRecord())');
+  const click = dataset => {
+    const target = { dataset };
+    for (const listener of app.document._listeners.get('doc::click') || []) {
+      listener({ target: { closest: () => target } });
+    }
+  };
+  const check = scale => {
+    assert.equal(app.run('APP._test.getSettings().fontScale'), scale);
+    assert.equal(app.document._fontScale.value, String(scale));
+    assert.equal(app.run('APP._test.isSettingsView()'), true);
+    assert.equal(app.document.body.classList.contains('large-font'), scale > 1.05);
+    const content = app.el('#content').innerHTML;
+    assert.match(content, new RegExp(`>${Math.round(scale * 100)}%</span>`));
+    assert.match(content, /data-settings-action="resetFont"/);
+    assert.match(content, /data-settings-action="checkUpdates"/);
+    assert.equal((content.match(/class="card settings-card"/g) || []).length, 3);
+    assert.equal(app.run('JSON.stringify(APP.getRecord())'), record);
+  };
+  for (const scale of [1.1, 1.2, 1.3, 1.4, 1.4]) {
+    click({ settingFont: 'up' });
+    check(scale);
+  }
+  for (const scale of [1.3, 1.2, 1.1, 1, 0.9, 0.8, 0.8]) {
+    click({ settingFont: 'down' });
+    check(scale);
+  }
+  click({ settingsAction: 'resetFont' });
+  check(1);
+  assert.equal(app.stored(KEYS.settings).fontScale, 1);
+});
+
 test('合法字号设置被保留', () => {
   const app = boot({ initial: { [KEYS.settings]: JSON.stringify({ fontScale: 1.2 }) } });
   assert.equal(app.fontScale, '1.2');

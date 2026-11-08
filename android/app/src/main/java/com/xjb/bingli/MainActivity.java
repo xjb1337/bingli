@@ -9,6 +9,10 @@ import android.webkit.*;
 import android.view.*;
 import android.widget.*;
 import androidx.core.content.FileProvider;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
 import java.io.*;
 import java.time.Clock;
 import com.xjb.bingli.migration.LegacyMigrator;
@@ -31,13 +35,18 @@ public class MainActivity extends Activity {
         clearCameraCache();
         aiKeys = new AIKeyStore(this);
         aiClient = new DeepSeekClient();
+        // One owner for system bars/cutouts on every supported Android version.
+        // The WebView receives an already inset viewport (see native-insets in HTML).
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
         root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL);
-        root.setOnApplyWindowInsetsListener((v, insets) -> {
-            v.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
-                insets.getSystemWindowInsetRight(), insets.getSystemWindowInsetBottom());
-            return insets;
+        ViewCompat.setOnApplyWindowInsetsListener(root, (v, insets) -> {
+            Insets safe = insets.getInsets(WindowInsetsCompat.Type.systemBars()
+                | WindowInsetsCompat.Type.displayCutout() | WindowInsetsCompat.Type.ime());
+            v.setPadding(safe.left, safe.top, safe.right, safe.bottom);
+            return WindowInsetsCompat.CONSUMED;
         });
         web = new WebView(this); root.addView(web, new LinearLayout.LayoutParams(-1, 0, 1)); setContentView(root);
+        ViewCompat.requestApplyInsets(root);
         WebSettings settings = web.getSettings();
         settings.setJavaScriptEnabled(true); settings.setDomStorageEnabled(true);
         settings.setAllowFileAccess(false); settings.setAllowContentAccess(true);
