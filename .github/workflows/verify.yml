@@ -26,8 +26,7 @@ jobs:
       - run: npm run test:storage
       - run: npm run test:web
       - run: npx vite build apps/web
-      - run: node build.js
-      - run: node --test tests/*.test.cjs
+      - run: npm run verify
 
   android-unit:
     runs-on: ubuntu-latest
