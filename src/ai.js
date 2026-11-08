@@ -5,6 +5,7 @@ const AI_ASSIST = (() => {
   let panel = null, pending = null, request = null, result = null, model = '', timer = null;
   let busy = false, processingImage = false, recognizeImage = null;
   let organizeStep = 1, resultAdopted = false;
+  let returnScroll = 0, returnFocus = null, headingObserver = null;
   const bridge = () => window.BingliAndroid;
   const $ = id => panel.querySelector('#' + id);
   function status(text) { if (panel) { $('aiStatus').textContent = text; $('aiStatus').focus(); } }
@@ -13,7 +14,15 @@ const AI_ASSIST = (() => {
     if (force !== true && panel && (pending || hasDraft) && !window.confirm('关闭会取消请求并清除本窗口的原始笔记和图片。已采纳到病历的内容会保留。确定关闭？')) return;
     if (pending) bridge().aiCancel(pending);
     clearTimeout(timer); pending = null; request = null; result = null; busy = false; processingImage = false; recognizeImage = null; organizeStep = 1; resultAdopted = false;
-    if (panel) { panel.remove(); panel = null; }
+    if (panel) {
+      if (headingObserver) headingObserver.disconnect();
+      headingObserver = null;
+      panel.remove(); panel = null;
+      document.body.classList.remove('ai-view');
+      if (returnFocus && returnFocus.focus) returnFocus.focus({preventScroll: true});
+      window.scrollTo({top: returnScroll, behavior: 'instant'});
+      returnFocus = null;
+    }
   }
   function invalidate() { request = null; result = null; resultAdopted = false; organizeStep = 1; if (panel) { $('aiConsent').checked = false; $('aiPreview').hidden = true; $('aiResult').innerHTML = ''; updateFlow(); } }
   function updateFlow() {
@@ -22,10 +31,10 @@ const AI_ASSIST = (() => {
     $('aiProgress').hidden = !organize;
     $('aiNotesWrap').hidden = !organize || organizeStep !== 1;
     $('aiNotesEmpty').hidden = !organize || organizeStep !== 1 || !!$('aiNotes').value.trim();
-    $('aiPrepare').hidden = organize && organizeStep !== 1;
-    $('aiPreview').hidden = !request || (organize && organizeStep !== 2);
+    $('aiPrepare').hidden = busy || (organize && organizeStep !== 1);
+    $('aiPreview').hidden = busy || !request || (organize && organizeStep !== 2);
     $('aiResult').hidden = organize && organizeStep !== 3;
-    $('aiReview').hidden = organize && organizeStep !== 4;
+    $('aiReview').hidden = busy || (organize && organizeStep !== 4);
     panel.querySelectorAll('[data-ai-step]').forEach(button => {
       const step = Number(button.dataset.aiStep);
       button.disabled = busy || processingImage || (step === 2 && !request) || (step === 3 && !result) || (step === 4 && !Object.values((APP.getRecord().meta || {}).fieldStates || {}).some(state => state.source === 'ai'));
@@ -138,9 +147,14 @@ const AI_ASSIST = (() => {
   function open() {
     if (!bridge() || !bridge().aiRequest) return;
     if (panel) return;
-    panel = document.createElement('div'); panel.className = 'ai-mask';
-    panel.innerHTML = `<section class="ai-sheet" role="dialog" aria-modal="true" aria-labelledby="aiTitle" aria-describedby="aiIntro" aria-busy="false">
-      <div class="ai-heading"><div class="ai-heading-copy"><span class="ai-eyebrow">DEEPSEEK · 填写辅助</span><h2 id="aiTitle">AI 病历助手</h2><p class="ai-subtitle">整理、润色或识别资料，确认后才写入病历。</p></div><button id="aiClose" type="button" class="btn btn-ghost ai-close">关闭</button></div>
+    returnScroll = window.scrollY || 0;
+    returnFocus = document.activeElement;
+    panel = document.createElement('main'); panel.className = 'ai-page';
+    panel.setAttribute('aria-labelledby', 'aiTitle');
+    panel.setAttribute('aria-busy', 'false');
+    panel.innerHTML = `
+      <div class="ai-heading"><div class="ai-heading-copy"><span class="ai-eyebrow">DEEPSEEK · 填写辅助</span><h1 id="aiTitle">AI 病历助手</h1></div><button id="aiClose" type="button" class="btn btn-ghost ai-close">关闭</button></div>
+      <p class="ai-subtitle">整理、润色或识别资料，确认后才写入病历。</p>
       <div class="ai-note" id="aiIntro"><span class="ai-note-icon" aria-hidden="true">i</span><p>只处理你选择的资料。结果须核对后采纳；未问、未查、不详不得当成正常。联网内容将发送至 DeepSeek。识别结果只填病史、生命体征、查体与系统回顾等白名单字段，不写诊断或处方。</p></div>
       <button id="aiUnreviewed" type="button" class="btn ai-review-reminder" hidden></button>
       <details id="aiOnboarding" class="ai-onboarding">
@@ -156,7 +170,7 @@ const AI_ASSIST = (() => {
       <nav id="aiProgress" class="ai-progress" aria-label="整理填表进度"><ol>${['贴笔记', '预览确认', '建议对照', '已采纳/回表单'].map((label, i) => `<li><button type="button" data-ai-step="${i + 1}"><span aria-hidden="true">${i + 1}</span>${label}</button></li>`).join('')}</ol></nav>
       <div id="aiTargetWrap" class="ai-field" hidden><label for="aiTarget">选择要润色的段落</label><select id="aiTarget">${Object.entries(AI_CORE.fields).filter(([k]) => k !== 'summary').map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('')}</select></div>
       <div id="aiNotesEmpty">${emptyState('从一段问诊笔记开始', '贴上原始笔记，AI 会大致填入病历，再由你逐项修改核对。', '粘贴笔记开始')}</div>
-      <div id="aiNotesWrap" class="ai-field"><label for="aiNotes">原始问诊笔记（仅在本次窗口保留）</label><textarea id="aiNotes" rows="5" maxlength="16000" placeholder="如：患者诉咳嗽3天，昨晚加重，发热情况未问，既往有高血压，具体用药不详。"></textarea></div>
+      <div id="aiNotesWrap" class="ai-field"><label for="aiNotes">原始问诊笔记（仅在本页保留）</label><textarea id="aiNotes" rows="5" maxlength="16000" placeholder="如：患者诉咳嗽3天，昨晚加重，发热情况未问，既往有高血压，具体用药不详。"></textarea></div>
       <div id="aiRecognizeWrap" hidden>
         <div class="ai-section-head"><strong>识别来源</strong><span>图片与文字可同时发送</span></div>
         <div class="ai-image-actions" role="group" aria-label="添加识别资料">
@@ -193,15 +207,25 @@ const AI_ASSIST = (() => {
       <button id="aiCancel" class="btn btn-ghost" hidden>取消请求</button>
       <div id="aiResult"></div><div id="aiReview" tabindex="-1"></div>
       <button id="aiUndo" class="btn btn-ghost">撤销上一步可撤销操作</button>
-    </section>`;
+    `;
+    document.body.classList.add('ai-view');
     document.body.appendChild(panel);
+    window.scrollTo({top: 0, behavior: 'instant'});
     $('aiClose').onclick = () => close();
     bindEmptyActions(panel);
     const rectHeight = el => el && typeof el.getBoundingClientRect === 'function' ? el.getBoundingClientRect().height : 0;
-    const reminderOffset = () => { $('aiUnreviewed').style.top = rectHeight(panel.querySelector('.ai-heading')) + 'px'; };
+    const reminderOffset = () => {
+      const height = rectHeight(panel.querySelector('.ai-heading'));
+      $('aiUnreviewed').style.top = height + 'px';
+      if (panel.style) panel.style.setProperty('--ai-heading-height', height + 'px');
+    };
+    if (window.ResizeObserver) {
+      headingObserver = new window.ResizeObserver(reminderOffset);
+      headingObserver.observe(panel.querySelector('.ai-heading'));
+    }
     $('aiUnreviewed').onclick = () => {
       reminderOffset(); organizeStep = 4; updateFlow();
-      $('aiReview').style.scrollMarginTop = (rectHeight(panel.querySelector('.ai-heading')) + rectHeight($('aiUnreviewed')) + 16) + 'px';
+      $('aiReview').style.scrollMarginTop = (rectHeight(panel.querySelector('.ai-heading')) + 16) + 'px';
       $('aiReview').focus({preventScroll: true}); $('aiReview').scrollIntoView({block: 'start'});
     };
     $('aiSettings').onclick = () => bridge().aiSettings();
@@ -238,7 +262,7 @@ const AI_ASSIST = (() => {
     try {
       const s = JSON.parse(bridge().aiStatus());
       model = s.model || '';
-      $('aiModel').textContent = s.configured ? '已配置 · ' + model + '（图片识别固定使用 Flash，Pro 不支持图片）' : '未配置 API Key，请在本面板打开「API 设置」';
+      $('aiModel').textContent = s.configured ? '已配置 · ' + model + '（图片识别固定使用 Flash，Pro 不支持图片）' : '未配置 API Key，请在本页打开「API 设置」';
       if (!$('aiOnboarding').dataset.initialized) {
         $('aiOnboarding').open = !s.configured;
         $('aiOnboarding').dataset.initialized = 'true';
@@ -276,8 +300,7 @@ const AI_ASSIST = (() => {
     busy = value;
     ['aiOperation', 'aiTarget', 'aiNotes', 'aiRecognizeText', 'aiPrepare', 'aiSend', 'aiSettings', 'aiRefreshSettings', 'aiUndo', 'aiCameraButton', 'aiGalleryButton', 'aiImageClear'].forEach(id => { if ($(id)) $(id).disabled = value || (id === 'aiPrepare' && processingImage); });
     if (panel) {
-      const sheet = panel.querySelector('.ai-sheet');
-      if (sheet) sheet.setAttribute('aria-busy', value ? 'true' : 'false');
+      panel.setAttribute('aria-busy', value ? 'true' : 'false');
       if ($('aiLoading')) $('aiLoading').hidden = !value;
       if ($('aiSend')) $('aiSend').disabled = value || !$('aiConsent').checked;
     }

@@ -76,8 +76,9 @@ async function main() {
     await wait("document.querySelector('#aiStatus').textContent.includes('已采纳 1 项并保存')");
     check('summary draft has provenance and stale tracking', await ev("return APP.getRecord().summary==='旧症状。'&&RECORD_CORE.documentState(APP.getRecord(),'summary').state==='fresh'&&RECORD_CORE.fieldState(APP.getRecord(),'summary').source==='ai';"));
     await ev("document.querySelector('#aiUndo').click();");
-    const metrics = await ev('return {width:innerWidth,overflow:document.documentElement.scrollWidth>innerWidth,sheet:document.querySelector(".ai-sheet").getBoundingClientRect().width};');
-    check('portrait assistant fits viewport', !metrics.overflow && metrics.sheet <= metrics.width + 1);
+    const metrics = await ev('return {width:innerWidth,overflow:document.documentElement.scrollWidth>innerWidth,page:document.querySelector(".ai-page").getBoundingClientRect().width};');
+    check('portrait assistant fits viewport', !metrics.overflow && metrics.page <= metrics.width + 1);
+    check('assistant is a standalone document page', await ev('return document.body.classList.contains("ai-view") && document.querySelector("main.ai-page") && !document.querySelector(".ai-mask, .ai-sheet, [aria-modal=true]") && getComputedStyle(document.querySelector("footer")).display === "none";'));
     console.log('Layout:', JSON.stringify(metrics));
     const image = await send('Page.captureScreenshot', {format: 'png'});
     fs.mkdirSync('tmp-review', {recursive: true}); fs.writeFileSync('tmp-review/deepseek-assistant.png', Buffer.from(image.data, 'base64'));
