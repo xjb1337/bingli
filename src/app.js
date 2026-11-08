@@ -4350,6 +4350,7 @@ const APP = (() => {
 
   return {
     init, getRecord: () => R, STEPS,
+    jumpToPath: path => { closeSettings(); jumpToPath(path); },
     getAiTarget: () => {
       const key = (STEPS[step] || {}).key;
       if (key === 'hpi') return 'hpi.symptoms';

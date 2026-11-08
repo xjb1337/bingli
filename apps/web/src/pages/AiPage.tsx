@@ -121,7 +121,7 @@ export function AiPage(props: AiPageProps) {
           {testMessage ? <p className="ai-status" role="status">{testMessage}</p> : null}
         </div>
       </Card>
-      <AiAssistantPanel {...props} />
+      <AiAssistantPanel {...props} onJumpToPath={props.onJumpToPath} />
     </section>
   );
 }

@@ -273,6 +273,7 @@ test('AI 面板内可打开原生 API 设置并刷新模型状态，预选当前
       });
       return nodes.get(selector);
     },
+    querySelectorAll: () => [],
     remove() {},
   });
   app.run(`window.configured = false; window.settingsOpened = 0;

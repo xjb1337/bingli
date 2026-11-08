@@ -211,6 +211,7 @@ describe('DeepSeek web security boundary', () => {
     expect(appStyles).toMatch(/\.ai-panel details > summary\s*\{[^}]*min-height:\s*44px/s);
     expect(appStyles).toMatch(/\.ai-json-preview\s*\{[^}]*overflow-wrap:\s*anywhere/s);
     expect(appStyles).toMatch(/\.ai-compare\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s);
+    expect(appStyles).toMatch(/\.ai-compare\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s);
   });
 
   it('shows readable send entries by default and keeps raw JSON collapsed', async () => {
@@ -228,6 +229,7 @@ describe('DeepSeek web security boundary', () => {
         createTransport={() => transport.factory('sk-test-preview')}
         onAdoptRecord={async () => true}
         onConfirmField={async () => true}
+        onJumpToPath={vi.fn()}
       />,
     );
 
@@ -244,6 +246,104 @@ describe('DeepSeek web security boundary', () => {
     expect(rawDetails).not.toBeNull();
     expect(rawDetails).not.toHaveAttribute('open');
     expect(within(rawDetails as HTMLElement).getByText(/"sources"/)).toBeInTheDocument();
+  });
+
+  it('walks through four organize steps, keeps evidence expanded and jumps to the adopted field', async () => {
+    const request = vi.fn(async () => ({ content: aiContent(), model: 'deepseek-flash' }));
+    const transport = fakeTransportFactory(request);
+    const user = userEvent.setup();
+    await renderApp(transport.factory);
+    await enterKey(user, 'sk-organize-steps');
+    await goToAi(user);
+
+    const progress = () => within(screen.getByRole('navigation', { name: '整理填表进度' }));
+    const currentStep = () => screen.getByRole('navigation', { name: '整理填表进度' }).querySelector('[aria-current="step"]');
+    expect(progress().getAllByRole('button')).toHaveLength(4);
+    expect(currentStep()).toHaveTextContent('贴笔记');
+    expect(progress().getByRole('button', { name: '预览确认' })).toBeDisabled();
+    expect(progress().getByRole('button', { name: '建议对照' })).toBeDisabled();
+    expect(progress().getByRole('button', { name: '已采纳/回表单' })).toBeDisabled();
+    expect(screen.queryByRole('heading', { name: '已采纳的 AI 内容' })).not.toBeInTheDocument();
+
+    await user.type(screen.getByLabelText(/问诊笔记/), '患者诉咳嗽3天');
+    await user.click(screen.getByRole('button', { name: '预览发送内容' }));
+    expect(currentStep()).toHaveTextContent('预览确认');
+    expect(screen.queryByLabelText(/问诊笔记/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '生成建议' })).toBeDisabled();
+    expect(request).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: '返回贴笔记' }));
+    expect(screen.getByLabelText(/问诊笔记/)).toHaveValue('患者诉咳嗽3天');
+    await user.click(progress().getByRole('button', { name: '预览确认' }));
+    await user.click(screen.getByLabelText(/我已核对下方实际发送内容/));
+    await user.click(screen.getByRole('button', { name: '生成建议' }));
+    await screen.findByRole('heading', { name: '建议对照 · 尚未写入' });
+    expect(currentStep()).toHaveTextContent('建议对照');
+    expect(screen.queryByRole('region', { name: /实际发送内容/ })).not.toBeInTheDocument();
+    const card = screen.getByRole('article');
+    expect(within(card).getByText('原内容')).toBeVisible();
+    expect(within(card).getByText('（空白）')).toBeVisible();
+    expect(within(card).getByText('AI 建议 · 待核对')).toBeVisible();
+    expect(within(card).getByText('患者诉咳嗽3天。')).toBeVisible();
+    expect(within(card).getByText('原文依据')).toBeVisible();
+    const quote = within(card).getByText('患者诉咳嗽3天');
+    expect(quote).toBeVisible();
+    expect(quote.closest('details')).toBeNull();
+    expect(screen.getByLabelText('选择症状特点')).not.toBeChecked();
+
+    await user.click(screen.getByRole('button', { name: '返回预览确认' }));
+    expect(currentStep()).toHaveTextContent('预览确认');
+    await user.click(progress().getByRole('button', { name: '建议对照' }));
+    await user.click(screen.getByLabelText('选择症状特点'));
+    await user.click(screen.getByRole('button', { name: '采纳勾选项' }));
+    await screen.findByRole('heading', { name: '已采纳的 AI 内容' });
+    expect(currentStep()).toHaveTextContent('已采纳/回表单');
+    expect(screen.getByRole('button', { name: '确认已核对：症状特点' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '返回建议对照' }));
+    expect(await screen.findByRole('heading', { name: '建议对照 · 本轮已采纳' })).toBeInTheDocument();
+    expect(screen.getByLabelText('选择症状特点')).toBeDisabled();
+    expect(screen.queryByRole('button', { name: '采纳勾选项' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '重新预览发送内容' }));
+    expect(currentStep()).toHaveTextContent('预览确认');
+    expect(screen.getByLabelText(/我已核对下方实际发送内容/)).not.toBeChecked();
+    expect(screen.getByRole('button', { name: '生成建议' })).toBeDisabled();
+    expect(progress().getByRole('button', { name: '建议对照' })).toBeDisabled();
+    await user.click(progress().getByRole('button', { name: '已采纳/回表单' }));
+
+    await user.click(screen.getByRole('button', { name: '去改该字段' }));
+    await waitFor(() => {
+      expect(document.activeElement).toHaveAttribute('data-field-path', 'hpi.symptoms');
+    });
+    expect(document.activeElement).toHaveValue('患者诉咳嗽3天。');
+    expect(screen.queryByRole('heading', { name: 'AI 助手' })).not.toBeInTheDocument();
+  });
+
+  it('invalidates preview and consent when notes change, and keeps other operations outside the step flow', async () => {
+    const user = userEvent.setup();
+    render(<AiAssistantPanel
+      record={SCHEMA.emptyRecord()}
+      configured
+      securityContext="web"
+      model="deepseek-flash"
+      createTransport={() => fakeTransportFactory(async () => ({ content: aiContent(), model: 'deepseek-flash' })).factory('sk-test')}
+      onAdoptRecord={async () => true}
+      onConfirmField={async () => true}
+      onJumpToPath={vi.fn()}
+    />);
+    await user.type(screen.getByLabelText(/问诊笔记/), '患者诉咳嗽3天');
+    await user.click(screen.getByRole('button', { name: '预览发送内容' }));
+    await user.click(screen.getByLabelText(/我已核对下方实际发送内容/));
+    await user.click(screen.getByRole('button', { name: '返回贴笔记' }));
+    await user.type(screen.getByLabelText(/问诊笔记/), '，无发热');
+    const progress = within(screen.getByRole('navigation', { name: '整理填表进度' }));
+    expect(progress.getByRole('button', { name: '预览确认' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: '预览发送内容' }));
+    expect(screen.getByLabelText(/我已核对下方实际发送内容/)).not.toBeChecked();
+    expect(screen.getByRole('button', { name: '生成建议' })).toBeDisabled();
+    for (const operation of ['polish', 'check', 'summary', 'recognize']) {
+      await user.selectOptions(screen.getByLabelText('AI 操作'), operation);
+      expect(screen.queryByRole('navigation', { name: '整理填表进度' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '预览发送内容' })).toBeEnabled();
+    }
   });
 
   it('offers camera, gallery and pasted-text recognition without auto-selecting results', async () => {
@@ -273,6 +373,7 @@ describe('DeepSeek web security boundary', () => {
         createTransport={() => transport.factory('sk-test-recognize')}
         onAdoptRecord={onAdoptRecord}
         onConfirmField={async () => true}
+        onJumpToPath={vi.fn()}
       />,
     );
 
@@ -336,6 +437,7 @@ describe('DeepSeek web security boundary', () => {
         createTransport={() => transport.factory('sk-test-dropped')}
         onAdoptRecord={async () => true}
         onConfirmField={async () => true}
+        onJumpToPath={vi.fn()}
       />,
     );
 
@@ -394,6 +496,7 @@ describe('DeepSeek web security boundary', () => {
         createTransport={() => transport.factory('sk-test-image-note')}
         onAdoptRecord={async () => true}
         onConfirmField={async () => true}
+        onJumpToPath={vi.fn()}
       />,
     );
 
@@ -498,6 +601,7 @@ describe('DeepSeek web security boundary', () => {
       createTransport: () => transport.factory('sk-test-stale'),
       onAdoptRecord,
       onConfirmField: async () => true,
+      onJumpToPath: vi.fn(),
     };
     const view = render(<AiAssistantPanel {...props} />);
 
@@ -568,6 +672,7 @@ describe('DeepSeek web security boundary', () => {
         createTransport={() => fakeTransportFactory(async () => ({ content: aiContent(), model: 'deepseek-flash' })).factory('sk-test')}
         onAdoptRecord={async () => true}
         onConfirmField={async () => true}
+        onJumpToPath={vi.fn()}
       />,
     );
 
@@ -602,6 +707,7 @@ describe('DeepSeek web security boundary', () => {
         createTransport={() => transport.factory('sk-test-status')}
         onAdoptRecord={async () => true}
         onConfirmField={async () => true}
+        onJumpToPath={vi.fn()}
       />,
     );
 

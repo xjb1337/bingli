@@ -4,6 +4,7 @@ const AI_ASSIST = (() => {
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
   let panel = null, pending = null, request = null, result = null, model = '', timer = null;
   let busy = false, processingImage = false, recognizeImage = null;
+  let organizeStep = 1, resultAdopted = false;
   const bridge = () => window.BingliAndroid;
   const $ = id => panel.querySelector('#' + id);
   function status(text) { if (panel) { $('aiStatus').textContent = text; $('aiStatus').focus(); } }
@@ -11,19 +12,42 @@ const AI_ASSIST = (() => {
     const hasDraft = panel && (($('aiNotes') && $('aiNotes').value.trim()) || ($('aiRecognizeText') && $('aiRecognizeText').value.trim()) || recognizeImage);
     if (force !== true && panel && (pending || hasDraft) && !window.confirm('关闭会取消请求并清除本窗口的原始笔记和图片。已采纳到病历的内容会保留。确定关闭？')) return;
     if (pending) bridge().aiCancel(pending);
-    clearTimeout(timer); pending = null; request = null; result = null; busy = false; processingImage = false; recognizeImage = null;
+    clearTimeout(timer); pending = null; request = null; result = null; busy = false; processingImage = false; recognizeImage = null; organizeStep = 1; resultAdopted = false;
     if (panel) { panel.remove(); panel = null; }
   }
-  function invalidate() { request = null; result = null; if (panel) { $('aiPreview').hidden = true; $('aiResult').innerHTML = ''; } }
+  function invalidate() { request = null; result = null; resultAdopted = false; organizeStep = 1; if (panel) { $('aiConsent').checked = false; $('aiPreview').hidden = true; $('aiResult').innerHTML = ''; updateFlow(); } }
+  function updateFlow() {
+    if (!panel) return;
+    const organize = $('aiOperation').value === 'organize';
+    $('aiProgress').hidden = !organize;
+    $('aiNotesWrap').hidden = !organize || organizeStep !== 1;
+    $('aiPrepare').hidden = organize && organizeStep !== 1;
+    $('aiPreview').hidden = !request || (organize && organizeStep !== 2);
+    $('aiResult').hidden = organize && organizeStep !== 3;
+    $('aiReview').hidden = organize && organizeStep !== 4;
+    panel.querySelectorAll('[data-ai-step]').forEach(button => {
+      const step = Number(button.dataset.aiStep);
+      button.disabled = busy || processingImage || (step === 2 && !request) || (step === 3 && !result) || (step === 4 && !$('aiReview').children.length);
+      if (step === organizeStep) button.setAttribute('aria-current', 'step');
+      else button.removeAttribute('aria-current');
+    });
+  }
   function pendingFields() {
     if (!panel) return;
     const r = APP.getRecord();
-    const paths = Object.keys((r.meta && r.meta.fieldStates) || {}).filter(p => AI_CORE.labels[p] && RECORD_CORE.fieldState(r, p).source === 'ai' && !RECORD_CORE.fieldReviewValid(r, p));
-    $('aiReview').innerHTML = paths.length ? '<h3>已采纳、待核对</h3>' + paths.map(p => {
+    const paths = Object.keys((r.meta && r.meta.fieldStates) || {}).filter(p => AI_CORE.labels[p] && RECORD_CORE.fieldState(r, p).source === 'ai');
+    $('aiReview').innerHTML = paths.length ? '<h3>已采纳的 AI 内容</h3>' + paths.map(p => {
       let provenance = {}; try { provenance = JSON.parse(RECORD_CORE.fieldState(r, p).sourceRef); } catch (e) { }
-      return `<div class="ai-review"><strong>${esc(AI_CORE.labels[p])}</strong><p>${esc(AI_CORE.displayValue(p, RECORD_CORE.getPath(r, p)))}</p><details><summary>AI 来源与原文依据</summary><small>${esc(provenance.model || 'DeepSeek')}</small>${(provenance.evidence || []).map(e => '<blockquote>' + esc(e.quote) + '</blockquote>').join('')}</details><button class="btn btn-ghost" data-review="${esc(p)}">已逐字核对，确认本项</button></div>`;
+      const reviewed = RECORD_CORE.fieldReviewValid(r, p);
+      return `<div class="ai-review"><strong>${esc(AI_CORE.labels[p])}</strong><span class="ai-badge">${reviewed ? '已核对' : '未核对'}</span><p>${esc(AI_CORE.displayValue(p, RECORD_CORE.getPath(r, p)))}</p><details><summary>AI 来源与原文依据</summary><small>${esc(provenance.model || 'DeepSeek')}</small>${(provenance.evidence || []).map(e => '<blockquote>' + esc(e.quote) + '</blockquote>').join('')}</details><button class="btn btn-ghost" data-ai-edit="${esc(p)}">去改该字段</button>${reviewed ? '' : `<button class="btn btn-ghost" data-review="${esc(p)}">已逐字核对，确认本项</button>`}</div>`;
     }).join('') : '';
     $('aiReview').querySelectorAll('[data-review]').forEach(button => button.onclick = () => { APP.reviewAI(button.dataset.review); pendingFields(); status('本项已标记核对；内容再次修改后需要重新核对'); });
+    $('aiReview').querySelectorAll('[data-ai-edit]').forEach(button => button.onclick = () => {
+      const path = button.dataset.aiEdit;
+      close(true);
+      APP.jumpToPath(path);
+    });
+    updateFlow();
   }
   function renderRecognizeImage() {
     if (!panel) return;
@@ -98,6 +122,7 @@ const AI_ASSIST = (() => {
         <p>密钥只保存在本机加密存储中，不会写入病历备份；联网前请检查预览内容。</p>
       </div>
       <div class="ai-field"><label for="aiOperation">需要什么帮助</label><select id="aiOperation">${Object.entries(AI_CORE.operations).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></div>
+      <nav id="aiProgress" class="ai-progress" aria-label="整理填表进度"><ol>${['贴笔记', '预览确认', '建议对照', '已采纳/回表单'].map((label, i) => `<li><button type="button" data-ai-step="${i + 1}"><span aria-hidden="true">${i + 1}</span>${label}</button></li>`).join('')}</ol></nav>
       <div id="aiTargetWrap" class="ai-field" hidden><label for="aiTarget">选择要润色的段落</label><select id="aiTarget">${Object.entries(AI_CORE.fields).filter(([k]) => k !== 'summary').map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('')}</select></div>
       <div id="aiNotesWrap" class="ai-field"><label for="aiNotes">原始问诊笔记（仅在本次窗口保留）</label><textarea id="aiNotes" rows="5" maxlength="16000" placeholder="如：患者诉咳嗽3天，昨晚加重，发热情况未问，既往有高血压，具体用药不详。"></textarea></div>
       <div id="aiRecognizeWrap" hidden>
@@ -143,11 +168,17 @@ const AI_ASSIST = (() => {
     if (APP.getAiTarget) $('aiTarget').value = APP.getAiTarget();
     const updateMode = () => {
       invalidate(); const op = $('aiOperation').value;
-      $('aiTargetWrap').hidden = op !== 'polish'; $('aiNotesWrap').hidden = op !== 'organize';
+      $('aiTargetWrap').hidden = op !== 'polish';
       $('aiRecognizeWrap').hidden = op !== 'recognize';
       status('');
     };
     $('aiOperation').onchange = updateMode;
+    panel.querySelectorAll('[data-ai-step]').forEach(button => button.onclick = () => {
+      if (busy || processingImage) return;
+      const step = Number(button.dataset.aiStep);
+      if (step === 2 && resultAdopted) { prepare(); return; }
+      organizeStep = step; updateFlow();
+    });
     $('aiTarget').onchange = invalidate; $('aiNotes').oninput = invalidate;
     $('aiRecognizeText').oninput = invalidate;
     $('aiCameraButton').onclick = () => $('aiCameraInput').click();
@@ -172,7 +203,7 @@ const AI_ASSIST = (() => {
       const operation = $('aiOperation').value;
       const text = operation === 'organize' ? $('aiNotes').value : operation === 'recognize' ? $('aiRecognizeText').value : '';
       request = AI_CORE.prepare(operation, APP.getRecord(), text, $('aiTarget').value, operation === 'recognize' ? recognizeImage : null);
-      result = null; $('aiResult').innerHTML = '';
+      result = null; resultAdopted = false; organizeStep = 2; $('aiResult').innerHTML = '';
       $('aiSources').textContent = request.sources.map(s => '[' + s.label + ']\n' + s.text).join('\n\n');
       $('aiImageSendPreview').hidden = !request.image;
       if (request.image) $('aiSendThumb').src = recognizeImage.previewDataUrl;
@@ -180,6 +211,7 @@ const AI_ASSIST = (() => {
         ? '我已确认图片可能含患者身份信息、图片无法自动脱敏，并确认可发送这张图片和上述文字至 DeepSeek'
         : '我已检查上述内容，确认可发送至 DeepSeek';
       $('aiConsent').checked = false; if ($('aiSend')) $('aiSend').disabled = true; $('aiPreview').hidden = false;
+      updateFlow();
       status(request.image ? '图片无法自动脱敏；请确认缩略图和说明后勾选发送' : '请核对实际发送内容；本次不发送姓名、病历号等身份字段');
     } catch (e) { request = null; $('aiPreview').hidden = true; status(e.message); }
   }
@@ -193,9 +225,10 @@ const AI_ASSIST = (() => {
       if ($('aiSend')) $('aiSend').disabled = value || !$('aiConsent').checked;
     }
     $('aiCancel').hidden = !value;
+    updateFlow();
   }
   function send() {
-    if (busy || !request) return;
+    if (busy || !request || resultAdopted) return;
     if (!$('aiConsent').checked) { status('请先确认可以发送预览中的资料'); return; }
     if (!refreshModel()) { status('请先打开 API 设置，保存密钥并测试连接'); return; }
     if (request.caseId !== APP.getRecord().id || AI_CORE.baseline(APP.getRecord()) !== request.baseline) { invalidate(); status('病历已改变，请重新预览资料'); return; }
@@ -222,22 +255,28 @@ const AI_ASSIST = (() => {
       $('aiResult').innerHTML = '<div class="ai-result-heading"><h3>建议对照 · 尚未写入</h3><span class="ai-badge">未核对</span></div><p class="hint">引用真实不代表建议一定正确。逐项检查否定词、时间、药名、剂量和来源。</p>' + result.suggestions.map((s, i) => {
         const original = AI_CORE.displayValue(s.path, RECORD_CORE.getPath(r, s.path)) || '';
         const kindLabel = s.kind === 'choice' ? '选择项 · 默认不勾选' : s.kind === 'number' ? '数值项 · 待核对' : '文本项 · 待核对';
-        return `<article class="ai-suggestion"><label class="ai-check"><input type="checkbox" data-ai-choice="${i}"><strong>${esc(AI_CORE.labels[s.path])}</strong><small>${kindLabel}</small>${s.fromImage ? '<small class="ai-image-note">来自图片，依据未能自动核实</small>' : ''}</label><div class="ai-compare"><div><small>原内容</small><p>${esc(original || '（空白）')}</p></div><div><small>AI 建议 · 待核对</small><p>${esc(AI_CORE.displayValue(s.path, s.text))}</p></div></div><details><summary>查看原文依据</summary>${s.evidence.map(e => `<blockquote>${esc(e.quote)}</blockquote>`).join('')}</details></article>`;
+        return `<article class="ai-suggestion"><label class="ai-check"><input type="checkbox" data-ai-choice="${i}"><strong>${esc(AI_CORE.labels[s.path])}</strong><small>${kindLabel}</small>${s.fromImage ? '<small class="ai-image-note">来自图片，依据未能自动核实</small>' : ''}</label><div class="ai-compare"><div><small>原内容</small><p>${esc(original || '（空白）')}</p></div><div><small>AI 建议 · 待核对</small><p>${esc(AI_CORE.displayValue(s.path, s.text))}</p></div><div><small>原文依据</small>${s.evidence.map(e => `<blockquote><code>${esc(e.source)}</code><p>${esc(e.quote)}</p></blockquote>`).join('')}</div></div></article>`;
       }).join('') + droppedHtml + (result.issues.length ? '<h3>待核实的问题</h3><ul>' + result.issues.map(i => `<li>${i.path ? esc(AI_CORE.labels[i.path]) + '：' : ''}${esc(i.message)}</li>`).join('') + '</ul>' : '') +
         (result.questions.length ? '<h3>建议补问</h3><ul>' + result.questions.map(q => '<li>' + esc(q) + '</li>').join('') + '</ul>' : '') +
         (result.suggestions.length ? '<label class="ai-check ai-consent-box"><input id="aiReplace" type="checkbox">允许用勾选建议替换已有内容（操作可撤销）</label><button id="aiApply" class="btn">采纳勾选项</button>' : '<div class="ai-empty-inline"><strong>没有可直接填写的建议</strong><p>可以补充更具体的原文依据，或先返回病历继续核对。</p></div>');
       if (result.suggestions.length) $('aiApply').onclick = apply;
+      organizeStep = 3; updateFlow();
       status('生成完成；请核对后勾选采纳。AI 检查不能证明病历正确或完整' + (dropped.length ? '；' + dropped.length + ' 条建议因格式问题未采用' : ''));
     } catch (e) { result = null; status(e.message || '结果校验失败，未写入病历'); }
   }
   async function apply() {
-    if (busy || !request || !result) return;
+    if (busy || !request || !result || resultAdopted) return;
     try {
       const selected = Array.from(panel.querySelectorAll('[data-ai-choice]:checked')).map(el => Number(el.dataset.aiChoice));
       $('aiApply').disabled = true;
       const applied = await APP.applyAI(request, result, selected, $('aiReplace').checked, model);
       if (!panel) return;
-      invalidate(); pendingFields();
+      resultAdopted = true; organizeStep = 4;
+      $('aiResult').querySelector('h3').textContent = '建议对照 · 本轮已采纳';
+      panel.querySelectorAll('[data-ai-choice], #aiReplace').forEach(input => { input.disabled = true; });
+      $('aiApply').hidden = true;
+      $('aiConsent').checked = false; $('aiSend').disabled = true;
+      pendingFields();
       status(applied.saved ? '已采纳 ' + applied.count + ' 项并保存到草稿，仍待逐项核对；可撤销上一步' : '已采纳到内存，但保存失败；请立即导出备份并处理主页面提示');
     } catch (e) { if (!panel) return; if ($('aiApply')) $('aiApply').disabled = false; status(e.message); }
   }
