@@ -197,10 +197,11 @@ const AI_ASSIST = (() => {
     document.body.appendChild(panel);
     $('aiClose').onclick = () => close();
     bindEmptyActions(panel);
-    const reminderOffset = () => { $('aiUnreviewed').style.top = panel.querySelector('.ai-heading').getBoundingClientRect().height + 'px'; };
+    const rectHeight = el => el && typeof el.getBoundingClientRect === 'function' ? el.getBoundingClientRect().height : 0;
+    const reminderOffset = () => { $('aiUnreviewed').style.top = rectHeight(panel.querySelector('.ai-heading')) + 'px'; };
     $('aiUnreviewed').onclick = () => {
       reminderOffset(); organizeStep = 4; updateFlow();
-      $('aiReview').style.scrollMarginTop = (panel.querySelector('.ai-heading').getBoundingClientRect().height + $('aiUnreviewed').getBoundingClientRect().height + 16) + 'px';
+      $('aiReview').style.scrollMarginTop = (rectHeight(panel.querySelector('.ai-heading')) + rectHeight($('aiUnreviewed')) + 16) + 'px';
       $('aiReview').focus({preventScroll: true}); $('aiReview').scrollIntoView({block: 'start'});
     };
     $('aiSettings').onclick = () => bridge().aiSettings();

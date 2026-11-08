@@ -26,7 +26,8 @@ export function AiPage(props: AiPageProps) {
   useEffect(() => {
     if (!focusSettings) return;
     if (settingsRef.current) {
-      const headerHeight = document.querySelector('.app-header')?.getBoundingClientRect().height ?? 0;
+      const header = document.querySelector('.app-header');
+      const headerHeight = header && typeof header.getBoundingClientRect === 'function' ? header.getBoundingClientRect().height : 0;
       settingsRef.current.style.scrollMarginTop = `${headerHeight + 16}px`;
       settingsRef.current.scrollIntoView?.({ block: 'start' });
     }
@@ -85,7 +86,7 @@ export function AiPage(props: AiPageProps) {
           <div className="ai-settings">
             <div className="ai-key-guide">
               <ol>
-                <li>打开 <a href="https://platform.deepseek.com" target="_blank" rel="noreferrer">platform.deepseek.com</a>，完成注册并登录。</li>
+                <li>打开 platform.deepseek.com，完成注册并登录。</li>
                 <li>进入账户中心完成充值，确认余额可用。</li>
                 <li>在左侧菜单点击 API keys，创建一个新的 API key。</li>
                 <li>复制以 sk- 开头的 Key；完整内容通常只显示一次。</li>

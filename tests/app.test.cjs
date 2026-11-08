@@ -268,7 +268,8 @@ test('AI 面板内可打开原生 API 设置并刷新模型状态，预选当前
     innerHTML: '',
     querySelector(selector) {
       if (!nodes.has(selector)) nodes.set(selector, {
-        value: '', textContent: '', hidden: false, focus() {}, setAttribute() {}, removeAttribute() {},
+        value: '', textContent: '', hidden: false, style: {}, dataset: {},
+        focus() {}, scrollIntoView() {}, setAttribute() {}, removeAttribute() {},
         querySelectorAll: () => [],
       });
       return nodes.get(selector);
@@ -286,13 +287,18 @@ test('AI 面板内可打开原生 API 设置并刷新模型状态，预选当前
   assert.equal(app.run('AI_ASSIST.isOpen()'), true);
   assert.equal(nodes.get('#aiTarget').value, 'pmh.diseaseDetail');
   assert.match(nodes.get('#aiModel').textContent, /未配置 API Key.*本面板/);
-  assert.equal(nodes.get('#aiOnboarding').hidden, false);
+  assert.equal(nodes.get('#aiOnboarding').open, true);
+  assert.equal(nodes.get('#aiNotConfigured').hidden, false);
+  assert.equal(nodes.get('#aiUnreviewed').style.top, '0px');
+  nodes.get('#aiUnreviewed').onclick();
+  assert.equal(nodes.get('#aiReview').style.scrollMarginTop, '16px');
   nodes.get('#aiSettings').onclick();
   assert.equal(app.run('window.settingsOpened'), 1);
   app.run('window.configured = true');
   nodes.get('#aiRefreshSettings').onclick();
   assert.match(nodes.get('#aiModel').textContent, /已配置.*deepseek-v4-pro/);
-  assert.equal(nodes.get('#aiOnboarding').hidden, true);
+  assert.equal(nodes.get('#aiNotConfigured').hidden, true);
+  assert.equal(nodes.get('#aiOnboarding').open, true, '刷新配置状态保留引导的展开状态');
 });
 
 /* ======================= 启动与渲染 ======================= */

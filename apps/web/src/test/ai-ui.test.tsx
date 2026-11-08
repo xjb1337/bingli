@@ -761,7 +761,8 @@ describe('AI 中低优 UX', () => {
     const summary = screen.getByText('如何获取 DeepSeek API Key · 配置与测试');
     const details = summary.closest('details');
     expect(details).toHaveAttribute('open');
-    expect(screen.getByRole('link', { name: 'platform.deepseek.com' })).toHaveAttribute('href', 'https://platform.deepseek.com');
+    expect(screen.getByText('打开 platform.deepseek.com，完成注册并登录。')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'platform.deepseek.com' })).not.toBeInTheDocument();
     expect(screen.getByText(/在左侧菜单点击 API keys/)).toBeInTheDocument();
     expect(screen.getByText(/复制以 sk- 开头/)).toBeInTheDocument();
     for (const code of ['401', '403', '402', '429', '网络', '超时']) expect(screen.getByText(code)).toBeVisible();

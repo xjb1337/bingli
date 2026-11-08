@@ -34,6 +34,9 @@ const MAX_IMAGE_EDGE = 1600;
 const ORGANIZE_STEPS = ['贴笔记', '预览确认', '建议对照', '已采纳/回表单'];
 type OrganizeStep = 1 | 2 | 3 | 4;
 
+const rectHeight = (element: Element | null) =>
+  element && typeof element.getBoundingClientRect === 'function' ? element.getBoundingClientRect().height : 0;
+
 function loadImageFile(file: File): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
@@ -155,7 +158,7 @@ export function AiAssistantPanel({
   useEffect(() => {
     const header = document.querySelector('.app-header');
     const updateOffset = () => {
-      if (reminderRef.current) reminderRef.current.style.top = `${(header?.getBoundingClientRect().height ?? 0) + 8}px`;
+      if (reminderRef.current) reminderRef.current.style.top = `${rectHeight(header) + 8}px`;
     };
     updateOffset();
     const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(updateOffset) : null;
@@ -167,8 +170,8 @@ export function AiAssistantPanel({
   useEffect(() => {
     if (!jumpToUnreviewed) return;
     const list = document.getElementById('ai-adopted-unreviewed');
-    const headerHeight = document.querySelector('.app-header')?.getBoundingClientRect().height ?? 0;
-    const reminderHeight = reminderRef.current?.getBoundingClientRect().height ?? 0;
+    const headerHeight = rectHeight(document.querySelector('.app-header'));
+    const reminderHeight = rectHeight(reminderRef.current);
     if (list) list.style.scrollMarginTop = `${headerHeight + reminderHeight + 24}px`;
     list?.focus({ preventScroll: true });
     list?.scrollIntoView?.({ block: 'start' });
