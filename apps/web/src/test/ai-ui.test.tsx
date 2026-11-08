@@ -9,11 +9,16 @@ import {
 } from '@dabingli/storage';
 import {
   AiError,
+  adoptAiSuggestions,
+  confirmAiField,
+  parseAiResult,
+  prepareAiRequest,
   type AiTransport,
   type AiTransportFactory,
 } from '@dabingli/ai';
 import { App } from '../App';
 import { AiAssistantPanel } from '../components/AiAssistantPanel';
+import { AiPage } from '../pages/AiPage';
 import { STEPS } from '../steps';
 import appStyles from '../styles.css?raw';
 
@@ -171,6 +176,7 @@ describe('DeepSeek web security boundary', () => {
     await renderApp(transport.factory);
     await enterKey(user, 'sk-connection-test');
     await goToAi(user);
+    await user.click(screen.getByText('如何获取 DeepSeek API Key · 配置与测试'));
     expect(screen.getByLabelText('DeepSeek API Key')).toHaveValue('sk-connection-test');
     expect(request).not.toHaveBeenCalled();
     await user.click(screen.getByRole('button', { name: '测试连接' }));
@@ -722,5 +728,149 @@ describe('DeepSeek web security boundary', () => {
     expect(compare).not.toBeNull();
     expect(within(compare as HTMLElement).getByText('阳性')).toBeInTheDocument();
     expect(within(compare as HTMLElement).getByText('阴性')).toBeInTheDocument();
+  });
+});
+
+
+describe('AI 中低优 UX', () => {
+  const originalScroll = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollIntoView');
+  beforeEach(() => {
+    if (!originalScroll) Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, writable: true, value: () => {} });
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (!originalScroll) Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView');
+  });
+  function panelProps(record = SCHEMA.emptyRecord()) {
+    return {
+      record, configured: true, securityContext: 'web' as const, model: 'deepseek-flash',
+      createTransport: () => ({ kind: 'web' as const,
+        status: async () => ({ configured: true, model: 'deepseek-flash' }),
+        request: async () => ({ content: { suggestions: [], issues: [], questions: [] }, model: 'deepseek-flash' }),
+      }),
+      onAdoptRecord: vi.fn(async () => true), onConfirmField: vi.fn(async () => true), onJumpToPath: vi.fn(),
+    };
+  }
+
+  it('opens the unconfigured guide, supports collapse and focuses configuration from the empty state', async () => {
+    const scroll = vi.fn();
+    vi.stubGlobal('ResizeObserver', undefined);
+    vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(scroll);
+    const user = userEvent.setup();
+    render(<AiPage {...panelProps()} configured={false} apiKey="" onApiKeyChange={vi.fn()} onModelChange={vi.fn()} />);
+    const summary = screen.getByText('如何获取 DeepSeek API Key · 配置与测试');
+    const details = summary.closest('details');
+    expect(details).toHaveAttribute('open');
+    expect(screen.getByRole('link', { name: 'platform.deepseek.com' })).toHaveAttribute('href', 'https://platform.deepseek.com');
+    expect(screen.getByText(/在左侧菜单点击 API keys/)).toBeInTheDocument();
+    expect(screen.getByText(/复制以 sk- 开头/)).toBeInTheDocument();
+    for (const code of ['401', '403', '402', '429', '网络', '超时']) expect(screen.getByText(code)).toBeVisible();
+    expect(screen.getByText('API Key 无权限，请检查 AI 设置后重试')).toBeVisible();
+    expect(screen.getByText('DeepSeek 余额不足，请充值后重试')).toBeVisible();
+    await user.click(summary);
+    expect(details).not.toHaveAttribute('open');
+    await user.click(screen.getByRole('button', { name: '去配置 API' }));
+    expect(details).toHaveAttribute('open');
+    expect(screen.getByLabelText('DeepSeek API Key')).toHaveFocus();
+    expect(scroll).toHaveBeenCalledWith({ block: 'start' });
+  });
+
+  it('collapses settings by default when configured and retains the connection test explanation', async () => {
+    const user = userEvent.setup();
+    render(<AiPage {...panelProps()} apiKey="sk-local" onApiKeyChange={vi.fn()} onModelChange={vi.fn()} />);
+    const summary = screen.getByText('如何获取 DeepSeek API Key · 配置与测试');
+    expect(summary.closest('details')).not.toHaveAttribute('open');
+    await user.click(summary);
+    expect(screen.getByRole('button', { name: '测试连接' })).toBeEnabled();
+    expect(screen.getByText(/测试连接仅发送固定测试文字，不发送病历资料/)).toBeVisible();
+  });
+
+  it('jumps to adopted unreviewed content from step 1 and removes the reminder when reviewed', async () => {
+    const scroll = vi.fn();
+    vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(scroll);
+    const user = userEvent.setup();
+    const original = SCHEMA.emptyRecord();
+    const request = prepareAiRequest('organize', original, '患者诉咳嗽3天');
+    const content = aiContent();
+    content.suggestions.push({ path: 'hpi.onset', text: '患者诉3天', evidence: [{ source: 'note', quote: '患者诉咳嗽3天' }] });
+    const result = parseAiResult(content, request, 'deepseek-flash');
+    const record = confirmAiField(adoptAiSuggestions(original, request, result, [0, 1], false), 'hpi.symptoms');
+    const props = panelProps(record);
+    const view = render(<AiAssistantPanel {...props} />);
+    expect(screen.queryByRole('heading', { name: '已采纳的 AI 内容' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '1 项未核对' }));
+    const list = screen.getByRole('list', { name: '已采纳待核对列表' });
+    expect(list).toHaveAttribute('id', 'ai-adopted-unreviewed');
+    expect(list).toHaveFocus();
+    expect(within(list).getAllByRole('listitem')[0]).toHaveTextContent('起病情况');
+    expect(scroll).toHaveBeenCalledWith({ block: 'start' });
+    const reviewed = confirmAiField(record, 'hpi.onset');
+    view.rerender(<AiAssistantPanel {...props} record={reviewed} />);
+    expect(screen.queryByRole('button', { name: '1 项未核对' })).not.toBeInTheDocument();
+    const edited = RECORD_CORE.cloneValue(reviewed);
+    edited.hpi.symptoms = '患者诉咳嗽4天';
+    view.rerender(<AiAssistantPanel {...props} record={edited} />);
+    expect(screen.getByRole('button', { name: '1 项未核对' })).toBeVisible();
+  });
+
+  it.each(['organize', 'polish'])('describes redactions in sent notes or fields (%s) without revealing originals', async (operation) => {
+    const user = userEvent.setup();
+    const record = SCHEMA.emptyRecord();
+    Object.assign(record.basic, { name: '张三', phone: '13812345678', recordNo: 'MR12345' });
+    const raw = '张三，电话13812345678，病历号MR12345，证件110101199001010011，咳嗽3天';
+    record.hpi.symptoms = raw;
+    render(<AiAssistantPanel {...panelProps(record)} />);
+    if (operation === 'polish') await user.selectOptions(screen.getByLabelText('AI 操作'), operation);
+    else await user.type(screen.getByLabelText(/问诊笔记/), raw);
+    await user.click(screen.getByRole('button', { name: '预览发送内容' }));
+    const diff = screen.getByRole('region', { name: '脱敏变化' });
+    for (const label of ['姓名', '电话', '病历号', '身份证']) expect(within(diff).getByRole('listitem')).toHaveTextContent(label);
+    expect(within(diff).getByRole('listitem')).toHaveTextContent('已隐去');
+    const preview = screen.getByRole('region', { name: /实际发送内容/ });
+    for (const privateText of ['张三', '13812345678', 'MR12345', '110101199001010011']) {
+      expect(preview).not.toHaveTextContent(privateText);
+    }
+    expect(preview).toHaveTextContent('[已隐去]');
+    expect(screen.getByRole('button', { name: '生成建议' })).toBeDisabled();
+  });
+
+  it('does not describe redactions in excluded unreviewed AI fields as if they were sent', async () => {
+    const user = userEvent.setup();
+    const record = SCHEMA.emptyRecord();
+    record.hpi.symptoms = '姓名：张三，电话13912345678';
+    RECORD_CORE.setFieldState(record, 'hpi.symptoms', { source: 'ai', reviewed: false });
+    record.pmh.surgery = '3年前手术';
+    render(<AiAssistantPanel {...panelProps(record)} />);
+    await user.selectOptions(screen.getByLabelText('AI 操作'), 'check');
+    await user.click(screen.getByRole('button', { name: '预览发送内容' }));
+    expect(screen.getByRole('region', { name: '脱敏变化' })).toHaveTextContent('未检测到可自动隐去');
+    const preview = screen.getByRole('region', { name: /实际发送内容/ });
+    expect(preview).toHaveTextContent('3年前手术');
+    expect(preview).not.toHaveTextContent('张三');
+    expect(preview).not.toHaveTextContent('13912345678');
+  });
+
+  it('offers actionable circular-icon empty states for notes, no suggestions and no adoptions', async () => {
+    const user = userEvent.setup();
+    render(<AiAssistantPanel {...panelProps()} />);
+    const start = screen.getByRole('button', { name: '粘贴笔记开始' });
+    expect(start.closest('.ai-empty')?.querySelector('.ai-empty-icon svg')).not.toBeNull();
+    await user.click(start);
+    expect(screen.getByLabelText(/问诊笔记/)).toHaveFocus();
+    await user.type(screen.getByLabelText(/问诊笔记/), '患者诉咳嗽3天');
+    await user.click(screen.getByRole('button', { name: '预览发送内容' }));
+    expect(screen.getByRole('region', { name: '脱敏变化' })).toHaveTextContent('未检测到可自动隐去');
+    await user.click(screen.getByLabelText(/我已核对下方实际发送内容/));
+    await user.click(screen.getByRole('button', { name: '生成建议' }));
+    const supplement = await screen.findByRole('button', { name: '补充原文' });
+    expect(supplement.closest('.ai-empty')?.querySelector('.ai-empty-icon svg')).not.toBeNull();
+    await user.click(supplement);
+    expect(screen.getByLabelText(/问诊笔记/)).toHaveFocus();
+    await user.selectOptions(screen.getByLabelText('AI 操作'), 'check');
+    const empty = screen.getByText('尚未采纳 AI 内容').closest('.ai-empty') as HTMLElement;
+    expect(empty.querySelector('.ai-empty-icon svg')).not.toBeNull();
+    await user.click(within(empty).getByRole('button', { name: '粘贴笔记开始' }));
+    expect(screen.getByLabelText('AI 操作')).toHaveValue('organize');
+    expect(screen.getByLabelText(/问诊笔记/)).toHaveFocus();
   });
 });

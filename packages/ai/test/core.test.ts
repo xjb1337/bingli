@@ -8,6 +8,8 @@ import {
   normalizeRecognizeValue,
   prepareAiRequest,
   recognitionTargets,
+  redactionDiff,
+  redactText,
   validateAiResponse,
 } from '../src';
 
@@ -383,5 +385,30 @@ describe('AI image/text recognition boundary', () => {
     expect(SCHEMA.peChecked(next, 'chest', 'heartAuscultation')).toBe(true);
     expect(SCHEMA.rosFactState(next.ros.resp?.fever)).toBe('asked_positive');
     expect(SCHEMA.rosFactState(next.ros.gi?.nausea)).toBe('asked_negative');
+  });
+});
+
+
+describe('redaction change descriptions', () => {
+  it('reports actual replacements, keeps clinical content and returns no raw identifiers', () => {
+    const record = makeRecord();
+    Object.assign(record.basic, { name: '张三', phone: '13812345678', recordNo: 'MR12345', address: '测试路99号' });
+    const raw = '张三住测试路99号，病历号MR12345，电话13812345678，证件110101199001010011，咳嗽3天';
+    const diff = redactionDiff(raw, record);
+    expect(new Set(diff.categories)).toEqual(new Set(['姓名', '地址', '病历号', '电话', '身份证']));
+    expect(diff.text).toBe(redactText(raw, record));
+    expect(diff.text).toContain('咳嗽3天');
+    for (const identifier of ['张三', '测试路99号', 'MR12345', '13812345678', '110101199001010011']) {
+      expect(JSON.stringify(diff)).not.toContain(identifier);
+    }
+  });
+
+  it('describes label-based redactions and unknown phones, without false changes for clean or masked text', () => {
+    const record = makeRecord();
+    const diff = redactionDiff('姓名：张三 住院号：12345 床号：8，电话13912345678，咳嗽3天', record);
+    expect(diff.categories).toEqual(['姓名', '住院号', '床号', '电话']);
+    expect(diff.text).toBe('姓名：[已隐去] 住院号：[已隐去] 床号：[已隐去]，电话[电话已隐去]，咳嗽3天');
+    expect(redactionDiff('姓名：[已隐去]，咳嗽3天', record).categories).toEqual([]);
+    expect(redactionDiff('咳嗽3天，无发热', record)).toEqual({ text: '咳嗽3天，无发热', categories: [] });
   });
 });

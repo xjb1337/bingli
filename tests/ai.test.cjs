@@ -102,3 +102,20 @@ test('AI：来源信息经备份及 v3 规范化后仍保留，密钥不在病�
   assert.equal(CORE.fieldReviewValid(normalized, 'hpi.symptoms'), false);
   assert.doesNotMatch(JSON.stringify(normalized), /apiKey|ciphertext/);
 });
+
+
+test('AI：脱敏变化仅报告实际替换类别，不返回原始身份信息', () => {
+  const r = record();
+  Object.assign(r.basic, {name: '张三', phone: '13812345678', recordNo: 'MR12345'});
+  const raw = '张三，电话13812345678，病历号MR12345，证件110101199001010011，咳嗽3天';
+  const diff = AI.redactionDiff(raw, r);
+  assert.deepEqual(new Set(diff.categories), new Set(['姓名', '电话', '病历号', '身份证']));
+  assert.equal(diff.text, AI.redact(raw, r));
+  assert.match(diff.text, /咳嗽3天/);
+  for (const identifier of ['张三', '13812345678', 'MR12345', '110101199001010011']) assert.ok(!JSON.stringify(diff).includes(identifier));
+  assert.deepEqual(AI.redactionDiff('姓名：张三 住院号：12345 床号：8，电话13912345678，咳嗽3天', record()), {
+    text: '姓名：[已隐去] 住院号：[已隐去] 床号：[已隐去]，电话[电话已隐去]，咳嗽3天',
+    categories: ['姓名', '住院号', '床号', '电话']
+  });
+  assert.deepEqual(AI.redactionDiff('姓名：[已隐去]，咳嗽3天', record()).categories, []);
+});

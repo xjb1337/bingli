@@ -12,6 +12,7 @@ import {
   listAdoptedAiFields,
   normalizeAiImage,
   prepareAiRequest,
+  redactionDiff,
   validateAiResponse,
   type AiImagePayload,
   type AiOperation,
@@ -21,6 +22,7 @@ import {
 } from '@dabingli/ai';
 import { RECORD_CORE, type DabingliRecord } from '@dabingli/domain';
 import { Card } from './StepShell';
+import { AiEmptyState } from './AiEmptyState';
 
 interface AiImageAttachment extends AiImagePayload {
   previewDataUrl: string;
@@ -92,6 +94,7 @@ export interface AiAssistantPanelProps {
   onAdoptRecord: (record: DabingliRecord) => Promise<boolean>;
   onConfirmField: (path: string) => Promise<boolean>;
   onJumpToPath: (path: string) => void;
+  onOpenApiSettings?: () => void;
 }
 
 function noKeyMessage(securityContext: 'web' | 'android', loading: boolean): string {
@@ -114,6 +117,7 @@ export function AiAssistantPanel({
   onAdoptRecord,
   onConfirmField,
   onJumpToPath,
+  onOpenApiSettings,
 }: AiAssistantPanelProps) {
   const [operation, setOperation] = useState<AiOperation>('organize');
   const [organizeStep, setOrganizeStep] = useState<OrganizeStep>(1);
@@ -124,6 +128,7 @@ export function AiAssistantPanel({
   const [recognizeImage, setRecognizeImage] = useState<AiImageAttachment | null>(null);
   const [processingImage, setProcessingImage] = useState(false);
   const [request, setRequest] = useState<AiRequest | null>(null);
+  const [redactions, setRedactions] = useState<{ label: string; categories: string[] }[]>([]);
   const [consent, setConsent] = useState(false);
   const [result, setResult] = useState<AiResult | null>(null);
   const [selected, setSelected] = useState<ReadonlySet<number>>(() => new Set());
@@ -135,17 +140,64 @@ export function AiAssistantPanel({
   const abortRef = useRef<AbortController | null>(null);
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const galleryInputRef = useRef<HTMLInputElement | null>(null);
+  const notesInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const reminderRef = useRef<HTMLDivElement | null>(null);
+  const [focusNotes, setFocusNotes] = useState(false);
+  const [jumpToUnreviewed, setJumpToUnreviewed] = useState(false);
   recordRef.current = record;
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
   const adopted = listAdoptedAiFields(record);
+  const unreviewedCount = adopted.filter((field) => !field.reviewed).length;
   const writableTargets = Object.entries(AI_FIELDS).filter(([path]) => path !== 'summary');
+
+  useEffect(() => {
+    const header = document.querySelector('.app-header');
+    const updateOffset = () => {
+      if (reminderRef.current) reminderRef.current.style.top = `${(header?.getBoundingClientRect().height ?? 0) + 8}px`;
+    };
+    updateOffset();
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(updateOffset) : null;
+    if (header) observer?.observe(header);
+    window.addEventListener('resize', updateOffset);
+    return () => { observer?.disconnect(); window.removeEventListener('resize', updateOffset); };
+  }, [unreviewedCount]);
+
+  useEffect(() => {
+    if (!jumpToUnreviewed) return;
+    const list = document.getElementById('ai-adopted-unreviewed');
+    const headerHeight = document.querySelector('.app-header')?.getBoundingClientRect().height ?? 0;
+    const reminderHeight = reminderRef.current?.getBoundingClientRect().height ?? 0;
+    if (list) list.style.scrollMarginTop = `${headerHeight + reminderHeight + 24}px`;
+    list?.focus({ preventScroll: true });
+    list?.scrollIntoView?.({ block: 'start' });
+    setJumpToUnreviewed(false);
+  }, [jumpToUnreviewed, organizeStep]);
+
+  useEffect(() => {
+    if (!focusNotes) return;
+    const input = operation === 'recognize'
+      ? document.getElementById('ai-recognize-text') : notesInputRef.current;
+    input?.focus();
+    input?.scrollIntoView?.({ block: 'center' });
+    setFocusNotes(false);
+  }, [focusNotes, operation, organizeStep]);
+
+  function startNotes(): void {
+    if (operation !== 'recognize' && operation !== 'organize') {
+      setOperation('organize');
+      resetPreview();
+    }
+    setOrganizeStep(1);
+    setFocusNotes(true);
+  }
 
   function resetPreview(): void {
     setOrganizeStep(1);
     setResultAdopted(false);
     setRequest(null);
+    setRedactions([]);
     setConsent(false);
     setResult(null);
     setSelected(new Set());
@@ -189,6 +241,12 @@ export function AiAssistantPanel({
         operation === 'recognize' ? recognizeImage : null,
       );
       setRequest(next);
+      setRedactions(next.sources.filter((source) => source.source !== 'image').map((source) => ({
+        label: source.label,
+        categories: redactionDiff(source.source === 'note'
+          ? (operation === 'recognize' ? recognizeText : notes).trim()
+          : RECORD_CORE.getPath(recordRef.current, source.source), recordRef.current).categories,
+      })).filter((entry) => entry.categories.length));
       setOrganizeStep(2);
       setResultAdopted(false);
       setConsent(false);
@@ -323,6 +381,15 @@ export function AiAssistantPanel({
       description="AI 只会提出白名单字段建议，不会写入诊断或处方；识别出的生命体征、查体与选择项也必须逐项勾选并人工核对。"
       className="ai-panel"
     >
+      {unreviewedCount > 0 ? (
+        <div className="ai-review-reminder" ref={reminderRef}>
+          <button type="button" className="button secondary" onClick={() => {
+            setOrganizeStep(4);
+            setJumpToUnreviewed(true);
+          }}>{unreviewedCount} 项未核对</button>
+          <span>已采纳内容需逐项确认，点击前往核对。</span>
+        </div>
+      ) : null}
       <p className="field-hint">当前润色字段：{AI_FIELDS[target]}；选择「润色本段」可调整。</p>
       {operation === 'organize' ? (
         <nav aria-label="整理填表进度" className="ai-progress">
@@ -345,18 +412,12 @@ export function AiAssistantPanel({
         </nav>
       ) : null}
       {!configured ? (
-        <div className="ai-empty" role="note">
-          <span className="ai-empty-icon" aria-hidden="true">
-            <svg viewBox="0 0 32 32" fill="none">
-              <path d="M16 4 18.4 12 26 16l-7.6 4L16 28l-2.4-8L6 16l7.6-4L16 4Z" />
-              <path d="m25 5 .8 2.2L28 8l-2.2.8L25 11l-.8-2.2L22 8l2.2-.8L25 5Z" />
-            </svg>
-          </span>
-          <div className="ai-empty-copy">
-            <strong>AI 助手尚未启用</strong>
-            <p>{noKeyMessage(securityContext, loadingAndroidStatus)}</p>
-          </div>
-        </div>
+        <AiEmptyState title="AI 助手尚未启用" description={noKeyMessage(securityContext, loadingAndroidStatus)}
+          action="去配置 API" disabled={loadingAndroidStatus}
+          onAction={() => {
+            if (onOpenApiSettings) onOpenApiSettings();
+            else document.getElementById('ai-api-settings')?.scrollIntoView({ block: 'start' });
+          }} />
       ) : (
         <div className="ai-controls">
           <div className="ai-model-row">
@@ -393,15 +454,21 @@ export function AiAssistantPanel({
             ) : null}
           </div>
           {operation === 'organize' && organizeStep === 1 ? (
-            <label className="ai-field">
-              <span>问诊笔记（仅用于本次请求）</span>
-              <textarea
-                rows={4}
-                value={notes}
-                onChange={(event) => { setNotes(event.target.value); resetPreview(); }}
-                placeholder="输入需要整理的问诊笔记；姓名、电话、地址等会尝试在发送前隐去"
-              />
-            </label>
+            <>
+              {!notes.trim() ? <AiEmptyState title="从一段问诊笔记开始"
+                description="贴上原始笔记，AI 会大致填入病历，再由你逐项修改核对。"
+                action="粘贴笔记开始" disabled={busy || processingImage} onAction={startNotes} /> : null}
+              <label className="ai-field">
+                <span>问诊笔记（仅用于本次请求）</span>
+                <textarea
+                  ref={notesInputRef}
+                  rows={4}
+                  value={notes}
+                  onChange={(event) => { setNotes(event.target.value); resetPreview(); }}
+                  placeholder="输入需要整理的问诊笔记；姓名、电话、地址等会尝试在发送前隐去"
+                />
+              </label>
+            </>
           ) : null}
           {operation === 'recognize' ? (
             <div className="ai-recognize">
@@ -479,6 +546,7 @@ export function AiAssistantPanel({
               <label className="ai-field">
                 <span>粘贴病历文字（可选，可与图片同时发送）</span>
                 <textarea
+                  id="ai-recognize-text"
                   rows={4}
                   value={recognizeText}
                   onChange={(event) => { setRecognizeText(event.target.value); resetPreview(); }}
@@ -514,6 +582,13 @@ export function AiAssistantPanel({
                   <h4 id="ai-send-heading">实际发送内容（{request.sources.length} 条资料）</h4>
                   <span className="ai-badge">发送前确认</span>
                 </div>
+                <section className="ai-redaction-summary" aria-label="脱敏变化">
+                  <strong>脱敏前后变化</strong>
+                  {redactions.length ? <ul>{redactions.map((entry, index) => (
+                    <li key={index}>{entry.label}：{entry.categories.join('、')}已隐去</li>
+                  ))}</ul> : <p>本次文字未检测到可自动隐去的身份信息。</p>}
+                  <p>下方显示脱敏后内容，以 [已隐去]、[电话已隐去] 或 [身份证已隐去] 标记替换处；仍可能遗漏，请检查后确认。</p>
+                </section>
                 {request.image && recognizeImage ? (
                   <div className="ai-image-preview ai-image-send">
                     <img src={recognizeImage.previewDataUrl} alt="将发送的病人图片缩略图" />
@@ -613,10 +688,8 @@ export function AiAssistantPanel({
               ))}
             </div>
           ) : (
-            <div className="ai-empty-inline">
-              <strong>没有可直接填写的建议</strong>
-              <p>可以补充更具体的原文依据，或先返回病历继续核对。</p>
-            </div>
+            <AiEmptyState title="没有可直接填写的建议" description="补充更具体的原文依据，再预览生成建议。"
+              action="补充原文" disabled={busy || processingImage} onAction={startNotes} />
           )}
           {result.dropped.length ? (
             <details className="ai-dropped">
@@ -670,7 +743,7 @@ export function AiAssistantPanel({
         <section className="ai-adopted" aria-labelledby="ai-adopted-heading">
           <div className="ai-result-heading">
             <h4 id="ai-adopted-heading">已采纳的 AI 内容</h4>
-            <span className="ai-badge">{adopted.filter((field) => !field.reviewed).length} 项未核对</span>
+            <span className="ai-badge">{unreviewedCount ? '请逐项核对' : '0 项未核对'}</span>
           </div>
           {operation === 'organize' ? (
             <div className="button-row">
@@ -679,8 +752,8 @@ export function AiAssistantPanel({
             </div>
           ) : null}
           {adopted.length ? (
-            <ul className="ai-adopted-list">
-              {adopted.map((field) => (
+            <ul className="ai-adopted-list" id="ai-adopted-unreviewed" tabIndex={-1} aria-label="已采纳待核对列表">
+              {[...adopted].sort((left, right) => Number(left.reviewed) - Number(right.reviewed)).map((field) => (
                 <li key={field.path}>
                   <div className="ai-adopted-head">
                     <strong>{field.label}</strong>
@@ -717,10 +790,8 @@ export function AiAssistantPanel({
               ))}
             </ul>
           ) : (
-            <div className="ai-empty-inline">
-              <strong>尚未采纳 AI 内容</strong>
-              <p>采纳后，这里会保留来源、时间和逐项核对状态。</p>
-            </div>
+            <AiEmptyState title="尚未采纳 AI 内容" description="先贴笔记生成建议；采纳后会保留来源、时间和核对状态。"
+              action="粘贴笔记开始" disabled={busy || processingImage} onAction={startNotes} />
           )}
         </section>
       ) : null}

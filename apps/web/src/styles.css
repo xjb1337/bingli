@@ -2860,3 +2860,117 @@ textarea:focus {
     gap: 1px;
   }
 }
+
+/* AI workspace: match the calm teal and rounded cards used by 问诊练习. */
+.ai-page,
+.ai-panel {
+  --primary: #00796b;
+  --primary-hover: #00695c;
+  --primary-strong: #004d40;
+  --primary-soft: #e0f2ef;
+  --focus-ring: #004d40;
+}
+
+.ai-page .page-header,
+.ai-settings-card,
+.ai-panel {
+  border-radius: 24px;
+}
+
+.ai-page .page-header {
+  padding: 20px;
+  border: 1px solid #b7ddd4;
+  background: linear-gradient(135deg, var(--primary-soft), var(--surface));
+}
+
+.ai-panel .ai-empty-icon {
+  border-radius: 50%;
+}
+
+.ai-panel .ai-source-list li,
+.ai-panel .ai-suggestion,
+.ai-panel .ai-adopted-list > li,
+.ai-panel .ai-compare > div,
+.ai-panel .ai-recognize,
+.ai-panel .ai-source-card,
+.ai-panel .ai-image-preview,
+.ai-panel .ai-image-send {
+  border-radius: 16px;
+}
+
+.ai-review-reminder {
+  position: sticky;
+  z-index: 10;
+  top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin-block: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--warning-border);
+  border-radius: 16px;
+  color: #754b00;
+  background: var(--warning-soft);
+  box-shadow: var(--shadow-xs);
+}
+
+.ai-review-reminder > span {
+  font-size: 0.88rem;
+}
+
+.ai-settings-card summary {
+  min-height: 44px;
+  padding-block: 10px;
+  color: var(--primary-strong);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+#ai-api-settings {
+  scroll-margin-top: 200px;
+}
+
+.ai-key-guide,
+.ai-redaction-summary,
+.ai-error-guide {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface-raised);
+}
+
+.ai-key-guide ol,
+.ai-redaction-summary ul {
+  margin: 8px 0;
+  padding-left: 24px;
+}
+
+.ai-key-guide li + li {
+  margin-top: 8px;
+}
+
+.ai-key-guide a {
+  color: var(--primary-strong);
+  text-decoration: underline;
+}
+
+.ai-redaction-summary p {
+  margin: 8px 0 0;
+  color: var(--muted);
+}
+
+.ai-error-guide dl {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 0;
+}
+
+.ai-error-guide dl > div {
+  display: grid;
+  grid-template-columns: 4em minmax(0, 1fr);
+  gap: 8px;
+}
+
+.ai-error-guide dt { font-weight: 700; }
+.ai-error-guide dd { margin: 0; }

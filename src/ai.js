@@ -21,26 +21,53 @@ const AI_ASSIST = (() => {
     const organize = $('aiOperation').value === 'organize';
     $('aiProgress').hidden = !organize;
     $('aiNotesWrap').hidden = !organize || organizeStep !== 1;
+    $('aiNotesEmpty').hidden = !organize || organizeStep !== 1 || !!$('aiNotes').value.trim();
     $('aiPrepare').hidden = organize && organizeStep !== 1;
     $('aiPreview').hidden = !request || (organize && organizeStep !== 2);
     $('aiResult').hidden = organize && organizeStep !== 3;
     $('aiReview').hidden = organize && organizeStep !== 4;
     panel.querySelectorAll('[data-ai-step]').forEach(button => {
       const step = Number(button.dataset.aiStep);
-      button.disabled = busy || processingImage || (step === 2 && !request) || (step === 3 && !result) || (step === 4 && !$('aiReview').children.length);
+      button.disabled = busy || processingImage || (step === 2 && !request) || (step === 3 && !result) || (step === 4 && !Object.values((APP.getRecord().meta || {}).fieldStates || {}).some(state => state.source === 'ai'));
       if (step === organizeStep) button.setAttribute('aria-current', 'step');
       else button.removeAttribute('aria-current');
+    });
+  }
+  function emptyState(title, description, action, target = 'notes') {
+    return `<div class="ai-empty"><span class="ai-empty-icon" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none"><path d="M10 5h12a3 3 0 0 1 3 3v19H7V8a3 3 0 0 1 3-3Z M12 12h8 M12 17h8 M12 22h4"/></svg></span><div><strong>${esc(title)}</strong><p>${esc(description)}</p></div><button type="button" class="btn" data-ai-start="${target}">${esc(action)}</button></div>`;
+  }
+  function bindEmptyActions(root) {
+    root.querySelectorAll('[data-ai-start]').forEach(button => button.onclick = () => {
+      if (busy || processingImage) return;
+      if (button.dataset.aiStart === 'settings') {
+        $('aiOnboarding').open = true;
+        $('aiSettings').focus(); $('aiOnboarding').scrollIntoView({block: 'start'});
+      } else {
+        const recognize = $('aiOperation').value === 'recognize';
+        if (!recognize && $('aiOperation').value !== 'organize') {
+          $('aiOperation').value = 'organize'; invalidate();
+          $('aiTargetWrap').hidden = true; $('aiRecognizeWrap').hidden = true;
+        }
+        organizeStep = 1; updateFlow();
+        const input = $(recognize ? 'aiRecognizeText' : 'aiNotes');
+        input.focus(); input.scrollIntoView({block: 'center'});
+      }
     });
   }
   function pendingFields() {
     if (!panel) return;
     const r = APP.getRecord();
     const paths = Object.keys((r.meta && r.meta.fieldStates) || {}).filter(p => AI_CORE.labels[p] && RECORD_CORE.fieldState(r, p).source === 'ai');
+    const unreviewed = paths.filter(p => !RECORD_CORE.fieldReviewValid(r, p));
+    paths.sort((a, b) => Number(RECORD_CORE.fieldReviewValid(r, a)) - Number(RECORD_CORE.fieldReviewValid(r, b)));
+    $('aiUnreviewed').hidden = !unreviewed.length;
+    $('aiUnreviewed').textContent = unreviewed.length + ' 项未核对';
     $('aiReview').innerHTML = paths.length ? '<h3>已采纳的 AI 内容</h3>' + paths.map(p => {
       let provenance = {}; try { provenance = JSON.parse(RECORD_CORE.fieldState(r, p).sourceRef); } catch (e) { }
       const reviewed = RECORD_CORE.fieldReviewValid(r, p);
       return `<div class="ai-review"><strong>${esc(AI_CORE.labels[p])}</strong><span class="ai-badge">${reviewed ? '已核对' : '未核对'}</span><p>${esc(AI_CORE.displayValue(p, RECORD_CORE.getPath(r, p)))}</p><details><summary>AI 来源与原文依据</summary><small>${esc(provenance.model || 'DeepSeek')}</small>${(provenance.evidence || []).map(e => '<blockquote>' + esc(e.quote) + '</blockquote>').join('')}</details><button class="btn btn-ghost" data-ai-edit="${esc(p)}">去改该字段</button>${reviewed ? '' : `<button class="btn btn-ghost" data-review="${esc(p)}">已逐字核对，确认本项</button>`}</div>`;
-    }).join('') : '';
+    }).join('') : emptyState('尚未采纳 AI 内容', '采纳后会保留来源、时间和逐项核对状态。', '粘贴笔记开始');
+    bindEmptyActions($('aiReview'));
     $('aiReview').querySelectorAll('[data-review]').forEach(button => button.onclick = () => { APP.reviewAI(button.dataset.review); pendingFields(); status('本项已标记核对；内容再次修改后需要重新核对'); });
     $('aiReview').querySelectorAll('[data-ai-edit]').forEach(button => button.onclick = () => {
       const path = button.dataset.aiEdit;
@@ -115,15 +142,20 @@ const AI_ASSIST = (() => {
     panel.innerHTML = `<section class="ai-sheet" role="dialog" aria-modal="true" aria-labelledby="aiTitle" aria-describedby="aiIntro" aria-busy="false">
       <div class="ai-heading"><div class="ai-heading-copy"><span class="ai-eyebrow">DEEPSEEK · 填写辅助</span><h2 id="aiTitle">AI 病历助手</h2><p class="ai-subtitle">整理、润色或识别资料，确认后才写入病历。</p></div><button id="aiClose" type="button" class="btn btn-ghost ai-close">关闭</button></div>
       <div class="ai-note" id="aiIntro"><span class="ai-note-icon" aria-hidden="true">i</span><p>只处理你选择的资料。结果须核对后采纳；未问、未查、不详不得当成正常。联网内容将发送至 DeepSeek。识别结果只填病史、生命体征、查体与系统回顾等白名单字段，不写诊断或处方。</p></div>
-      <div class="ai-settings-row"><button id="aiSettings" class="btn btn-ghost">API 设置 / 测试连接</button><button id="aiRefreshSettings" class="btn btn-ghost">刷新配置状态</button><span id="aiModel" role="status"></span></div>
-      <div id="aiOnboarding" class="ai-onboarding" hidden>
-        <strong>首次使用 AI</strong>
-        <ol><li>打开「API 设置」，按教程创建 DeepSeek API Key。</li><li>粘贴密钥并保存，点击「保存并测试连接」。</li><li>回到这里预览资料，确认后再发送。</li></ol>
-        <p>密钥只保存在本机加密存储中，不会写入病历备份；联网前请检查预览内容。</p>
-      </div>
+      <button id="aiUnreviewed" type="button" class="btn ai-review-reminder" hidden></button>
+      <details id="aiOnboarding" class="ai-onboarding">
+        <summary>如何获取 DeepSeek API Key · API 设置</summary>
+        <ol><li>打开 platform.deepseek.com，完成注册并登录。</li><li>进入账户中心完成充值，确认余额可用。</li><li>在左侧菜单点击 API keys，创建一个新的 API key。</li><li>复制以 sk- 开头的 Key；完整内容通常只显示一次。</li><li>打开下方「API 设置」，粘贴密钥并保存，再点击「保存并测试连接」。</li></ol>
+        <div class="ai-settings-row"><button id="aiSettings" class="btn btn-ghost">API 设置 / 测试连接</button><button id="aiRefreshSettings" class="btn btn-ghost">刷新配置状态</button></div>
+        <p>密钥只保存在本机加密存储中，不会写入病历备份；测试连接仅发送固定测试文字，不发送病历资料，会产生少量 API 用量。</p>
+        <strong>常见错误对照</strong><ul><li>401：API Key 无效，请检查密钥。</li><li>403：API Key 无权限，请检查配置。</li><li>402：DeepSeek 余额不足，请充值。</li><li>429：请求过于频繁，请稍后重试。</li><li>5xx：DeepSeek 服务暂不可用，请稍后重试。</li><li>网络：连接失败，请检查联网；超时可缩短资料后重试，原病历未改动。</li></ul>
+      </details>
+      <p id="aiModel" role="status"></p>
+      <div id="aiNotConfigured" hidden>${emptyState('AI 助手尚未启用', '请先配置 API Key，再预览并发送资料；普通填写和保存不受影响。', '去配置 API', 'settings')}</div>
       <div class="ai-field"><label for="aiOperation">需要什么帮助</label><select id="aiOperation">${Object.entries(AI_CORE.operations).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></div>
       <nav id="aiProgress" class="ai-progress" aria-label="整理填表进度"><ol>${['贴笔记', '预览确认', '建议对照', '已采纳/回表单'].map((label, i) => `<li><button type="button" data-ai-step="${i + 1}"><span aria-hidden="true">${i + 1}</span>${label}</button></li>`).join('')}</ol></nav>
       <div id="aiTargetWrap" class="ai-field" hidden><label for="aiTarget">选择要润色的段落</label><select id="aiTarget">${Object.entries(AI_CORE.fields).filter(([k]) => k !== 'summary').map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('')}</select></div>
+      <div id="aiNotesEmpty">${emptyState('从一段问诊笔记开始', '贴上原始笔记，AI 会大致填入病历，再由你逐项修改核对。', '粘贴笔记开始')}</div>
       <div id="aiNotesWrap" class="ai-field"><label for="aiNotes">原始问诊笔记（仅在本次窗口保留）</label><textarea id="aiNotes" rows="5" maxlength="16000" placeholder="如：患者诉咳嗽3天，昨晚加重，发热情况未问，既往有高血压，具体用药不详。"></textarea></div>
       <div id="aiRecognizeWrap" hidden>
         <div class="ai-section-head"><strong>识别来源</strong><span>图片与文字可同时发送</span></div>
@@ -152,17 +184,25 @@ const AI_ASSIST = (() => {
       <div id="aiPreview" class="ai-preview" hidden>
         <div class="ai-section-head"><h3>实际发送内容</h3><span class="ai-badge">发送前确认</span></div>
         <div id="aiImageSendPreview" class="ai-image-send" hidden><img id="aiSendThumb" alt="将发送的病历图片缩略图"><p class="ai-warning"><span class="ai-warning-icon" aria-hidden="true">!</span><span>图片为压缩后的版本，可能含患者身份信息，且无法自动脱敏。</span></p></div>
+        <div id="aiRedactions" class="ai-redaction-summary" aria-label="脱敏变化"></div>
         <pre id="aiSources" class="ai-source"></pre>
         <label class="ai-check ai-consent-box"><input id="aiConsent" type="checkbox"><span id="aiConsentLabel">我已检查上述内容，确认可发送至 DeepSeek</span></label>
         <button id="aiSend" class="btn" disabled>发送并生成建议</button>
       </div>
       <div class="ai-status-wrap"><p id="aiStatus" role="status" aria-live="polite" tabindex="-1"></p><div id="aiLoading" class="ai-loading" role="status" aria-live="polite" hidden><div class="ai-loading-head"><span class="ai-spinner" aria-hidden="true"></span><div><strong>AI 正在整理资料</strong><span>请保持本页打开，生成期间不会写入病历。</span></div></div><div class="ai-skeleton" aria-hidden="true"><span></span><span></span><span></span></div></div></div>
       <button id="aiCancel" class="btn btn-ghost" hidden>取消请求</button>
-      <div id="aiResult"></div><div id="aiReview"></div>
+      <div id="aiResult"></div><div id="aiReview" tabindex="-1"></div>
       <button id="aiUndo" class="btn btn-ghost">撤销上一步可撤销操作</button>
     </section>`;
     document.body.appendChild(panel);
     $('aiClose').onclick = () => close();
+    bindEmptyActions(panel);
+    const reminderOffset = () => { $('aiUnreviewed').style.top = panel.querySelector('.ai-heading').getBoundingClientRect().height + 'px'; };
+    $('aiUnreviewed').onclick = () => {
+      reminderOffset(); organizeStep = 4; updateFlow();
+      $('aiReview').style.scrollMarginTop = (panel.querySelector('.ai-heading').getBoundingClientRect().height + $('aiUnreviewed').getBoundingClientRect().height + 16) + 'px';
+      $('aiReview').focus({preventScroll: true}); $('aiReview').scrollIntoView({block: 'start'});
+    };
     $('aiSettings').onclick = () => bridge().aiSettings();
     $('aiRefreshSettings').onclick = refreshModel;
     if (APP.getAiTarget) $('aiTarget').value = APP.getAiTarget();
@@ -191,10 +231,20 @@ const AI_ASSIST = (() => {
     $('aiSend').onclick = send;
     $('aiCancel').onclick = () => { if (pending) bridge().aiCancel(pending); pending = null; clearTimeout(timer); setBusy(false); status('已取消，病历未改动；可再次发送'); };
     $('aiUndo').onclick = () => { if (!busy) { APP.undoAI(); invalidate(); pendingFields(); status('已请求撤销，请检查病历及保存状态'); } };
-    renderRecognizeImage(); pendingFields(); refreshModel(); $('aiClose').focus();
+    renderRecognizeImage(); pendingFields(); refreshModel(); reminderOffset(); $('aiClose').focus();
   }
   function refreshModel() {
-    try { const s = JSON.parse(bridge().aiStatus()); model = s.model || ''; $('aiModel').textContent = s.configured ? '已配置 · ' + model + '（图片识别固定使用 Flash，Pro 不支持图片）' : '未配置 API Key，请在本面板打开「API 设置」'; $('aiOnboarding').hidden = !!s.configured; return s.configured; }
+    try {
+      const s = JSON.parse(bridge().aiStatus());
+      model = s.model || '';
+      $('aiModel').textContent = s.configured ? '已配置 · ' + model + '（图片识别固定使用 Flash，Pro 不支持图片）' : '未配置 API Key，请在本面板打开「API 设置」';
+      if (!$('aiOnboarding').dataset.initialized) {
+        $('aiOnboarding').open = !s.configured;
+        $('aiOnboarding').dataset.initialized = 'true';
+      }
+      $('aiNotConfigured').hidden = !!s.configured;
+      return s.configured;
+    }
     catch (e) { status('无法读取 AI 设置'); return false; }
   }
   function prepare() {
@@ -204,6 +254,12 @@ const AI_ASSIST = (() => {
       const text = operation === 'organize' ? $('aiNotes').value : operation === 'recognize' ? $('aiRecognizeText').value : '';
       request = AI_CORE.prepare(operation, APP.getRecord(), text, $('aiTarget').value, operation === 'recognize' ? recognizeImage : null);
       result = null; resultAdopted = false; organizeStep = 2; $('aiResult').innerHTML = '';
+      const changes = request.sources.filter(source => source.source !== 'image').map(source => {
+        const raw = source.source === 'note' ? text.trim() : RECORD_CORE.getPath(APP.getRecord(), source.source);
+        const categories = AI_CORE.redactionDiff(raw, APP.getRecord()).categories;
+        return categories.length ? '<li>' + esc(source.label) + '：' + esc(categories.join('、')) + '已隐去</li>' : '';
+      }).filter(Boolean);
+      $('aiRedactions').innerHTML = '<strong>脱敏前后变化</strong>' + (changes.length ? '<ul>' + changes.join('') + '</ul>' : '<p>本次文字未检测到可自动隐去的身份信息。</p>') + '<p>下方以 [已隐去]、[电话已隐去] 或 [身份证已隐去] 标记替换处；仍可能遗漏，请检查后确认。</p>';
       $('aiSources').textContent = request.sources.map(s => '[' + s.label + ']\n' + s.text).join('\n\n');
       $('aiImageSendPreview').hidden = !request.image;
       if (request.image) $('aiSendThumb').src = recognizeImage.previewDataUrl;
@@ -258,7 +314,8 @@ const AI_ASSIST = (() => {
         return `<article class="ai-suggestion"><label class="ai-check"><input type="checkbox" data-ai-choice="${i}"><strong>${esc(AI_CORE.labels[s.path])}</strong><small>${kindLabel}</small>${s.fromImage ? '<small class="ai-image-note">来自图片，依据未能自动核实</small>' : ''}</label><div class="ai-compare"><div><small>原内容</small><p>${esc(original || '（空白）')}</p></div><div><small>AI 建议 · 待核对</small><p>${esc(AI_CORE.displayValue(s.path, s.text))}</p></div><div><small>原文依据</small>${s.evidence.map(e => `<blockquote><code>${esc(e.source)}</code><p>${esc(e.quote)}</p></blockquote>`).join('')}</div></div></article>`;
       }).join('') + droppedHtml + (result.issues.length ? '<h3>待核实的问题</h3><ul>' + result.issues.map(i => `<li>${i.path ? esc(AI_CORE.labels[i.path]) + '：' : ''}${esc(i.message)}</li>`).join('') + '</ul>' : '') +
         (result.questions.length ? '<h3>建议补问</h3><ul>' + result.questions.map(q => '<li>' + esc(q) + '</li>').join('') + '</ul>' : '') +
-        (result.suggestions.length ? '<label class="ai-check ai-consent-box"><input id="aiReplace" type="checkbox">允许用勾选建议替换已有内容（操作可撤销）</label><button id="aiApply" class="btn">采纳勾选项</button>' : '<div class="ai-empty-inline"><strong>没有可直接填写的建议</strong><p>可以补充更具体的原文依据，或先返回病历继续核对。</p></div>');
+        (result.suggestions.length ? '<label class="ai-check ai-consent-box"><input id="aiReplace" type="checkbox">允许用勾选建议替换已有内容（操作可撤销）</label><button id="aiApply" class="btn">采纳勾选项</button>' : emptyState('没有可直接填写的建议', '补充更具体的原文依据，再预览生成建议。', '补充原文'));
+      bindEmptyActions($('aiResult'));
       if (result.suggestions.length) $('aiApply').onclick = apply;
       organizeStep = 3; updateFlow();
       status('生成完成；请核对后勾选采纳。AI 检查不能证明病历正确或完整' + (dropped.length ? '；' + dropped.length + ' 条建议因格式问题未采用' : ''));
