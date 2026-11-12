@@ -412,3 +412,39 @@ describe('redaction change descriptions', () => {
     expect(redactionDiff('咳嗽3天，无发热', record)).toEqual({ text: '咳嗽3天，无发热', categories: [] });
   });
 });
+
+describe('additional identifier redaction', () => {
+  it('redacts space-separated labels, phones, ID and birthplace through the county', () => {
+    const text = '姓名 李小虚 住院号 0012345 病案号 BA00057 床号 08，身份证号 99000020000101001X，手机13900001111，座机0577-88001234，出生地 虚构省虚构市虚构县。';
+    const sent = organizeRequest(makeRecord(), text).user;
+    for (const value of ['李小虚', '0012345', 'BA00057', '08', '99000020000101001X', '13900001111', '0577-88001234', '虚构省虚构市虚构县']) {
+      expect(sent).not.toContain(value);
+    }
+    for (const label of ['姓名', '住院号', '病案号', '床号', '出生地']) expect(sent).toContain(`${label}：[已隐去]`);
+  });
+
+  it('redacts patient names without a basic name and detailed addresses', () => {
+    const text = '患者王小虚，患者周小虚于就诊。现住址 虚构省虚构市虚构区和平路99号3室；患者住虚构省虚构市虚构县星光村17号，出生于虚构省虚构市虚构县。';
+    const diff = redactionDiff(text, makeRecord());
+    for (const value of ['王小虚', '周小虚', '虚构省虚构市虚构区和平路99号3室', '虚构省虚构市虚构县星光村17号']) {
+      expect(diff.text).not.toContain(value);
+    }
+    expect(diff.text).toContain('患者[已隐去]，患者[已隐去]于就诊');
+    expect(diff.text).toContain('患者住[地址已隐去]');
+    expect(diff.text).toContain('出生于[已隐去]');
+    expect(diff.categories).toContain('姓名');
+    expect(diff.categories).toContain('地址');
+    expect(redactText(diff.text, makeRecord())).toBe(diff.text);
+    const spaced = redactText('出生地 虚构省 虚构市 虚构县，现住址 虚构省 虚构市 虚构区 和平路 99号 3室。', makeRecord());
+    expect(spaced).toBe('出生地：[已隐去]，现住址：[已隐去]。');
+  });
+
+  it('leaves medication, dates, clinical measurements and non-name patient phrases untouched', () => {
+    const text = '阿司匹林 100mg qd；2026-10-01，3天前；WBC 12.3×10^9/L，血压 150/90mmHg，脉搏96次/分。患者3天前咳嗽，患者于2026-10-01就诊，患者无明显诱因，患者诉胸闷，患者陈述：无发热。患者高血压，患者曾于2026-10-01就诊，患者经常咳嗽，患者张口呼吸。';
+    const record = makeRecord();
+    Object.assign(record.basic, { bedNo: '12', recordNo: '3', phone: '96' });
+    expect(redactionDiff(text, record)).toEqual({ text, categories: [] });
+    expect(organizeRequest(record, text).user).toContain(text);
+    expect(redactText('床号12，病历号3，咳嗽3天', record)).toBe('床号：[已隐去]，病历号：[已隐去]，咳嗽3天');
+  });
+});

@@ -48,6 +48,8 @@ const APP = (() => {
   let storageAlert = '';
   /** 其他标签页写了更新版本时的冲突状态；有值时禁止本页覆盖 */
   let remoteConflict = null;
+  // 记录当前页面已接受的导入版本，防止其他页面继续保存导入前的内存内容。
+  let activeImportGuard = '';
   /** 本页会话 ID，用于区分「自己的写入」和「其他页面的写入」 */
   const SESSION_ID = 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   /** 撤销栈：只在本机内存里，刷新即失效 */
@@ -294,10 +296,36 @@ const APP = (() => {
     return run;
   }
 
+  // 导入和删除必须在列表锁内重新读取、计算并写入，不能提前修改 LIST。
+  function listTransaction(task) {
+    if (!lockAvailable()) return task();
+    const run = listQueue.then(() => withStorageLock('list', task)).catch(() => false);
+    listQueue = run.then(() => {}, () => {});
+    return run;
+  }
+
   /** 普通保存入口：排队写入，不阻塞界面 */
   function saveList(opts = {}) {
     const result = saveListAwait(opts);
     return result && typeof result.then === 'function' ? true : result;
+  }
+
+  function importGuardFor(id) {
+    const loaded = REPO.loadList();
+    const item = loaded.ok && CORE.findRecord(loaded.list, id);
+    return item && item.__importGuard && item.__importGuard.token || '';
+  }
+
+  function detectImportedConflict(item) {
+    const guard = item && item.__importGuard;
+    if (!R || !item || item.id !== R.id || !guard || !guard.token || guard.token === activeImportGuard) return false;
+    const remote = CORE.cloneValue(item.data || item);
+    remote.id = item.id;
+    remote.meta = remote.meta || {};
+    remote.meta.revision = Math.max(Number(remote.meta.revision) || 0, Number(guard.revision) || 0);
+    remoteConflict = { remote, remoteRevision: remote.meta.revision, importToken: guard.token };
+    storageAlert = '其他页面导入了这份病历的新版本。为避免覆盖，本页已暂停保存；请载入新版本或保留当前内容为副本。';
+    return true;
   }
 
   function saveCurrentNow() {
@@ -308,6 +336,14 @@ const APP = (() => {
       return false;
     }
     if (!R) return false;
+    // 导入列表已经落盘但清除旧草稿中断时，绝不能让旧草稿重新覆盖导入版本。
+    const storedList = REPO.loadList();
+    const listed = storedList.ok && CORE.findRecord(storedList.list, R.id);
+    if (detectImportedConflict(listed)) return false;
+    if (listed && supersededDraft(listed) && !removeSupersededDraft(listed)) {
+      storageAlert = '导入后的旧草稿无法清除，已暂停保存。请先导出病历并检查本机存储。';
+      return false;
+    }
     if (remoteConflict) {
       // 其他标签页已有更新版本：在用户选择「载入新版本 / 保留为副本」前不写
       return false;
@@ -398,6 +434,8 @@ const APP = (() => {
     if (!lockAvailable()) return saveCurrentNow();
     const run = saveQueue.then(() =>
       withStorageLock('record:' + id, previousRevision => {
+        const loaded = REPO.loadList();
+        if (loaded.ok && detectImportedConflict(CORE.findRecord(loaded.list, id))) return false;
         if (previousRevision > (Number(R.meta && R.meta.revision) || 0)) {
           remoteConflict = { remote: null, remoteRevision: previousRevision };
           storageAlert = '其他页面已保存了这份病历的更新版本（修订号 '
@@ -3595,9 +3633,12 @@ const APP = (() => {
       // 首次病程录：按已填内容生成初稿（只补空字段，不覆盖手写内容）
       case 'loadRemote': {
         if (!remoteConflict || !remoteConflict.remote) return;
-        const rec = CORE.normalizeRecord(remoteConflict.remote, SCHEMA.emptyRecord, deptKeys());
-        if (!rec.ok) { toast('新版本无法读取，已保留当前内容'); return; }
-        R = rec.record;
+        let rec;
+        try { rec = CORE.normalizeRecord(remoteConflict.remote, SCHEMA.emptyRecord, deptKeys()); }
+        catch (e) { toast('新版本无法读取，已保留当前内容'); return; }
+        activeImportGuard = remoteConflict.importToken || importGuardFor(rec.id);
+        R = rec;
+        setSessionId(R.id);
         remoteConflict = null;
         storageAlert = '';
         saveCurrent();
@@ -3607,24 +3648,34 @@ const APP = (() => {
       }
       case 'keepCopy': {
         if (!remoteConflict) return;
-        // 两份内容都保留：当前内存内容另存为副本，新版本仍在原 ID 下
+        const original = R;
+        const conflict = remoteConflict;
+        const originalGuard = activeImportGuard;
         const copy = CORE.cloneValue(R);
         copy.id = CORE.uid();
         copy.meta = copy.meta || {};
         copy.meta.revision = 0;
-        copy.meta.updatedAt = new Date().toISOString();
-        if (copy.basic) {
-          copy.basic.name = (copy.basic.name || '未命名') + '（副本）';
-        }
-        LIST = CORE.upsertRecord(LIST, copy, new Date().toISOString()).list;
-        saveList();
+        copy.meta.importDraftCopy = true;
         R = copy;
         remoteConflict = null;
-        storageAlert = '';
-        saveCurrent();
-        render();
-        toast('已保留为副本；原病历的新版本仍在病历列表中');
-        break;
+        activeImportGuard = '';
+        setSessionId(copy.id);
+        return afterSave(saveToLibrary(), ok => {
+          if (!ok) {
+            R = original;
+            remoteConflict = conflict;
+            activeImportGuard = originalGuard;
+            setSessionId(R.id);
+            storageAlert = '草稿副本未能写入列表，当前内容仍在页面中。请先导出病历并重试。';
+            render();
+            toast('保存副本失败，请查看页面顶部提示');
+            return false;
+          }
+          storageAlert = '';
+          render();
+          toast('已保留为副本；原病历的新版本仍在病历列表中');
+          return true;
+        });
       }
       case 'addSoapBasis': {
         ensureSoap().a.basisDetail.push({ diagnosis: '', history: '', pe: '', aux: '' });
@@ -3882,18 +3933,99 @@ const APP = (() => {
     return differs(record, blank, '');
   }
 
-  /** 打开病历：优先读该 id 的最新草稿，草稿缺失/损坏时才退回列表快照 */
-  function recordForOpen(id, fallback) {
-    const draft = REPO.loadCurrent(id);
-    if (draft.ok && draft.record) return draft.record;
+  // 只有明确删除过的记录才会被启动清理处理，其他未入列表的草稿可能仍在编辑。
+  const DELETED_DRAFT_PREFIX = 'dabingli.deleted-draft.v1.';
+
+  function currentPointerId() {
+    const raw = REPO.readRaw(K.current);
+    if (!raw.ok || raw.missing) return '';
+    try {
+      const pointer = JSON.parse(raw.raw);
+      return String(pointer && pointer.id || '');
+    } catch (e) { return ''; }
+  }
+
+  function cleanupDeletedDrafts() {
+    const loaded = REPO.loadList();
+    if (!loaded.ok || currentSaveBlocked) return;
+    const protectedIds = new Set([R && R.id, getSessionId(), currentPointerId()]);
+    const listedIds = new Set(loaded.list.map(item => item && item.id));
+    REPO.storageKeys().filter(key => key && key.indexOf(DELETED_DRAFT_PREFIX) === 0).forEach(key => {
+      const id = key.slice(DELETED_DRAFT_PREFIX.length);
+      if (!id || protectedIds.has(id) || listedIds.has(id)) return;
+      if (REPO.removeDraft(id)) REPO.removeRaw(key);
+    });
+  }
+
+  function supersededDraft(item) {
+    const guard = item && item.__importGuard;
+    if (!guard || !guard.hash) return false;
+    const raw = REPO.readRaw(CORE.draftKey(item.id));
+    return raw.ok && !raw.missing && raw.raw.length === guard.length && CORE.hashText(raw.raw) === guard.hash;
+  }
+
+  function removeSupersededDraft(item) {
+    return !supersededDraft(item) || REPO.removeDraft(item.id);
+  }
+
+  /** 打开病历时保留新草稿，但不能复活导入前被替换的旧草稿。 */
+  function recordForOpen(id, fallback, item) {
+    const superseded = supersededDraft(item);
+    if (superseded) removeSupersededDraft(item);
+    const draft = superseded ? null : REPO.loadCurrent(id);
+    if (draft && draft.ok && draft.record) return draft.record;
     if (fallback) {
+      let record;
       try {
-        return CORE.normalizeRecord(JSON.parse(JSON.stringify(fallback)), SCHEMA.emptyRecord, deptKeys());
+        record = CORE.normalizeRecord(JSON.parse(JSON.stringify(fallback)), SCHEMA.emptyRecord, deptKeys());
       } catch (e) {
-        return deepMerge(SCHEMA.emptyRecord(), JSON.parse(JSON.stringify(fallback)));
+        record = deepMerge(SCHEMA.emptyRecord(), JSON.parse(JSON.stringify(fallback)));
       }
+      record.id = id;
+      record.meta = record.meta || {};
+      // 草稿修订号和跨页锁的修订号只在本机有意义，恢复时不能倒退。
+      let revision = Number(item && item.__importGuard && item.__importGuard.revision) || 0;
+      try {
+        const lock = JSON.parse(localStorage.getItem(storageLockKey('record:' + id)) || 'null');
+        revision = Math.max(revision, Number(lock && lock.lastRevision) || 0);
+      } catch (e) { /* 读取失败时仍保留导入版本 */ }
+      record.meta.revision = Math.max(Number(record.meta.revision) || 0, revision);
+      return record;
     }
     return null;
+  }
+
+  function deleteRecord(id) {
+    const perform = () => listTransaction(() => {
+      const loaded = loadList();
+      if (!loaded.ok) return false;
+      // 标记先写入；只有列表不再包含该 id 时，启动清理才会使用它。
+      const marked = REPO.writeRaw(DELETED_DRAFT_PREFIX + id, '1');
+      const next = CORE.removeRecord(loaded.list, id);
+      if (!REPO.writeList(next)) {
+        if (marked) REPO.removeRaw(DELETED_DRAFT_PREFIX + id);
+        storageAlert = '删除失败：无法写入病历列表。病历和草稿均已保留。';
+        return false;
+      }
+      LIST = next;
+      if (R && R.id === id) {
+        if (saveTimer) clearTimeout(saveTimer);
+        saveTimer = null;
+        saveDirty = false;
+        R = newRecord();
+        setSessionId(R.id);
+        remoteConflict = null;
+        render();
+      }
+      // 其他当前病历尚未落盘时，公共指针仍可能指向刚删除的病历。
+      if (currentPointerId() === id) REPO.removeCurrent();
+      if (REPO.removeDraft(id)) REPO.removeRaw(DELETED_DRAFT_PREFIX + id);
+      else storageAlert = marked
+        ? '病历已从列表删除，但草稿暂时无法清除；下次启动会重试。'
+        : '病历已从列表删除，但草稿暂时无法清除。请检查本机存储后重试。';
+      return true;
+    });
+    return lockAvailable() ? saveQueue.then(perform) : perform();
   }
 
   function switchRecord(next) {
@@ -3907,6 +4039,7 @@ const APP = (() => {
       }
       R = next;
       setSessionId(next.id);
+      activeImportGuard = importGuardFor(next.id);
       step = 0;
       return true;
     };
@@ -3929,6 +4062,7 @@ const APP = (() => {
             <div class="list-name">${esc(s.name)}
               <span class="list-meta">${esc(s.gender)} ${esc(AGE.display({ age: s.age, birthDate: s.birthDate, admitDate: s.admitDate }))}</span>
             </div>
+            ${item.data && item.data.meta && item.data.meta.importDraftCopy ? '<div class="list-sub">导入前的本机草稿副本</div>' : ''}
             <div class="list-sub">${esc(dept)} · ${esc((s.chiefComplaint || '无主诉').slice(0, 20))}</div>
             <div class="list-sub muted">更新于 ${esc(fmtTime(s.updatedAt))}</div>
           </div>
@@ -3982,8 +4116,8 @@ const APP = (() => {
       const delId = ev.target.dataset.del;
       if (delId) {
         if (!confirm('确定删除这份病历？删除后无法恢复，建议先导出备份。')) return;
-        LIST = CORE.removeRecord(LIST, delId);
-        await saveListAwait({ replace: true });
+        const deleted = await deleteRecord(delId);
+        if (!deleted) toast('删除失败，请查看页面顶部提示');
         wrap.remove();
         openList();
         return;
@@ -3997,7 +4131,7 @@ const APP = (() => {
         // 保存当前记录可能刚好更新了用户选择的那一条。
         found = CORE.findRecord(LIST, openId) || found;
         // 用 core 规范化，兼容旧版本存档
-        const next = recordForOpen(found.id, found.data || found);
+        const next = recordForOpen(found.id, found.data || found, found);
         if (!next) { wrap.remove(); render(); return; }
         next.id = found.id;
         if (!(await switchRecord(next))) { wrap.remove(); render(); return; }
@@ -4024,7 +4158,11 @@ const APP = (() => {
       return false;
     }
     const before = { id: R.id, updatedAt: R.updatedAt };
+    const previousEntry = CORE.findRecord(LIST, R.id);
     const res = CORE.upsertRecord(LIST, R, new Date().toISOString());
+    if (previousEntry && previousEntry.__importGuard) {
+      res.list.find(item => item.id === res.id).__importGuard = previousEntry.__importGuard;
+    }
     R.id = res.id;
     R.updatedAt = res.list.find(x => x.id === res.id).updatedAt;
     // 先保存当前记录和稳定 ID；若列表写失败，重试会更新同一条记录。
@@ -4115,30 +4253,109 @@ const APP = (() => {
     input.click();
   }
 
-  /**
-   * 把导入结果落盘，返回 { ok, res }。
-   * 单独抽出来是因为「合并」和「替换」对写入锁的态度相反：
-   *   · 合并要读现有列表，列表读不出来时读到的空数组会覆盖掉原来的记录 → 一律不写
-   *   · 替换是用户明确选择的破坏行为，是列表损坏时唯一允许覆盖的入口 → 先解锁再写
-   */
-  function applyImport(mode, records) {
-    loadList();
-    if (mode === 'merge') {
-      if (listSaveBlocked) {
-        storageAlert = '病历列表读不出来，已停止合并导入以免覆盖原数据。'
-          + '这次导入没有写入任何内容。请先导出原始列表或新建列表。';
-        return { ok: false, blocked: true };
+  // 比较内容时排除保存时间和修订号，但保留字段来源等其他元数据。
+  function importContentKey(record) {
+    const normalized = CORE.normalizeRecord(CORE.cloneValue(record), SCHEMA.emptyRecord, deptKeys());
+    delete normalized.updatedAt;
+    if (normalized.meta) {
+      delete normalized.meta.createdAt;
+      delete normalized.meta.updatedAt;
+      delete normalized.meta.revision;
+    }
+    return CORE.stableStringify(normalized);
+  }
+
+  function applyImportNow(mode, records) {
+    const loaded = loadList();
+    if (mode === 'merge' && !loaded.ok) {
+      storageAlert = '病历列表读不出来，已停止合并导入以免覆盖原数据。'
+        + '这次导入没有写入任何内容。请先导出原始列表或新建列表。';
+      return { ok: false, blocked: true };
+    }
+    const incoming = records.map(item => item.data ? item : {
+      id: item.id, updatedAt: item.updatedAt || '', basic: item.basic, data: item
+    });
+    const res = mode === 'merge' ? CORE.mergeImport(loaded.list, incoming) : null;
+    let next = res ? res.list : CORE.replaceImport(incoming);
+    const changed = next.filter(item => item && CORE.findRecord(loaded.list, item.id) !== item);
+    const guards = [];
+    let preserved = 0;
+    try {
+      changed.forEach(item => {
+        const previous = CORE.findRecord(loaded.list, item.id);
+        const baseline = previous ? importContentKey(previous.data || previous) : null;
+        const raw = REPO.readRaw(CORE.draftKey(item.id));
+        if (!raw.ok) throw Error('无法读取本机草稿');
+        let draft = null;
+        if (!raw.missing) draft = CORE.normalizeRecord(JSON.parse(raw.raw), SCHEMA.emptyRecord, deptKeys());
+        const candidates = [draft];
+        if (R && R.id === item.id) candidates.push(R);
+        const seen = new Set();
+        candidates.forEach(candidate => {
+          if (!candidate || !hasRecordContent(candidate)) return;
+          const key = importContentKey(candidate);
+          if (key === baseline || seen.has(key)) return;
+          seen.add(key);
+          const copy = CORE.cloneValue(candidate);
+          copy.id = CORE.uid();
+          copy.meta = copy.meta || {};
+          copy.meta.revision = 0;
+          copy.meta.importDraftCopy = true;
+          next = CORE.upsertRecord(next, copy, new Date().toISOString()).list;
+          preserved++;
+        });
+        const guard = {
+          token: CORE.uid(),
+          revision: Math.max(Number(draft && draft.meta && draft.meta.revision) || 0,
+            R && R.id === item.id ? Number(R.meta && R.meta.revision) || 0 : 0)
+        };
+        if (!raw.missing) { guard.hash = CORE.hashText(raw.raw); guard.length = raw.raw.length; }
+        const index = next.findIndex(entry => entry && entry.id === item.id);
+        next[index] = { ...next[index], __importGuard: guard };
+        guards.push({ id: item.id, raw: raw.missing ? null : raw.raw });
+      });
+    } catch (e) {
+      storageAlert = '导入失败：本机草稿无法读取，已保留原数据。请先导出原始数据。';
+      return { ok: false };
+    }
+    // 列表、导入版本和所有需要保留的草稿副本只写一次；失败时原样保留。
+    if (!REPO.writeList(next)) {
+      storageAlert = '导入失败：无法写入病历列表，浏览器存储空间可能已满。现有病历和草稿均已保留。';
+      return { ok: false };
+    }
+    LIST = next;
+    listSaveBlocked = false;
+    corruptListRaw = '';
+    guards.forEach(({ id, raw }) => {
+      if (raw !== null) {
+        const current = REPO.readRaw(CORE.draftKey(id));
+        if (current.ok && current.raw === raw) REPO.removeDraft(id);
       }
-      const res = CORE.mergeImport(LIST, records);
-      LIST = res.list;
-      return { ok: saveList(), res };
+    });
+    if (R && guards.some(guard => guard.id === R.id)) {
+      if (saveTimer) clearTimeout(saveTimer);
+      saveTimer = null;
+      saveDirty = false;
+      const imported = CORE.findRecord(LIST, R.id);
+      HISTORY.clear(R.id);
+      R = recordForOpen(R.id, imported.data || imported, imported);
+      activeImportGuard = imported.__importGuard.token;
+      remoteConflict = null;
+      setSessionId(R.id);
+      render();
     }
-    if (listSaveBlocked) {
-      listSaveBlocked = false;
-      corruptListRaw = '';
-    }
-    LIST = CORE.replaceImport(records);
-    return { ok: saveList({ replace: true }), replaced: LIST.length };
+    return res ? { ok: true, res, preserved } : { ok: true, replaced: incoming.length, preserved };
+  }
+
+  /** 有锁时等待实际写入，失败时既不改变内存列表也不清除草稿。 */
+  function applyImport(mode, records) {
+    const finish = result => {
+      if (result && typeof result === 'object') return result;
+      storageAlert = '导入失败：无法取得本机存储锁，现有病历和草稿均已保留。';
+      return { ok: false };
+    };
+    const perform = () => listTransaction(() => applyImportNow(mode, records));
+    return lockAvailable() ? saveQueue.then(perform).then(finish, () => finish(false)) : finish(perform());
   }
 
   /** 导入预览：显示条数与摘要，让用户选择合并或替换 */
@@ -4174,14 +4391,17 @@ const APP = (() => {
           if (listSaveBlocked && !confirm('现有列表已经读不出来，替换会连原始数据一起清掉。'
             + '建议先点顶部横幅里的「导出原始列表」留底。仍要继续？')) return;
         }
-        const out = applyImport(mode, parsed.records);
+        // 防止异步写入期间重复提交；成功提示只在实际落盘之后显示。
+        if (wrap.__importing) return;
+        wrap.__importing = true;
+        const out = await applyImport(mode, parsed.records);
         wrap.remove();
         if (mode === 'merge') {
           toast(out.ok
-            ? `已导入：新增 ${out.res.added}，更新 ${out.res.updated}，跳过 ${out.res.skipped}`
+            ? `已导入：新增 ${out.res.added}，更新 ${out.res.updated}，跳过 ${out.res.skipped}${out.preserved ? `；另存 ${out.preserved} 份本机草稿副本` : ''}`
             : '导入没有写入，请查看页面顶部提示');
         } else {
-          toast(out.ok ? `已替换为导入的 ${out.replaced} 份病历` : '替换没有写入，请查看页面顶部提示');
+          toast(out.ok ? `已替换为导入的 ${out.replaced} 份病历${out.preserved ? `；另存 ${out.preserved} 份本机草稿副本` : ''}` : '替换没有写入，请查看页面顶部提示');
         }
         openList();
       });
@@ -4216,9 +4436,17 @@ const APP = (() => {
 
   function init() {
     loadSettings();
-    if (!loadCurrent()) {
-      R = newRecord();
+    loadList();
+    const loadedCurrent = loadCurrent();
+    const currentId = loadedCurrent && R ? R.id : (getSessionId() || currentPointerId());
+    const listed = currentId && CORE.findRecord(LIST, currentId);
+    if (listed && !currentSaveBlocked && (!loadedCurrent || supersededDraft(listed))) {
+      R = recordForOpen(currentId, listed.data || listed, listed);
+      setSessionId(currentId);
     }
+    if (!R) R = newRecord();
+    activeImportGuard = importGuardFor(R.id);
+    cleanupDeletedDrafts();
 
     // 回到上次停留的那一步。键不认识（改过步骤、旧存档）就退回第一步，
     // 不因为一个字符串对不上就让页面白屏。
@@ -4269,6 +4497,13 @@ const APP = (() => {
     // 多标签页：只关心「同一份病历」的草稿键；不同病历各写各的槽位。
     window.addEventListener('storage', ev => {
       if (!ev || !ev.key || !ev.newValue) return;
+      if (ev.key === K.list) {
+        try {
+          const list = JSON.parse(ev.newValue);
+          if (Array.isArray(list) && detectImportedConflict(CORE.findRecord(list, R && R.id))) render();
+        } catch (e) { /* 不因其他页面的损坏数据替换当前内容 */ }
+        return;
+      }
       if (ev.key.indexOf(K.draftPrefix) !== 0) return;
       const id = ev.key.slice(K.draftPrefix.length);
       if (!R || id !== R.id) return;
@@ -4388,12 +4623,13 @@ const APP = (() => {
         loadList();
         const item = LIST.find(x => x.id === id) || CORE.findRecord(LIST, id);
         if (!item) return false;
-        const next = recordForOpen(id, item.data || item);
+        const next = recordForOpen(id, item.data || item, item);
         if (!next) return false;
         next.id = id;
         return afterSave(switchRecord(next), ok => { if (ok) render(); return ok; });
       },
       openList,
+      handleAction,
       openSettings,
       closeSettings,
       gotoStep,
@@ -4425,7 +4661,7 @@ const APP = (() => {
       sessionId: () => getSessionId(),
       discardCorruptCurrent, discardCorruptList,
       // 导入合并/替换的落盘入口：列表损坏时合并必须整单不写，替换要能解锁
-      applyImport
+      applyImport, previewImport
     }
   };
 })();

@@ -244,8 +244,11 @@ export function redactionDiff(text: unknown, record: DabingliRecord): { text: st
     recordNo: '病历号', bedNo: '床号', nativePlace: '籍贯', birthPlace: '出生地',
   };
   Object.entries(labels)
-    .map(([key, label]) => ({ value: String(record.basic[key] ?? '').trim(), label }))
-    .filter(({ value }) => value.length >= 2)
+    .map(([key, label]) => ({ key, value: String(record.basic[key] ?? '').trim(), label }))
+    // 跳过纯数字床号、病历号及不完整电话的全文替换，避免误改化验值和时间。
+    .filter(({ key, value }) => value.length >= 2
+        && !((key === 'bedNo' || key === 'recordNo') && /^\d+$/.test(value))
+        && !(key === 'phone' && /^\d{1,6}$/.test(value)))
     .sort((left, right) => right.value.length - left.value.length)
     .forEach(({ value, label }) => {
       if (output.includes(value)) {
@@ -254,14 +257,48 @@ export function redactionDiff(text: unknown, record: DabingliRecord): { text: st
       }
     });
   output = output
-    .replace(/(患者姓名|姓名|病历号|住院号|门诊号|床号|ID号|身份证号?)\s*[:：]\s*[^\s，。；,;]+/g, (match, label: string) => {
-      const replacement = `${label}：[已隐去]`;
-      if (match !== replacement) categories.add(label === '患者姓名' ? '姓名' : label);
-      return replacement;
+    // 标签与值之间既可能是冒号，也可能只有空格；不要重复处理已隐去的值。
+    .replace(/(患者姓名|姓名|病案号|病历号|住院号|门诊号|床号|ID号|身份证号?)(?:[ \t]*[:：][ \t]*|[ \t]+|(?=\d))(?!\[)([^\s，。；,;]+)/gi, (match, label: string, value: string) => {
+      if (value.startsWith('[')) return match;
+      categories.add(label === '患者姓名' ? '姓名' : label);
+      return `${label}：[已隐去]`;
+    })
+    // 省、市、县和门牌之间也可能有空格，按完整地址一起处理。
+    .replace(/(出生地|籍贯)(?:[ \t]*[:：][ \t]*|[ \t]+)((?:[\u4e00-\u9fff]{2,4}省[ \t]*)?(?:[\u4e00-\u9fff]{1,8}市[ \t]*)?[\u4e00-\u9fff]{1,8}[区县])/g, (_match, label: string) => {
+      categories.add(label);
+      return `${label}：[已隐去]`;
+    })
+    .replace(/(家庭住址|现住址|联系地址|住址|地址)(?:[ \t]*[:：][ \t]*|[ \t]+)((?:[\u4e00-\u9fff]{2,4}省|北京市|天津市|上海市|重庆市)[ \t]*(?:[\u4e00-\u9fff]{1,8}市[ \t]*)?[\u4e00-\u9fff]{1,8}[区县][ \t]*[\u4e00-\u9fff0-9]{1,12}?(?:路|街|巷|村|镇|乡)(?:[ \t]*[0-9一二三四五六七八九十]+(?:号|弄|栋|幢|单元|室|楼|座))*)/g, (_match, label: string) => {
+      categories.add('地址');
+      return `${label}：[已隐去]`;
+    })
+    .replace(/(出生地|籍贯|家庭住址|现住址|联系地址|住址|地址)(?:[ \t]*[:：][ \t]*|[ \t]+)(?!\[)([^\s，。；,;]+)/g, (match, label: string, value: string) => {
+      if (value.startsWith('[')) return match;
+      categories.add(label === '出生地' || label === '籍贯' ? label : '地址');
+      return `${label}：[已隐去]`;
+    })
+    // 姓名未填入基本信息时，只匹配姓氏加名字且以标点或常见叙述词结束的形式。
+    .replace(/(患者)((?!(?:陈述|张口|周围|高血压|高血糖|高血脂|低血压|低血糖|低血钾|曾于|曾有|曾患|曾服|曾因|曾在|经常))(?:(?:欧阳|司马|上官|诸葛|夏侯|东方|皇甫|尉迟|公孙|慕容)|[赵钱孙李周吴郑王冯陈褚卫蒋沈韩杨朱秦尤许何吕施张孔曹严华金魏陶姜戚谢邹喻柏水窦章云苏潘葛奚范彭郎鲁韦昌马苗凤花方俞任袁柳唐罗薛雷贺倪汤滕殷罗毕郝邬安常乐于时傅皮卞齐康伍余元卜顾孟平黄和穆萧尹姚邵湛汪祁毛禹狄米贝明臧计伏成戴宋茅庞熊纪舒屈项祝董梁杜阮蓝闵席季麻强贾路娄危江童颜郭梅盛林刁钟徐邱骆高夏蔡田樊胡凌霍虞万支柯管卢莫经房裘缪干解应宗丁宣邓郁单洪包左石崔吉龚程邢裴陆荣翁荀羊惠甄曲封芮羿储靳汲邴糜松井段富巫乌焦巴弓牧隗山谷车侯宓蓬全郗班仰秋仲伊宫宁仇栾暴甘钭厉戎祖武符刘景詹束龙叶幸司韶郜黎蓟薄印宿白怀蒲邰从鄂索赖卓屠池乔阴胥能苍双闻莘党翟谭贡劳逄姬申扶堵冉宰郦雍郤璩桑桂濮牛寿通边扈燕冀浦尚农温别庄晏柴瞿阎充慕连茹习宦艾鱼容向古易慎戈廖庾终暨居衡步都耿满弘匡国文寇广禄阙东殴殳沃利蔚越夔隆师巩厍聂晁勾敖融冷辛阚那简饶空曾毋沙乜养鞠须丰巢关蒯相查后荆红游竺权逯盖益桓公])[\u4e00-\u9fff·]{1,2})(?=$|[\s，。；：,;:、\d]|(?:于|因|诉|无|有|男|女|出现|入院|就诊|患病|发病|既往))/g, (_match, prefix: string) => {
+      categories.add('姓名');
+      return `${prefix}[已隐去]`;
+    })
+    // 无标签的出生地或籍贯也要隐去到县、区。
+    .replace(/(出生于|出生地为|籍贯为)((?:[\u4e00-\u9fff]{2,4}省|北京市|天津市|上海市|重庆市)(?:[\u4e00-\u9fff]{1,8}市)?[\u4e00-\u9fff]{1,8}[区县])/g, (_match, prefix: string) => {
+      categories.add(prefix === '籍贯为' ? '籍贯' : '出生地');
+      return `${prefix}[已隐去]`;
+    })
+    // 无地址标签的完整省市区县与道路、村庄等详细地址。
+    .replace(/(居住在|住在|出生于|来自|住|^|[^\u4e00-\u9fff])((?!(?:患者|居住|出生|来自|住|他|她))(?:(?:[\u4e00-\u9fff]{2,4}省)|北京市|天津市|上海市|重庆市)(?:[\u4e00-\u9fff]{1,8}市)?[\u4e00-\u9fff]{1,8}[区县](?:[\u4e00-\u9fff0-9]{1,12}?(?:路|街|巷|村|镇|乡))(?:[0-9一二三四五六七八九十]+(?:号|弄|栋|幢|单元|室|楼|座))*)/g, (_match, prefix: string) => {
+      categories.add('地址');
+      return `${prefix}[地址已隐去]`;
     })
     .replace(/(?<!\d)\d{17}[\dXx](?!\d)/g, () => {
       categories.add('身份证');
       return '[身份证已隐去]';
+    })
+    .replace(/(?<![\d-])0\d{2,3}[-－]\d{7,8}(?:[-－]\d{1,6})?(?!\d)/g, () => {
+      categories.add('电话');
+      return '[电话已隐去]';
     })
     .replace(/(?<!\d)1[3-9]\d{9}(?!\d)/g, () => {
       categories.add('电话');
