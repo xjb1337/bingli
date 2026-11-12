@@ -159,9 +159,8 @@ test('PR5-05 ROS 未问不生成“无”，明确阴性才生成否定句', () 
   conflict.ros.resp = { cough: { status: 'not_asked', checked: true } };
   assert.doesNotMatch(GENERATOR.buildROS(conflict), /无咳嗽/);
   const hits = diagnosticsWith(conflict, 'ROS_FACT_STATE_CONFLICT');
-  assert.equal(hits.length, 1);
-  assertTyped(hits);
-  assert.equal(hits[0].path, 'ros.resp.cough.status');
+  assert.equal(hits.length, 0);
+  assert.doesNotMatch(GENERATOR.generate(conflict).text, /系统回顾/);
 });
 
 test('PR5-06 未勾查体不生成正常描述，显式阳性无详情不回填正常值', () => {
@@ -244,7 +243,7 @@ test('PR5-08 三种文书都从文档 IR 输出且章节顺序稳定', () => {
   assert.equal(bundle.discharge.text, GENERATOR.buildDischargeRecord(r));
   assert.deepEqual(bundle.record.sections.map(item => item.title), [
     '一般项目', '主诉', '现病史', '既往史', '个人史', '婚育史', '家族史',
-    '体格检查', '辅助检查', '初步诊断'
+    '体格检查（一）', '体格检查（二）：补充及专科情况', '实验室检查', '特殊检查', '初步诊断'
   ]);
   assert.deepEqual(bundle.firstCourse.sections.map(item => item.title), [
     '一、病历特点（S）', '二、客观记录（O）', '三、诊断依据（A）', '四、鉴别诊断（A）', '五、诊疗计划（P）'

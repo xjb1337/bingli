@@ -14,8 +14,8 @@ export function AuxStep({ record, update, errors }: StepComponentProps) {
 
   return (
     <StepShell
-      eyebrow="第 9 / 11 步"
-      title="辅助检查"
+      eyebrow="第 8 / 10 步"
+      title="实验室检查 / 特殊检查"
       description={STEP_DESCRIPTIONS.aux}
     >
       <Card title="检查结果" description="按检查时间顺序记录；外院检查请写明机构名称和检查号。">
@@ -34,6 +34,19 @@ export function AuxStep({ record, update, errors }: StepComponentProps) {
                 </button>
               </div>
               <FormGrid>
+                <FieldRenderer
+                  path={`auxiliary.items.${index}.category`}
+                  label="检查分类"
+                  value={stringAt(record, `auxiliary.items.${index}.category`)}
+                  onChange={update}
+                  kind="select"
+                  options={[
+                    { value: '', label: '自动分类（无法判断归实验室）' },
+                    { value: 'lab', label: '实验室检查' },
+                    { value: 'special', label: '特殊检查（影像 / 心电图等）' },
+                    { value: 'pathology', label: '病理检查（归特殊检查）' },
+                  ]}
+                />
                 <FieldRenderer
                   path={`auxiliary.items.${index}.name`}
                   label="检查项目"

@@ -16,10 +16,10 @@ test('识别：图片与文字进入同一预览，图片数据不重复塞进�
   assert.equal(q.operation, 'recognize');
   assert.deepEqual(q.sources.map(s => s.source), ['note', 'image']);
   assert.ok(q.allowed.includes('pe.vitals.temperature'));
-  assert.ok(q.allowed.includes('ros.resp.fever.status'));
+  assert.ok(!q.allowed.some(path => path.startsWith('ros.')));
   assert.ok(!q.user.includes(image().dataBase64));
-  assert.match(q.user, /呼吸系统/);
-  assert.match(q.system, /asked_positive/);
+  assert.doesNotMatch(q.user, /ros\./);
+  assert.match(q.system, /识别和整理填表均禁止输出系统回顾字段/);
 });
 
 test('识别：月经史白名单包含「未初潮」', () => {
@@ -140,21 +140,21 @@ test('识别：勾选查体项同步本次检查状态，未查则保持未勾',
   assert.equal(SCHEMA.peChecked(next, 'genital', 'genitalia'), false);
 });
 
-test('识别：ROS 状态同步事实状态，阳性/阴性/未问均按三态落库', () => {
+test('识别和整理填表均拒绝 ROS 建议，保留旧 ROS 原值', () => {
   const r = record();
-  const q = recognize(r);
+  r.ros.resp = { fever: { checked: true, detail: '虚构旧症状' } };
+  for (const operation of ['recognize', 'organize']) {
+  const q = AI.prepare(operation, r, '否认发热', undefined, operation === 'recognize' ? image() : null);
   const result = AI.validate(response([
     suggestion('ros.resp.fever.status', 'asked_positive', []),
     suggestion('ros.gi.nausea.status', 'asked_negative', []),
     suggestion('ros.cardio.syncope.status', 'not_asked', []),
   ]), q);
-  const next = AI.apply(r, q, result, [0, 1, 2], false, 'deepseek-flash');
-  assert.equal(next.ros.resp.fever.status, 'asked_positive');
-  assert.equal(next.ros.resp.fever.checked, true);
-  assert.equal(SCHEMA.rosFactState(next.ros.resp.fever), 'asked_positive');
-  assert.equal(next.ros.gi.nausea.negative, true);
-  assert.equal(SCHEMA.rosFactState(next.ros.gi.nausea), 'asked_negative');
-  assert.equal(SCHEMA.rosFactState(next.ros.cardio.syncope), 'not_asked');
+  assert.equal(result.suggestions.length, 0);
+  assert.equal(result.dropped.length, 3);
+  assert.throws(() => AI.apply(r, q, result, [0], false, 'deepseek-flash'));
+  assert.deepEqual(r.ros, { resp: { fever: { checked: true, detail: '虚构旧症状' } } });
+  }
 });
 
 test('识别：专科查体只开放当前科室，其他科室目标不进入请求', () => {
@@ -188,7 +188,7 @@ test('识别：压缩字段目录控制提示词长度并保留旧版对象接�
   const payload = JSON.parse(q.user);
   assert.equal(Array.isArray(payload.targets), false);
   assert.ok(payload.valueSets.some(values => values.includes('未初潮')));
-  assert.match(q.user, /呼吸系统/);
+  assert.doesNotMatch(q.user, /ros\./);
   assert.match(q.system, /valueSets/);
   const legacy = AI.recognizeTargets();
   assert.ok(Array.isArray(legacy));

@@ -32,7 +32,7 @@ const GENERATOR = (() => {
       verificationLabel: '已对照',
       source: Object.freeze({
         kind: 'hospital-template',
-        label: '温州市人民医院入院记录模板（2026-10 照片）'
+        label: '温州市人民医院入院记录模板（完善版结构对照）'
       })
     }),
     firstCourse: Object.freeze({
@@ -450,22 +450,15 @@ const GENERATOR = (() => {
     const b = r.basic || {};
     const age = ageWithUnit(r);
     const marital = (r.marriage || {}).status || b.marital;
-    const informant = [stripTail(b.informant), stripTail(b.reliability)].filter(Boolean).join('，');
     const pairs = [
-      ['姓名', b.name], ['职业', b.occupation],
-      ['性别', b.gender], ['婚姻', marital],
-      ['出生日期', b.birthDate], ['出生地', b.birthPlace],
-      ['年龄', age], ['病史陈述者', informant],
-      ['民族', b.nationality], ['入院时间', dateTimeText(b.admitDate, b.admitTime)]
+      ['姓名', b.name], ['性别', b.gender], ['年龄', age],
+      ['科别', departmentName(r)], ['床号', b.bedNo], ['住院号', b.recordNo],
+      ['民族', b.nationality], ['出生地', b.birthPlace], ['婚姻', marital], ['职业', b.occupation],
+      ['入院日期', dateTimeText(b.admitDate, b.admitTime)],
+      ['记录日期', dateTimeText(b.recordDate, b.recordTime)],
+      ['病史陈述者', b.informant], ['病史可靠程度', b.reliability]
     ];
-    const lines = [];
-    for (let i = 0; i < pairs.length; i += 2) {
-      const left = `${pairs[i][0]}：${filledOrPH(pairs[i][1])}`;
-      const right = `${pairs[i + 1][0]}：${filledOrPH(pairs[i + 1][1])}`;
-      lines.push(`${left}  ${right}`);
-    }
-    lines.push(`记录时间：${filledOrPH(dateTimeText(b.recordDate, b.recordTime))}`);
-    return lines.join('\n');
+    return pairs.map(([label, value]) => `${label}：${filledOrPH(value)}`).join('\n');
   }
 
   /* ---------------------------- 主诉 ---------------------------- */
@@ -644,26 +637,26 @@ const GENERATOR = (() => {
   function splitAdmissionGeneralCondition(text) {
     const t = stripTail(text);
     if (!t) return { body: '', general: '' };
-    const trigger = /(^|[；;，,。])\s*(病来以来|发病以来|起病以来|病来)/;
+    const trigger = /(^|[；;，,。])\s*(病来以来|发病以来|起病以来|起病来|病来)/;
     const match = t.match(trigger);
-    if (!match) return { body: '', general: ensureSentence(`病来，${t}`) };
+    if (!match) return { body: '', general: ensureSentence(`起病来，${t}`) };
 
     const body = stripTail(t.slice(0, match.index));
     let clause = stripTail(match[2] + t.slice(match.index + match[0].length));
     let previous;
     do {
       previous = clause;
-      clause = stripTail(clause.replace(/^(?:病来以来|发病以来|起病以来|病来)[，,]?\s*/, ''));
+      clause = stripTail(clause.replace(/^(?:病来以来|发病以来|起病以来|起病来|病来)[，,]?\s*/, ''));
     } while (clause !== previous);
 
     // 同一段里再出现「；发病以来…」时去掉重复的起句，只保留病来段。
     clause = stripTail(clause.replace(
-      /([；;，,。])\s*(?:病来以来|发病以来|起病以来|病来)[，,]?\s*/g,
+      /([；;，,。])\s*(?:病来以来|发病以来|起病以来|起病来|病来)[，,]?\s*/g,
       '$1'
     ));
     return {
       body,
-      general: clause ? ensureSentence(`病来，${clause}`) : '病来。'
+      general: clause ? ensureSentence(`起病来，${clause}`) : '起病来。'
     };
   }
 
@@ -686,9 +679,9 @@ const GENERATOR = (() => {
     }
     const lines = [];
     if (body) lines.push(body);
-    if (generalParts.general) lines.push(generalParts.general);
-    if (parts.other) lines.push(ensureSentence(`现在需要治疗的其他现病史：${parts.other}`));
-    if (parts.extra) lines.push(ensureSentence(parts.extra));
+    if (generalParts.general) lines.push('　　' + generalParts.general);
+    if (parts.other) lines.push('　　' + ensureSentence(`伴发疾病：${parts.other}`));
+    if (parts.extra) lines.push('　　' + ensureSentence(parts.extra));
     return lines.join('\n');
   }
 
@@ -869,11 +862,10 @@ const GENERATOR = (() => {
     const p = r.pmh || {};
     const lines = [];
 
-    // 1) 既往健康状况：模板要求写成完整句；空值不输出该行。
     const health = stripTail(p.health);
     if (opts.template) {
       const healthSentence = pastHealthSentence(health);
-      if (healthSentence) lines.push(healthSentence);
+      lines.push(healthSentence || `既往健康状况：${PH}`);
     } else {
       lines.push(`既往健康状况：${health ? (/^(平素|既往)/.test(health) ? health : `平素${health}`) : PH}`);
     }
@@ -935,9 +927,7 @@ const GENERATOR = (() => {
     // 10) 长期用药
     lines.push(`长期用药：${filledOrPH(p.longTermMeds)}`);
 
-    // 11) 与本病相关病史：只有这一项是「可选行」——它是补充性质，
-    //     不像上面那些是教材规定的固定栏目，没内容时整行不出现不算缺项。
-    if (stripTail(p.relatedHistory)) lines.push(`与本病相关病史：${stripTail(p.relatedHistory)}`);
+    if (opts.template || stripTail(p.relatedHistory)) lines.push(`与本病相关病史：${filledOrPH(p.relatedHistory)}`);
 
     // 12) 其它（补充说明）
     //     「其他需治疗的疾病」已经并入上面的疾病史（见缺陷4），这里只留补充说明，
@@ -1697,6 +1687,24 @@ const GENERATOR = (() => {
       const items = group.items.filter(it => !it.depts || it.depts.includes(deptKey));
       if (!items.length) return;
       const entries = peEntries(r, group.key, items);
+      if (opts.admission) {
+        if (group.key === 'genital') {
+          ['genitalia', 'anus'].forEach((key, index) => {
+            const entry = entries.find(value => value.item.key === key);
+            out.push(`${index ? '直肠肛门' : '外生殖器'}：${entry ? ensureSentence(entry.value) : PH}`);
+          });
+        } else if (group.key === 'chest') {
+          const chest = entries.filter(entry => !/^(lung|heart)/.test(entry.item.key));
+          out.push(`胸部：${chest.length ? ensureSentence(chest.map(entry => entry.value).join('。')) : PH}`);
+          [['lung', '肺'], ['heart', '心']].forEach(([prefix, label]) => {
+            const values = entries.filter(entry => entry.item.key.startsWith(prefix)).map(entry => entry.value);
+            out.push(`　${label}：${values.length ? ensureSentence(values.join('。')) : PH}`);
+          });
+        } else {
+          out.push(`${group.key === 'skin' ? '皮肤黏膜' : group.name}：${entries.length ? ensureSentence(entries.map(entry => entry.value).join(group.joinWith || '。')) : PH}`);
+        }
+        return;
+      }
       if (!entries.length) return;
       renderPEGroup(group, entries).forEach(line => out.push(line));
     });
@@ -1754,6 +1762,7 @@ const GENERATOR = (() => {
 
     const focus = buildFocusPE(r);
     if (focus) specialOut.push(focus);
+    if (opts.admission) return { common: out.join('\n'), special: specialOut.join('\n') || PH };
     if (opts.template) {
       out.unshift('体格检查表（一）');
       if (specialOut.length) out.push('体格检查表（二）补充及专科情况', ...specialOut);
@@ -2049,7 +2058,8 @@ const GENERATOR = (() => {
           result: stripTail(o.result),
           date: String(o.date || '').trim(),
           hospital: stripTail(o.hospital),
-          no: String(o.no || '').trim()
+          no: String(o.no || '').trim(),
+          category: o.category
         };
       })
       // 只保留真正写了检查项目/结果的条目；空行（含只剩日期的行）不输出
@@ -2077,11 +2087,12 @@ const GENERATOR = (() => {
    * 三个新字段都没填时，输出与改动前完全一致（「血常规：WBC 12×10^9/L。」）。
    */
   function auxiliaryCategory(item) {
+    if (item && ['lab', 'special', 'pathology'].includes(item.category)) return item.category;
     const name = stripTail(item && item.name);
     if (/病理/.test(name)) return 'pathology';
-    if (/(?:CT|MRI|PET|超声|X线|心电图|镜|造影|核素|放射)/i.test(name)) return 'special';
+    if (/(?:\b(?:CT|MRI|PET)\b|超声|X线|心电图|(?:胃|肠|支气管|膀胱|喉|内)镜|造影|核素|放射)/i.test(name)) return 'special';
     if (/(?:检验|血|尿|生化|常规|培养|免疫|电解质|凝血|血气)/.test(name)) return 'lab';
-    return 'special';
+    return 'lab';
   }
 
   function formatAuxiliaryLine(item, category) {
@@ -2089,6 +2100,7 @@ const GENERATOR = (() => {
       const hospital = stripTail(item.hospital);
       const parts = [`均于${hospital || '本院'}`];
       if (item.date) parts.push(item.date);
+      if (item.no) parts.push(`检查号 ${item.no}`);
       if (item.name) parts.push(item.name);
       parts.push(item.result || PH);
       return ensureSentence(parts.join(' '));
@@ -2104,11 +2116,13 @@ const GENERATOR = (() => {
   }
 
   function buildAuxiliary(r, opts = {}) {
-    const items = auxItems(r);
+    const items = auxItems(r).filter(item => !opts.category ||
+      (opts.category === 'special' ? auxiliaryCategory(item) !== 'lab' : auxiliaryCategory(item) === opts.category));
     // 空节保留原来的「暂缺。」而不是改成「／」：
     // 辅助检查整节为空时，「暂缺」本身就是病历里的规范写法（医生也这么写），
     // 不构成编造；而它的 hint 与既有测试都按「暂缺」写，改成「／」只有风险没有收益。
     if (!items.length) return '暂缺。';
+    if (opts.category) return items.map(item => formatAuxiliaryLine(item, auxiliaryCategory(item))).join('\n');
     if (!opts.template) {
       return items.map(it => formatAuxiliaryLine(it, 'special')).join('\n');
     }
@@ -2812,7 +2826,8 @@ const GENERATOR = (() => {
 
   const SECTION_ORDER = [
     '一般项目', '主诉', '现病史', '既往史', '个人史',
-    '婚育史', '家族史', '体格检查', '系统回顾', '辅助检查', '初步诊断'
+    '婚育史', '家族史', '体格检查（一）', '体格检查（二）：补充及专科情况',
+    '实验室检查', '特殊检查', '初步诊断'
   ];
 
   const ADMISSION_CONSENT = '患者确认以上病史签名：＿＿＿＿';
@@ -2881,7 +2896,7 @@ const GENERATOR = (() => {
           seenAcross.add(k);
           out.push(sentence);
         });
-        if (out.length) kept.push(out.join(''));
+        if (out.length) kept.push((line.match(/^[ \t\u3000]*/) || [''])[0] + out.join(''));
       });
       sections[key] = kept.join('\n') || PH;
     });
@@ -2896,15 +2911,13 @@ const GENERATOR = (() => {
    * 反映到带教老师那边就是一份缺项的入院记录。
    * 《诊断学》第10版：「所有表格项都应详细填写，无内容者画"/"或"—"」。
    *
-   * 现在 14 节标题恒在，正文为空时写占位符「／」。
    * 这样既满足「不可空缺」，也让用户一眼看到自己还有哪几节没填。
    *
    * 注意：sections 里存的也是占位符而非空串，所以 app.js 的「复制某节」
-   * 列表（GENERATOR.SECTION_ORDER.filter(n => res.sections[n])）会列出全部 14 节，
+   * 列表（GENERATOR.SECTION_ORDER.filter(n => res.sections[n])）
    * 与正文保持一致，不会出现"正文有、复制列表里没有"的错位。
    *
    * @param {object} r record
-   * @param {object} opts { rosMode: 'detail'|'brief' }
    */
   /** 病史类字段的固定遍历顺序：先出现的保留，后出现的跨字段重复去掉 */
   const HISTORY_FIELD_PATHS = [
@@ -2957,7 +2970,6 @@ const GENERATOR = (() => {
   }
 
   function generate(r, opts = {}) {
-    const rosMode = opts.rosMode || 'detail';
     // 生成用克隆：跨字段整句去重，原记录一个字都不改
     const rec = dedupeRecordFields(r);
     const sections = {};
@@ -2965,22 +2977,21 @@ const GENERATOR = (() => {
     sections['主诉'] = buildChiefComplaint(rec);
     sections['现病史'] = buildAdmissionHPI(rec);
     sections['既往史'] = buildPMH(rec, { template: true });
-    const ros = buildROS(rec, rosMode);
-    // 签名行跟在「最后一段病史」后面：系统回顾有正文时接在系统回顾末尾，
-    // 否则接在家族史末尾；不能两处都出现。
-    if (ros) sections['系统回顾'] = `${ros}\n${ADMISSION_CONSENT}`;
     sections['个人史'] = buildPersonal(rec, { template: true });
     sections['婚育史'] = buildAdmissionMarriageChildbirth(rec);
     const family = String(buildFamily(rec) || '').trim();
-    sections['家族史'] = ros ? family : (family ? `${family}\n${ADMISSION_CONSENT}` : ADMISSION_CONSENT);
-    sections['体格检查'] = buildPE(rec, { template: true });
-    sections['辅助检查'] = buildAuxiliary(rec, { template: true });
+    sections['家族史'] = family ? `${family}\n${ADMISSION_CONSENT}` : ADMISSION_CONSENT;
+    const pe = buildPE(rec, { admission: true });
+    sections['体格检查（一）'] = pe.common;
+    sections['体格检查（二）：补充及专科情况'] = pe.special;
+    sections['实验室检查'] = buildAuxiliary(rec, { category: 'lab' });
+    sections['特殊检查'] = buildAuxiliary(rec, { category: 'special' });
     sections['初步诊断'] = buildDiagnosis(rec);
 
     // 同一句话填进两个病史栏目时只输出一次；同栏内重复保留并提示。
     dedupeHistorySections(sections);
 
-    const lines = ['【入院记录】', admissionHeaderLine(rec), ''];
+    const lines = ['【入院记录】', ''];
     SECTION_ORDER.forEach(name => {
       if (!Object.prototype.hasOwnProperty.call(sections, name)) return;
       // 空节不再整节消失：标题照出，正文补「／」占位。
@@ -3000,7 +3011,7 @@ const GENERATOR = (() => {
    */
   function generatePlain(r, opts = {}) {
     const { sections } = generate(r, opts);
-    const out = [];
+    const out = ['入院记录', ''];
     SECTION_ORDER.forEach(n => {
       const body = sections[n];
       if (!body) return;
@@ -3319,35 +3330,8 @@ const GENERATOR = (() => {
     return out;
   }
 
-  /** 返回 ROS/查体事实状态自身的问题；这些提醒可直接携带精确字段路径。 */
   function factStateDiagnostics(r) {
     const out = [];
-    const ros = r.ros || {};
-    Object.keys(ros).forEach(sysKey => {
-      const store = ros[sysKey];
-      if (!store || typeof store !== 'object') return;
-      Object.keys(store).forEach(symKey => {
-        const entry = store[symKey] || {};
-        const explicit = typeof SCHEMA.normalizeFactState === 'function'
-          ? SCHEMA.normalizeFactState(entry.status || entry.factState)
-          : '';
-        if (!explicit) return;
-        const conflict =
-          (explicit === 'not_asked' && !!(entry.checked || entry.negative)) ||
-          (explicit === 'asked_positive' && entry.negative === true) ||
-          (explicit === 'asked_negative' && entry.checked === true);
-        if (!conflict) return;
-        out.push(diagnostic({
-          code: 'ROS_FACT_STATE_CONFLICT',
-          severity: 'warning',
-          document: 'record',
-          path: `ros.${sysKey}.${symKey}.status`,
-          action: '核对症状状态',
-          message: `【系统回顾】${sysKey}.${symKey} 的事实状态与旧勾选值冲突，生成时以显式状态“${explicit}”为准。`,
-          evidence: [{ path: `ros.${sysKey}.${symKey}`, text: JSON.stringify(entry) }]
-        }));
-      });
-    });
 
     const deptKey = (r.basic || {}).department || 'general';
     const dept = SCHEMA.DEPARTMENTS.find(d => d.key === deptKey) || SCHEMA.DEPARTMENTS[0];
@@ -3790,16 +3774,6 @@ const GENERATOR = (() => {
     // ⚠️ 措辞随本轮语义改动（缺陷1第2条）：旧文案「默认为阴性，勾选阳性症状即可」
     // 已经不成立——现在没勾不等于阴性，没问过就是未问，一个字都不写。
     // 同时把「标阴性」这条路径也认进来（v.negative），否则用户全点阴性还会被反复提醒。
-    const rosTouched = Object.keys(r.ros || {}).some(sysKey =>
-      Object.values(r.ros[sysKey] || {}).some(v => {
-        if (!v) return false;
-        const state = typeof SCHEMA.rosFactState === 'function' ? SCHEMA.rosFactState(v) : '';
-        return state === 'asked_positive' || state === 'asked_negative' || v.checked || v.negative || v.detail || v.time;
-      })
-    );
-    if (!rosTouched) {
-      w.push('【系统回顾】尚未问诊。未点选的症状不会写进病历；过一遍问诊后，阳性点红、明确阴性的点「阴性」。');
-    }
     // 【婚姻史】静默丢失（缺陷2第3条）：
     // 这一节以前 `if (!status) return ''`，空就整节消失，而 validate 里没有任何一项检查它，
     // 用户完全不知道自己漏了婚姻史。现在正文有占位符，同时这里补一条提醒。
@@ -3895,7 +3869,6 @@ const GENERATOR = (() => {
     [/【主诉】疑似包含诊断性词语/, 'CHIEF_COMPLAINT_DIAGNOSIS_WORD', 'record', ['basic.chiefComplaint'], 'warning', '改成症状描述'],
     [/【主诉】缺少持续时间/, 'CHIEF_COMPLAINT_DURATION_MISSING', 'record', ['basic.chiefComplaint', 'basic.chiefComplaintDuration'], 'warning', '补持续时间'],
     [/【现病史】未填写/, 'HPI_MISSING', 'record', ['hpi'], 'error', '填写现病史'],
-    [/【系统回顾】尚未问诊/, 'ROS_UNTOUCHED', 'record', ['ros'], 'info', '逐系统问诊'],
     [/【婚姻史】未填写/, 'MARITAL_MISSING', 'record', ['basic.marital', 'marriage.status'], 'warning', '填写婚姻状态'],
     [/【婚姻史】.*两处不一致/, 'MARITAL_CONFLICT', 'record', ['basic.marital', 'marriage.status'], 'warning', '选择以哪个为准'],
     [/【月经史】.*已绝经/, 'MENSTRUATION_CHILD_MENOPAUSE', 'record', ['menstruation.applicable', 'basic.age'], 'warning', '核对月经史'],
@@ -4173,9 +4146,10 @@ const GENERATOR = (() => {
     return facts;
   }
 
-  function auxiliaryFacts(r) {
+  function auxiliaryFacts(r, category) {
     const facts = [];
-    auxItems(r).forEach((item, index) => {
+    (((r.auxiliary || {}).items) || []).forEach((item, index) => {
+      if (!item || (category && (category === 'lab' ? auxiliaryCategory(item) !== 'lab' : auxiliaryCategory(item) === 'lab'))) return;
       const text = [stripTail(item.name), stripTail(item.result)].filter(Boolean).join('：');
       if (!text) return;
       addFacts(facts, r, [
@@ -4209,8 +4183,9 @@ const GENERATOR = (() => {
       return facts;
     }
     if (title === '家族史') return familyFacts(r);
-    if (title === '体格检查') return peFacts(r);
-    if (title === '辅助检查') return auxiliaryFacts(r);
+    if (title.startsWith('体格检查')) return peFacts(r).filter(fact =>
+      title === '体格检查（一）' ? !fact.path.startsWith('pe.special_') : fact.path.startsWith('pe.special_'));
+    if (title === '实验室检查' || title === '特殊检查') return auxiliaryFacts(r, title === '实验室检查' ? 'lab' : 'special');
     if (title === '摘要') {
       const manual = stripTail(r.summary);
       return addFacts([], r, [{ path: 'summary', text: manual || buildSummary(r), source: manual ? 'manual' : 'generated' }]);
@@ -4343,7 +4318,7 @@ const GENERATOR = (() => {
         warnings: relevantWarnings(r, kind, sectionTitle)
       };
     });
-    return IR_API.documentFromSections(kind, '入院记录', sections, warnings, admissionPrefix(r));
+    return IR_API.documentFromSections(kind, '入院记录', sections, warnings, '【入院记录】');
   }
 
   function buildDocumentBundle(r, opts = {}) {

@@ -624,9 +624,31 @@ test('getRecord 返回当前病历对象', () => {
   assert.ok(r && r.basic, '应返回有病历结构的对象');
 });
 
-test('STEPS 有 11 个步骤', () => {
+test('STEPS 有 10 个步骤', () => {
   const app = boot();
-  assert.equal(app.run('APP.STEPS.length'), 11);
+  assert.equal(app.run('APP.STEPS.length'), 10);
+});
+
+test('入院记录表单按医院基本项目排列，旧身份补充资料仍可编辑', () => {
+  const app = boot();
+  const html = app.document.querySelector('#content').innerHTML;
+  const paths = ['name', 'gender', 'age', 'department', 'bedNo', 'recordNo', 'nationality', 'birthPlace', 'marital', 'occupation', 'admitDate', 'recordDate', 'informant', 'reliability'];
+  const positions = paths.map(key => html.search(new RegExp(`data-(?:path|seg)="basic\\.${key}"`)));
+  assert.ok(positions.every(position => position >= 0));
+  assert.equal(positions.join(','), [...positions].sort((left, right) => left - right).join(','));
+  ['birthDate', 'nativePlace', 'workUnit', 'address', 'phone'].forEach(key => assert.ok(html.includes(`data-path="basic.${key}"`)));
+  assert.doesNotMatch(app.run('APP._test.navRowsHtml()'), /系统回顾/);
+});
+
+test('App 检查分类可录入并用于预览，未知旧检查仍可见', () => {
+  const app = boot();
+  app.run('APP.getRecord().auxiliary.items = [{name:"虚构项目",result:"旧结果原文"}]; APP._test.gotoStep("aux")');
+  const html = app.document.querySelector('#content').innerHTML;
+  assert.match(html, /data-aux="category"/);
+  app.document._listeners.get('doc::input')[0]({ target: { dataset: { aux: 'category', idx: '0' }, value: 'special' } });
+  assert.equal(app.run('APP.getRecord().auxiliary.items[0].category'), 'special');
+  assert.match(app.run('GENERATOR.generate(APP.getRecord()).sections["特殊检查"]'), /旧结果原文/);
+  assert.doesNotMatch(app.run('GENERATOR.generate(APP.getRecord()).sections["实验室检查"]'), /旧结果原文/);
 });
 
 test('步骤里不再有「评分自查」，生成病历是最后一步', () => {
@@ -668,11 +690,11 @@ test('折叠补充项在已有内容时自动展开，旧数据仍可编辑', ()
   app.run('APP.getRecord().basic.address = "已有地址"');
   app.run('APP._test.gotoStep("basic")');
   html = app.document.querySelector('#content').innerHTML;
-  assert.match(html, /<details class="optional-details" open>\s*<summary>工作单位和联系方式/);
+  assert.match(html, /<details class="optional-details" open>\s*<summary>出生日期、籍贯、工作单位和联系方式/);
   assert.match(html, /value="已有地址"/);
 });
 
-test('录入步骤顺序与病历章节顺序一致：系统回顾紧接体格检查之后', () => {
+test('录入步骤顺序与病历章节顺序一致且无系统回顾', () => {
   const app = boot();
   // vm 沙箱里的数组 prototype 与宿主不同，deepStrictEqual 会因原型不等而失败，
   // 所以先转成宿主数组再比。
@@ -681,7 +703,7 @@ test('录入步骤顺序与病历章节顺序一致：系统回顾紧接体格�
   // 有人改步骤时只顾一处、把顺序又改乱。
   assert.deepEqual(keys, [
     'basic', 'hpi', 'pmh', 'personal', 'marriage', 'family',
-    'pe', 'ros', 'aux', 'summary', 'output'
+    'pe', 'aux', 'summary', 'output'
   ]);
 });
 
@@ -697,7 +719,7 @@ test('录入步骤顺序与 SECTION_ORDER 的病史部分一一对应', () => {
   const map = {
     basic: '一般项目', hpi: '现病史', pmh: '既往史', ros: '系统回顾',
     personal: '个人史', marriage: '婚育史', family: '家族史',
-    pe: '体格检查', aux: '辅助检查'
+    pe: '体格检查（一）', aux: '实验室检查'
   };
   const pairs = keys.filter(k => map[k]).map(k => [k, sec.indexOf(map[k])]);
   const idx = pairs.map(p => p[1]);
@@ -717,7 +739,8 @@ test('stepIndexOf 认得出步骤键，认不出来的一律回第 0 步', () =>
   const app = boot();
   assert.equal(app.run('APP._test.stepIndexOf("basic")'), 0);
   assert.equal(app.run('APP._test.stepIndexOf("pe")'), 6);
-  assert.equal(app.run('APP._test.stepIndexOf("output")'), 10);
+  assert.equal(app.run('APP._test.stepIndexOf("output")'), 9);
+  assert.equal(app.run('APP._test.stepIndexOf("ros")'), 0);
   // 空串、旧键、拼错的键都不能让页面白屏
   assert.equal(app.run('APP._test.stepIndexOf("")'), 0);
   assert.equal(app.run('APP._test.stepIndexOf(undefined)'), 0);
@@ -728,7 +751,7 @@ test('刷新后回到上次停留的步骤，不必从第一步重新点', () =>
   const app = boot({
     initial: { 'dabingli.settings.v1': JSON.stringify({ rosMode: 'detail', fontScale: 1, lastStep: 'pe' }) }
   });
-  assert.equal(app.document.querySelector('#stepNum').textContent, '7/11');
+  assert.equal(app.document.querySelector('#stepNum').textContent, '7/10');
   assert.match(app.document.querySelector('#stepTitle').textContent, /体格检查/);
 });
 
@@ -736,7 +759,7 @@ test('存档里的步骤键坏掉时退回第一步，不白屏', () => {
   const app = boot({
     initial: { 'dabingli.settings.v1': JSON.stringify({ lastStep: 'steps-changed' }) }
   });
-  assert.equal(app.document.querySelector('#stepNum').textContent, '1/11');
+  assert.equal(app.document.querySelector('#stepNum').textContent, '1/10');
   assert.match(app.document.querySelector('#stepTitle').textContent, /基本情况/);
   assert.ok(app.document.querySelector('#content').innerHTML.length > 100);
 });
@@ -753,16 +776,16 @@ test('切换步骤后立即写回设置，生成页不记', () => {
 
 /* ======================= 步骤导航 ======================= */
 
-test('步骤导航列出全部 11 步，且当前步被标出来', () => {
+test('步骤导航列出全部 10 步，且当前步被标出来', () => {
   const app = boot();
   app.run('APP._test.gotoStep("pmh")');
   const html = app.run('APP._test.navRowsHtml()');
   assert.match(html, /基本情况/);
   assert.match(html, /既往史/);
-  assert.match(html, /系统回顾/);
+  assert.doesNotMatch(html, /系统回顾/);
   assert.match(html, /生成病历/);
   const rows = (html.match(/data-navstep=/g) || []).length;
-  assert.equal(rows, 11, '11 个步骤每步一行');
+  assert.equal(rows, 10, '10 个步骤每步一行');
   assert.match(html, /nav-row cur[^>]*data-navstep="pmh"/, '当前步要带 cur 类');
 });
 
@@ -1157,23 +1180,12 @@ test('P0-3 成人月经史不显示儿童提示', () => {
   assert.doesNotMatch(html, /儿童可选「未初潮」/);
 });
 
-test('P1-14 系统回顾三态按钮带 aria-label 并随状态更新', () => {
+test('旧系统回顾步骤键回退到基本情况且不显示三态表单', () => {
   const app = boot();
   app.run('APP._test.gotoStep("ros")');
   const html = app.document.querySelector('#content').innerHTML;
-  assert.match(html, /aria-label="咳嗽：未问"/, '初始应标未问');
-  assert.match(html, /aria-label="发热：未问"/);
-
-  let chip = clickRos(app, 'resp', 'cough');
-  assert.equal(chip.getAttribute('aria-label'), '咳嗽：阴性');
-  assert.equal(app.run('APP.getRecord().ros.resp.cough.factState'), 'asked_negative');
-
-  chip = clickRos(app, 'resp', 'cough');
-  assert.equal(chip.getAttribute('aria-label'), '咳嗽：阳性');
-  assert.equal(app.run('APP.getRecord().ros.resp.cough.factState'), 'asked_positive');
-
-  chip = clickRos(app, 'resp', 'cough');
-  assert.equal(chip.getAttribute('aria-label'), '咳嗽：未问');
+  assert.doesNotMatch(html, /data-ros=|系统回顾/);
+  assert.match(app.document.querySelector('#stepTitle').textContent, /基本情况/);
 });
 
 test('P0-6 系统剩余项全部标阴性后就地刷新，不跳顶且保留阳性', () => {

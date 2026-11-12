@@ -73,10 +73,11 @@ function checkPsy(r, itemKey, value) {
 /** 【体格检查】节的所有非空行。 */
 function peSection(text) {
   const lines = String(text || '').split('\n');
-  const i = lines.findIndex(l => l.trim() === '【体格检查】');
+  const i = lines.findIndex(l => l.trim() === '【体格检查（一）】');
   if (i < 0) return [];
   const out = [];
   for (let j = i + 1; j < lines.length; j++) {
+    if (/^【体格检查（二）/.test(lines[j])) continue;
     if (/^【/.test(lines[j])) break;
     if (lines[j].trim()) out.push(lines[j]);
   }
@@ -453,8 +454,7 @@ test('阳性症状写成「label＋，＋具体细节」', () => {
     '只写症状名等于没说程度与表现，学生填的细节就白填了。');
 
   const t = genText(r);
-  assert.ok(t.includes('兴趣减退') && t.includes(detail),
-    '生成的病历【系统回顾】里找不到新增症状或其细节：问诊问了却不落笔，学生填了等于没填。');
+  assert.ok(!t.includes('兴趣减退') && !t.includes(detail), '旧系统回顾仅保存在存储和备份中');
 
   const bad = [];
   for (const [key, label] of NEW_ROS) {
@@ -503,10 +503,8 @@ test('阴性症状写成「无＋label」，五项全阴时只在第一个前面
     '阳性与阴性混排时应「阳性；阴性」，实际输出不符：' +
     '混排是最常见的问诊结果，格式错会让整行读起来像两句话粘在一起。');
   const t = genText(mixed);
-  assert.ok(t.includes('兴趣减退/愉快感缺失，对以前喜欢的事情提不起兴趣'),
-    '混排时阳性项没有连同细节一起落进病历：学生填的细节被吞了。');
-  assert.ok(t.includes('无精力下降/易疲劳、自杀自伤观念、食欲及体重改变、行为异常'),
-    '混排时阴性项没有合并落进病历：明确排除的症状丢失，等于没有问诊记录。');
+  assert.ok(!t.includes('兴趣减退/愉快感缺失，对以前喜欢的事情提不起兴趣'), '旧 ROS 不进入入院记录');
+  assert.ok(!t.includes('无精力下降/易疲劳、自杀自伤观念、食欲及体重改变、行为异常'), '旧 ROS 阴性项也不进入入院记录');
 });
 
 /* ================= 附加护栏：精神科提示规则不外溢 ================= */

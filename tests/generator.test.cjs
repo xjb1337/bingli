@@ -15,7 +15,7 @@ const { SCHEMA, GENERATOR, HINTS } = bootGlobals();
 // 固定章节顺序对齐温州市人民医院入院记录模板（2026-10）
 const REQUIRED_SECTIONS = [
   '一般项目', '主诉', '现病史', '既往史',
-  '个人史', '婚育史', '家族史', '体格检查', '辅助检查', '初步诊断'
+  '个人史', '婚育史', '家族史', '体格检查（一）', '体格检查（二）：补充及专科情况', '实验室检查', '特殊检查', '初步诊断'
 ];
 
 function makeRecord(deptKey, over) {
@@ -36,7 +36,7 @@ function makeRecord(deptKey, over) {
 
 /* ======================= 科室完整性 ======================= */
 
-test('每个科室都能生成10个固定章节，空系统回顾不输出', async t => {
+test('每个科室都能生成12个固定章节，系统回顾不输出', async t => {
   for (const dept of SCHEMA.DEPARTMENTS) {
     await t.test(dept.name, () => {
       const text = GENERATOR.generate(makeRecord(dept.key)).text;

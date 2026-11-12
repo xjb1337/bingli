@@ -6,6 +6,15 @@ const record = () => { const r = SCHEMA.emptyRecord(); r.id = 'case_a'; return r
 const request = (r, text = '患者诉咳嗽3天，药名不详，发热未问') => AI.prepare('organize', r, text);
 const response = (text = '患者诉咳嗽3天。', quote = '患者诉咳嗽3天', path = 'hpi.symptoms') => ({suggestions: [{path, text, evidence: [{source: 'note', quote}]}], issues: [], questions: []});
 
+test('检查病历：不再要求系统回顾，也不发送旧 ROS', () => {
+  const r = record();
+  r.hpi.symptoms = '咳嗽3天';
+  r.ros.resp = { cough: { checked: true, detail: '旧回顾独有内容' } };
+  const q = AI.prepare('check', r);
+  assert.match(q.system, /不要要求补写或补问系统回顾/);
+  assert.doesNotMatch(q.user, /旧回顾独有内容|ros\./);
+});
+
 test('AI：已知身份及常见电话身份证不进入发送内容，病例标识仅保留本地', () => {
   const r = record(); Object.assign(r.basic, {name: '张三', phone: '13812345678', address: '测试路99号', recordNo: 'ABC12345'});
   const q = request(r, '张三住测试路99号，病历号ABC12345，电话13812345678，证件110101199001010011，咳嗽3天');

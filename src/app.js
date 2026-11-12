@@ -65,18 +65,16 @@ const APP = (() => {
    * 步骤清单。
    *
    * 步骤顺序 == 病历章节顺序（见 GENERATOR.SECTION_ORDER），不是两套。
-   * 本顺序由用户明确指定：系统回顾紧接在体格检查之后，不沿用教材的默认章序。
    */
   const STEPS = [
     { key: 'basic', name: '基本情况' },
     { key: 'hpi', name: '现病史' },
     { key: 'pmh', name: '既往史' },
     { key: 'personal', name: '个人史' },
-    { key: 'marriage', name: '婚姻与生育史' },
-    { key: 'family', name: '家庭史' },
-    { key: 'pe', name: '体格检查' },
-    { key: 'ros', name: '系统回顾' },
-    { key: 'aux', name: '辅助检查' },
+    { key: 'marriage', name: '婚育史' },
+    { key: 'family', name: '家族史' },
+    { key: 'pe', name: '体格检查（一）/（二）' },
+    { key: 'aux', name: '实验室 / 特殊检查' },
     { key: 'summary', name: '摘要与诊断' },
     { key: 'output', name: '生成病历' }
   ];
@@ -773,35 +771,23 @@ const APP = (() => {
     return `
       <div class="card">
         <div class="card-title">基本情况</div>
-        ${select('科室', 'basic.department', deptGroups(), {
-          hint: '选择科室后，体格检查会自动追加该科室的专科查体项目。'
-        })}
         ${renderTemplates()}
         <div class="section-title">一般项目</div>
         ${input('姓名', 'basic.name', { placeholder: '如：张三' })}
         ${seg('性别', 'basic.gender', SCHEMA.GENDERS)}
-        <div class="row2">${input('出生日期', 'basic.birthDate', { type: 'date' })}
         ${input('年龄', 'basic.age', {
           placeholder: '58 或 7月 / 3天',
           hint: '成人填数字；婴儿可填「7月」或「3天」。'
-        })}</div>
+        })}
+        ${select('科别', 'basic.department', deptGroups(), {
+          hint: '选择科别后，体格检查会自动追加该科室的专科查体项目。'
+        })}
+        ${input('床号', 'basic.bedNo', { placeholder: '如：32 / 12-3' })}
+        ${input('住院号', 'basic.recordNo', { placeholder: '如：01234567' })}
         ${input('民族', 'basic.nationality', { placeholder: '汉族', hint: '不填则病历里写「／」。' })}
+        ${input('出生地', 'basic.birthPlace', { placeholder: '按实际出生地填写' })}
         ${seg('婚姻', 'basic.marital', SCHEMA.MARITAL)}
         ${input('职业', 'basic.occupation', { placeholder: '退休 / 农民 / 工人…' })}
-        <div class="row2">${input('籍贯', 'basic.nativePlace', { placeholder: '浙江温州' })}
-          ${input('出生地', 'basic.birthPlace', { placeholder: '浙江温州' })}</div>
-        <details class="optional-details"${hasContact ? ' open' : ''}>
-          <summary>工作单位和联系方式</summary>
-          ${input('工作单位', 'basic.workUnit', { placeholder: '无 / ××公司' })}
-          ${input('通讯地址', 'basic.address', { placeholder: '通讯地址' })}
-          ${input('电话号码', 'basic.phone', { placeholder: '联系电话' })}
-        </details>
-        <div class="row2">${input('病历号 / 住院号', 'basic.recordNo', {
-          placeholder: '如：01234567',
-        })}
-        ${input('床号', 'basic.bedNo', {
-          placeholder: '如：32 / 12-3'
-        })}</div>
         <div class="row2">${input('入院日期', 'basic.admitDate', { type: 'date' })}
           ${input('入院时间', 'basic.admitTime', { type: 'time' })}</div>
         <div class="row2">${input('记录日期', 'basic.recordDate', { type: 'date' })}
@@ -817,6 +803,14 @@ const APP = (() => {
           empty: '未评估',
           hint: '不选＝没评估，病历里写「／」。'
         })}
+        <details class="optional-details"${hasContact || b.birthDate || b.nativePlace ? ' open' : ''}>
+          <summary>出生日期、籍贯、工作单位和联系方式（补充资料）</summary>
+          ${input('出生日期', 'basic.birthDate', { type: 'date' })}
+          ${input('籍贯', 'basic.nativePlace', { placeholder: '按实际籍贯填写' })}
+          ${input('工作单位', 'basic.workUnit', { placeholder: '无 / ××公司' })}
+          ${input('通讯地址', 'basic.address', { placeholder: '通讯地址' })}
+          ${input('电话号码', 'basic.phone', { placeholder: '联系电话' })}
+        </details>
         <div class="section-title">主诉 <span class="tag-req">必填</span></div>
         ${textarea('主诉症状', 'basic.chiefComplaint', {
           rows: 2,
@@ -859,7 +853,7 @@ const APP = (() => {
           rows: 3,
           placeholder: '如：自服布洛芬后体温可暂时下降，未到医院就诊'
         })}
-        ${textarea('一般情况（精神、食欲、睡眠、大小便、体重）', 'hpi.generalCondition', {
+        ${textarea('一般情况（神志、精神、饮食、睡眠、大小便、体重）', 'hpi.generalCondition', {
           rows: 2,
           placeholder: '如：发病以来精神、食欲、睡眠可，大小便正常，体重无明显变化',
           hint: '留空时不会自动填入正常情况。'
@@ -1022,7 +1016,7 @@ const APP = (() => {
         ${input('其他疾病', 'pmh.diseaseOther', { placeholder: '补充未列出的疾病' })}
         ${textarea('疾病详情（病程、治疗、控制情况）', 'pmh.diseaseDetail', {
           rows: 3,
-          placeholder: '如：高血压病史 5 年，长期口服氨氯地平 5mg qd，血压控制在 130/80mmHg 左右',
+          placeholder: '如：否认“高血压、糖尿病、肾病、心脏病、肝病、脑血管病、肺病”等病史；如有疾病请写病程及诊治情况',
           hint: '填写此项后会直接采用这里的文字，替代上面的勾选描述。'
         })}
         ${textarea('长期用药史', 'pmh.longTermMeds', {
@@ -1039,11 +1033,11 @@ const APP = (() => {
         ${textarea('传染病史', 'pmh.infection', {
           rows: 2, placeholder: '如：否认肝炎、结核等传染病史'
         })}
-        ${textarea('手术史', 'pmh.surgery', { rows: 2, placeholder: '如：2015年阑尾切除术' })}
+        ${textarea('手术史', 'pmh.surgery', { rows: 2, placeholder: '如：否认手术史；有手术请写时间及名称' })}
         ${textarea('外伤史', 'pmh.trauma', { rows: 2, placeholder: '如：否认外伤史' })}
         ${textarea('输血史', 'pmh.transfusion', { rows: 2, placeholder: '如：否认输血史' })}
         ${textarea('中毒史', 'pmh.poisoning', { rows: 2, placeholder: '如：否认中毒史' })}
-        ${textarea('预防接种史', 'pmh.vaccine', { rows: 2, placeholder: '如：按计划预防接种' })}
+        ${textarea('预防接种史', 'pmh.vaccine', { rows: 2, placeholder: '如：预防接种史不详' })}
         ${textarea('与本病相关病史', 'pmh.relatedHistory', {
           rows: 2,
           placeholder: '如：既往有类似发作史（3年前同样出现右下腹痛，保守治疗好转）',
@@ -1320,7 +1314,7 @@ const APP = (() => {
 
     let html = `
       <div class="card sticky-note">
-        <div><strong>体格检查</strong></div>
+        <div><strong>体格检查（一）</strong></div>
         <div class="hint">
           <b>勾了才算查过。</b>没勾的项目＝本次没做，病历里不会出现，也不会替你写「正常」。
           常规查体项目，可以用每张卡片里的「全选」，或点「常用描述」直接选一句（会自动勾上）。
@@ -1376,6 +1370,7 @@ const APP = (() => {
       });
     });
 
+    html += '<div class="card"><div class="card-title">体格检查（二）：补充及专科情况</div></div>';
     // 专科查体
     (dept.special || []).forEach(spKey => {
       const sp = SCHEMA.PE_SPECIAL[spKey];
@@ -1560,6 +1555,9 @@ const APP = (() => {
     const items = (R.auxiliary && R.auxiliary.items) || [{ name: '', result: '' }];
     const rows = items.map((it, i) => `
       <div class="aux-item">
+        <label class="field">检查分类<select data-aux="category" data-field-path="auxiliary.items.${i}.category" data-idx="${i}" aria-label="检查 ${i + 1} 分类">
+          ${[['', '自动分类（无法判断归实验室）'], ['lab', '实验室检查'], ['special', '特殊检查（影像 / 心电图等）'], ['pathology', '病理检查（归特殊检查）']].map(([value, label]) => `<option value="${value}" ${it.category === value ? 'selected' : ''}>${label}</option>`).join('')}
+        </select></label>
         <div class="aux-row">
           <input type="text" data-aux="name" data-field-path="auxiliary.items.${i}.name" data-idx="${i}" value="${esc(it.name || '')}"
             placeholder="检查项目，如：血常规">
@@ -1579,8 +1577,8 @@ const APP = (() => {
     `).join('');
     return `
       <div class="card">
-        <div class="card-title">辅助检查</div>
-        <div class="hint">填写本次就诊已有的检查结果；没有就留空，生成时这一节写「暂缺」。填了日期会按时间先后排列，在外院做的检查请写明机构名称与检查号。</div>
+        <div class="card-title">实验室检查 / 特殊检查</div>
+        <div class="hint">填写已有检查结果并核对分类；没有就留空，两节分别写「暂缺」。未指定分类的旧条目按项目名自动区分，不确定时归实验室；病理检查归特殊检查。填了日期会按时间先后排列，外院检查请写明机构与检查号。</div>
         <div id="auxList">${rows}</div>
         <button class="btn btn-ghost" data-act="addAux">+ 添加一项</button>
       </div>
@@ -2298,7 +2296,7 @@ const APP = (() => {
     if (OUT_VIEW === 'discharge') {
       return '出院记录包括入院情况、诊疗经过、出院情况、出院诊断和出院医嘱；出院诊断需要单独填写并确认，不会自动沿用初步诊断。';
     }
-    return '大病历 = 一般项目 → 主诉 → 现病史 → 既往史 → 个人史 → 婚姻史 → 月经与生育史 → 家庭史 → 体格检查 → 系统回顾 → 辅助检查 → 摘要 → 诊断依据 → 初步诊断。';
+    return '入院记录 = 一般项目 → 主诉 → 现病史 → 既往史 → 个人史 → 婚育史 → 家族史 → 体格检查（一） → 体格检查（二）：补充及专科情况 → 实验室检查 → 特殊检查 → 初步诊断。';
   }
 
   /** 取某个生成视图的纯文本（始终按当前 record 现算，不用旧缓存） */
@@ -2694,12 +2692,6 @@ const APP = (() => {
               <span class="settings-scale-value" aria-live="polite">${percent}%</span>
               <button type="button" class="btn btn-ghost btn-mini" data-setting-font="up" aria-label="增大字号">A＋</button>
             </div>
-          </div>
-          <div class="settings-row settings-row-stack">
-            ${settingsSeg('系统回顾详略', settings.rosMode, [
-              { value: 'detail', text: '逐系统写出' },
-              { value: 'brief', text: '只写阳性' }
-            ], '只影响生成病历时的系统回顾段落；未问过的项目仍不会被自动写成阴性。')}
           </div>
           <div class="settings-note">主题颜色跟随设备的浅色 / 深色模式。</div>
         </section>

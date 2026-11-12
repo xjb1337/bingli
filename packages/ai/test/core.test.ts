@@ -38,6 +38,15 @@ function response(
 }
 
 describe('AI request boundary', () => {
+  it('does not require system review or send legacy ROS when checking records', () => {
+    const record = makeRecord();
+    record.hpi.symptoms = '咳嗽3天';
+    record.ros.resp = { cough: { checked: true, detail: '旧回顾独有内容' } };
+    const request = prepareAiRequest('check', record);
+    expect(request.system).toContain('不要要求补写或补问系统回顾');
+    expect(request.user).not.toContain('旧回顾独有内容');
+    expect(request.user).not.toContain('ros.');
+  });
   it('redacts known identifiers and never sends the local record id', () => {
     const record = makeRecord();
     Object.assign(record.basic, {
@@ -192,8 +201,8 @@ describe('AI image/text recognition boundary', () => {
     expect(request.sources.map((source) => source.source)).toEqual(['note', 'image']);
     expect(request.user).not.toContain(image.dataBase64);
     expect(request.allowed).toContain('pe.vitals.temperature');
-    expect(request.allowed).toContain('ros.resp.fever.status');
-    expect(request.system).toContain('asked_positive');
+    expect(request.allowed.some(path => path.startsWith('ros.'))).toBe(false);
+    expect(request.system).toContain('识别和整理填表均禁止输出系统回顾字段');
   });
 
   it('offers 未初潮 as a whitelisted menstruation choice', () => {
@@ -336,14 +345,15 @@ describe('AI image/text recognition boundary', () => {
     };
     expect(Array.isArray(payload.targets)).toBe(false);
     expect(payload.valueSets).toContainEqual(['有', '无', '未初潮']);
-    expect(payload.groupLabels['ros.resp']).toContain('呼吸系统');
+    expect(payload.groupLabels['ros.resp']).toBeUndefined();
     expect(request.user).not.toContain('pe.vitals.temperature');
     expect(request.system).toContain('valueSets');
   });
 
   it('keeps recognitionTargets as the legacy object list for callers and tests', () => {
     const targets = recognitionTargets();
-    expect(targets.length).toBeGreaterThan(300);
+    expect(targets.length).toBeGreaterThan(200);
+    expect(targets.some(target => target.path.startsWith('ros.'))).toBe(false);
     const temperature = targets.find((target) => target.path === 'pe.vitals.temperature');
     expect(temperature).toMatchObject({ path: 'pe.vitals.temperature', kind: 'number' });
     expect(typeof temperature?.label).toBe('string');
@@ -368,8 +378,10 @@ describe('AI image/text recognition boundary', () => {
     expect(RECORD_CORE.fieldReviewValid(next, 'hpi.symptoms')).toBe(false);
   });
 
-  it('synchronizes PE checked state and ROS fact state when adopted', () => {
+  it('synchronizes PE checked state but drops ROS and preserves stored legacy values', () => {
     const record = makeRecord();
+    record.ros.resp = { fever: { checked: true, detail: '虚构旧回顾' } };
+    const originalRos = RECORD_CORE.cloneValue(record.ros);
     const request = recognizeRequest(record, '查体记录');
     const responseBody = {
       suggestions: [
@@ -381,12 +393,14 @@ describe('AI image/text recognition boundary', () => {
       questions: [],
     };
     const result = createAiResult(validateAiResponse(responseBody, request), request, 'deepseek-flash');
-    const next = adoptAiSuggestions(record, request, result, [0, 1, 2], false);
+    expect(result.suggestions).toHaveLength(1);
+    expect(result.dropped).toHaveLength(2);
+    expect(() => adoptAiSuggestions(record, request, result, [1], false)).toThrow();
+    const next = adoptAiSuggestions(record, request, result, [0], false);
 
     expect(next.pe.chest.heartAuscultation).toBe('心律不齐，可闻及早搏');
     expect(SCHEMA.peChecked(next, 'chest', 'heartAuscultation')).toBe(true);
-    expect(SCHEMA.rosFactState(next.ros.resp?.fever)).toBe('asked_positive');
-    expect(SCHEMA.rosFactState(next.ros.gi?.nausea)).toBe('asked_negative');
+    expect(next.ros).toEqual(originalRos);
   });
 });
 

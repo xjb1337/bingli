@@ -132,7 +132,7 @@ describe('step navigation and keyboard flow', () => {
     const user = userEvent.setup();
     await renderApp();
 
-    await user.selectOptions(screen.getByLabelText('科室'), 'respiratory');
+    await user.selectOptions(screen.getByLabelText('科别'), 'respiratory');
     const summary = await screen.findByText('用模板开始（可选，6 个病种）');
     await user.click(summary);
 
@@ -146,18 +146,39 @@ describe('step navigation and keyboard flow', () => {
 
     const directory = screen.getByRole('complementary', { name: '步骤目录' });
     await user.click(within(directory).getByRole('button', { name: /体格检查/ }));
-    expect(screen.getByRole('heading', { name: '体格检查' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '体格检查（一）/（二）' })).toBeInTheDocument();
 
     await user.click(within(directory).getByRole('button', { name: /生成病历/ }));
     expect(await screen.findByRole('heading', { name: '生成病历' })).toBeInTheDocument();
     expect(screen.getByTestId('doc-record')).toBeInTheDocument();
   });
 
+  it('keeps hospital basic field order, removes ROS navigation and persists examination categories', async () => {
+    const user = userEvent.setup();
+    const { repository } = await renderApp();
+    const paths = Array.from(document.querySelectorAll('[data-field-wrap]')).map(element => element.getAttribute('data-field-wrap'));
+    const expected = ['name', 'gender', 'age', 'department', 'bedNo', 'recordNo', 'nationality', 'birthPlace', 'marital', 'occupation', 'admitDate', 'recordDate', 'informant', 'reliability'];
+    const positions = expected.map(key => paths.indexOf(`basic.${key}`));
+    expect(positions.every(position => position >= 0)).toBe(true);
+    expect(positions).toEqual([...positions].sort((left, right) => left - right));
+    const directory = screen.getByRole('complementary', { name: '步骤目录' });
+    expect(within(directory).queryByRole('button', { name: /系统回顾/ })).not.toBeInTheDocument();
+    await user.click(within(directory).getByRole('button', { name: /实验室 \/ 特殊检查/ }));
+    await user.type(screen.getByLabelText('检查项目'), '虚构检查项目');
+    await user.type(screen.getByLabelText('结果'), '虚构检查结果');
+    await user.selectOptions(screen.getByLabelText('检查分类'), 'special');
+    await waitFor(async () => expect((await repository.loadCurrent()).record?.auxiliary.items[0]?.category).toBe('special'));
+    await user.click(within(directory).getByRole('button', { name: /生成病历/ }));
+    const text = documentText('record');
+    expect(text).toContain('【特殊检查】\n虚构检查项目：虚构检查结果。');
+    expect(text).not.toContain('【系统回顾】');
+  });
+
   it('closes the mobile directory with Escape', async () => {
     const user = userEvent.setup();
     await renderApp();
 
-    await user.click(screen.getByRole('button', { name: /步骤 1\/11/ }));
+    await user.click(screen.getByRole('button', { name: /步骤 1\/10/ }));
     await waitFor(() => expect(document.getElementById('mobile-step-nav')).toBeInTheDocument());
 
     await user.keyboard('{Escape}');

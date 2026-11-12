@@ -264,6 +264,7 @@ export interface PhysicalExamSection {
 }
 
 export interface AuxiliaryItem {
+  category?: string;
   name: string;
   result: string;
   date?: string;

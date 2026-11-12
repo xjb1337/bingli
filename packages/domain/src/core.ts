@@ -119,17 +119,12 @@ const RECORD_CORE = (() => {
       });
     });
 
-    // ROS：旧版用布尔 true 表示阳性 → 现在用三态对象
-    if (isObject(out.ros)) {
-      Object.keys(out.ros).forEach(sysKey => {
-        const sys = out.ros[sysKey];
-        if (!isObject(sys)) return;
-        Object.keys(sys).forEach(symKey => {
-          if (sys[symKey] === true) {
-            sys[symKey] = { checked: true, status: 'asked_positive' };
-          }
-        });
-      });
+    if (isText(out.pmh)) out.pmh = { diseaseDetail: out.pmh };
+    if (Array.isArray(out.auxiliary)) out.auxiliary = { items: out.auxiliary };
+    if (isText(out.auxiliary)) out.auxiliary = { items: [{ name: '旧辅助检查', result: out.auxiliary }] };
+    if (isObject(out.auxiliary) && Array.isArray(out.auxiliary.items)) {
+      out.auxiliary.items = out.auxiliary.items.map(item => isText(item)
+        ? { name: '旧辅助检查', result: item } : item);
     }
 
     return out;
@@ -254,7 +249,7 @@ const RECORD_CORE = (() => {
     for (let i = 0; i < parts.length - 1; i++) {
       const p = parts[i];
       if (DANGEROUS.includes(p)) return obj;
-      if (!isObject(cur[p])) cur[p] = {};
+      if (!isObject(cur[p]) && !Array.isArray(cur[p])) cur[p] = {};
       cur = cur[p];
     }
     const last = parts[parts.length - 1];
@@ -717,6 +712,9 @@ const RECORD_CORE = (() => {
     ) || (isObject(raw.hpi) && Object.values(raw.hpi).some(v => isText(v) && v.trim() !== ''));
 
     const legacyUnmapped = {};
+    ['pmh', 'auxiliary'].forEach(key => {
+      if (isText(raw[key])) legacyUnmapped[key] = raw[key];
+    });
     const filled = deepMerge(emptyRecord(), adaptLegacyShapes(raw), (path, value) => {
       legacyUnmapped[path] = cloneValue(value);
     });

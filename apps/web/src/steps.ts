@@ -3,11 +3,10 @@ export const STEPS = [
   { key: 'hpi', name: '现病史' },
   { key: 'pmh', name: '既往史' },
   { key: 'personal', name: '个人史' },
-  { key: 'marriage', name: '婚姻与生育史' },
-  { key: 'family', name: '家庭史' },
-  { key: 'pe', name: '体格检查' },
-  { key: 'ros', name: '系统回顾' },
-  { key: 'aux', name: '辅助检查' },
+  { key: 'marriage', name: '婚育史' },
+  { key: 'family', name: '家族史' },
+  { key: 'pe', name: '体格检查（一）/（二）' },
+  { key: 'aux', name: '实验室 / 特殊检查' },
   { key: 'summary', name: '摘要与诊断' },
   { key: 'output', name: '生成病历' },
 ] as const;
@@ -24,7 +23,6 @@ export function stepKeyForPath(path: string): StepKey {
   if (path === 'basic' || path.startsWith('basic.')) return 'basic';
   if (path === 'hpi' || path.startsWith('hpi.')) return 'hpi';
   if (path === 'pmh' || path.startsWith('pmh.')) return 'pmh';
-  if (path === 'ros' || path.startsWith('ros.')) return 'ros';
   if (path === 'personal' || path.startsWith('personal.')) return 'personal';
   if (
     path.startsWith('marriage.') ||
@@ -55,7 +53,6 @@ export const STEP_DESCRIPTIONS: Readonly<Record<StepKey, string>> = {
   basic: '先确认患者身份、科室与主诉。所有步骤都可随时跳转。',
   hpi: '按时间顺序记录本次疾病的发生、演变和诊疗经过。',
   pmh: '记录既往疾病、用药、过敏、手术、外伤和输血等情况。',
-  ros: '三态记录：阳性、明确阴性、未问。未点选的内容不会写入病历。',
   personal: '记录居住、烟酒、职业接触和相关个人史。',
   marriage: '记录婚姻、月经与生育史，按患者实际情况填写。',
   family: '记录家族疾病、传染病和遗传性疾病史。',

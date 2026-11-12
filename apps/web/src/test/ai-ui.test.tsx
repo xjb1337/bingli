@@ -685,7 +685,7 @@ describe('DeepSeek web security boundary', () => {
     expect(screen.getByText('图片识别固定使用 Flash（Pro 不支持图片）')).toBeInTheDocument();
   });
 
-  it('displays the original ROS status with the same readable labels as Android', async () => {
+  it('rejects ROS suggestions without exposing an adoption comparison', async () => {
     const transport = fakeTransportFactory(async () => ({
       content: {
         suggestions: [
@@ -724,10 +724,8 @@ describe('DeepSeek web security boundary', () => {
     await user.click(screen.getByRole('button', { name: '生成建议' }));
     await screen.findByRole('heading', { name: '建议对照 · 尚未写入' });
 
-    const compare = screen.getByText('原内容').closest('.ai-compare');
-    expect(compare).not.toBeNull();
-    expect(within(compare as HTMLElement).getByText('阳性')).toBeInTheDocument();
-    expect(within(compare as HTMLElement).getByText('阴性')).toBeInTheDocument();
+    expect(screen.queryByText('原内容')).not.toBeInTheDocument();
+    expect(RECORD_CORE.getPath(record, 'ros.resp.cough.status')).toBe('asked_positive');
   });
 });
 

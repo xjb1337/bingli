@@ -12,7 +12,7 @@ export function HpiStep({ record, update, errors, notify }: StepComponentProps) 
 
   return (
     <StepShell
-      eyebrow="第 2 / 11 步"
+      eyebrow="第 2 / 10 步"
       title="现病史"
       description={STEP_DESCRIPTIONS.hpi}
       actions={
@@ -72,7 +72,7 @@ export function HpiStep({ record, update, errors, notify }: StepComponentProps) 
             onChange={update}
             kind="textarea"
             rows={2}
-            placeholder="精神、食欲、睡眠、大小便、体重变化"
+            placeholder="起病来，神志、精神、饮食、睡眠、大小便、体重变化"
             hint="留空不会自动补入正常情况。"
             error={errors['hpi.generalCondition']}
             className="field-wide"

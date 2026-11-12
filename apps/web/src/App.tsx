@@ -46,7 +46,6 @@ import { MarriageStep } from './pages/MarriageStep';
 import { PeStep } from './pages/PeStep';
 import { PersonalStep } from './pages/PersonalStep';
 import { PmhStep } from './pages/PmhStep';
-import { RosStep } from './pages/RosStep';
 import { SummaryStep } from './pages/SummaryStep';
 import { STEPS, stepIndexOf, stepKeyForPath, type StepKey } from './steps';
 import type { StepComponentProps } from './editor-types';
@@ -632,9 +631,6 @@ function EditorApp({
       break;
     case 'pmh':
       stepContent = <PmhStep {...stepProps} />;
-      break;
-    case 'ros':
-      stepContent = <RosStep {...stepProps} />;
       break;
     case 'personal':
       stepContent = <PersonalStep {...stepProps} />;

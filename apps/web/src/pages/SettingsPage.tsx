@@ -31,22 +31,8 @@ export function SettingsPage({
         </div>
       </header>
 
-      <Card title="显示与系统回顾">
+      <Card title="显示">
         <FormGrid>
-          <FieldRenderer
-            path="settings.rosMode"
-            label="系统回顾输出方式"
-            value={settings.rosMode}
-            onChange={(_path, value) =>
-              onChange({ ...settings, rosMode: value === 'brief' ? 'brief' : 'detail' })
-            }
-            kind="segmented"
-            options={[
-              { value: 'detail', label: '详细' },
-              { value: 'brief', label: '简要' },
-            ]}
-            hint="仅影响生成的大病历文本，不改变已记录的系统回顾数据。"
-          />
           <FieldRenderer
             path="settings.fontScale"
             label="字号缩放"

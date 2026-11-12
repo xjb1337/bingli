@@ -18,7 +18,7 @@ const personalFields = [
 export function PersonalStep({ record, update, errors }: StepComponentProps) {
   return (
     <StepShell
-      eyebrow="第 4 / 11 步"
+      eyebrow="第 4 / 10 步"
       title="个人史"
       description={STEP_DESCRIPTIONS.personal}
     >

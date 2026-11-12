@@ -61,11 +61,11 @@ export function PeStep({ record, update, errors }: StepComponentProps) {
 
   return (
     <StepShell
-      eyebrow="第 7 / 11 步"
-      title="体格检查"
+      eyebrow="第 7 / 10 步"
+      title="体格检查（一）/（二）"
       description={STEP_DESCRIPTIONS.pe}
     >
-      <Card title="生命体征">
+      <Card title="体格检查（一）：生命体征">
         <div className="vitals-grid">
           {SCHEMA.VITALS.filter((vital) => !vital.dept || vital.dept === departmentKey).map((vital) => (
             <FieldRenderer
@@ -141,7 +141,7 @@ export function PeStep({ record, update, errors }: StepComponentProps) {
           return (
             <Collapsible
               key={group.groupKey}
-              title={group.name}
+              title={group.special ? `体格检查（二）：补充及专科情况 · ${group.name}` : group.name}
               defaultOpen={group.special && checkedCount > 0}
               className="pe-group"
               badge={`已勾 ${checkedCount}/${group.items.length}${group.special ? ' · 本科室' : ''}`}

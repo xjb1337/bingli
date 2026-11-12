@@ -156,7 +156,7 @@ export function OutputStep({
   const warnings = GENERATOR.validateStructured(record);
   return (
     <StepShell
-      eyebrow="第 11 / 11 步"
+      eyebrow="第 10 / 10 步"
       title="生成病历"
       description={STEP_DESCRIPTIONS.output}
     >
