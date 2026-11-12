@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 2,
+  "id": "fictional-merged-legacy",
+  "basic": { "name": "虚构旧档患者", "department": "digestive", "recordNo": "LEGACY-FICTION-009" },
+  "hpi": { "symptoms": "虚构旧档腹痛记录" },
+  "pmh": "旧版合并既往史：胃炎8年；曾行模拟手术；用药名称不详",
+  "ros": { "resp": { "cough": true, "fever": { "checked": false, "negative": true, "detail": "仅为虚构旧数据", "time": "旧档时间原文", "custom": "扩展值" } }, "unknown": { "legacyValue": "未知系统也保留" } },
+  "auxiliary": [
+    { "name": "血常规", "result": "虚构旧检验结果", "date": "2039-02-03", "hospital": "虚构旧机构", "no": "F-L-9", "custom": "旧条目扩展" },
+    { "name": "头颅CT", "result": "虚构旧影像结果", "no": "F-C-8" },
+    { "name": "旧项目无法判断", "result": "必须保持可见的旧结果" },
+    "旧版纯文本辅助检查原文"
+  ]
+}

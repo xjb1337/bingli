@@ -11,7 +11,6 @@ import { FieldRenderer } from '../components/FieldRenderer';
 import { Card, FormGrid, StepShell } from '../components/StepShell';
 import type { StepComponentProps } from '../editor-types';
 import { stringAt } from '../form-utils';
-import { STEP_DESCRIPTIONS } from '../steps';
 
 interface SymptomState {
   label: string;
@@ -83,7 +82,7 @@ export function RosStep({ record, update, errors }: StepComponentProps) {
     <StepShell
       eyebrow="第 8 / 11 步"
       title="系统回顾"
-      description={STEP_DESCRIPTIONS.ros}
+      description="旧版系统回顾仅保存在备份中，不参与入院记录。"
     >
       <Card className="ros-toolbar">
         <div className="metric-strip" data-field-path="ros" tabIndex={-1}>

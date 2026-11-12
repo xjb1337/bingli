@@ -94,7 +94,10 @@ export interface AiAssistantPanelProps {
   loadingAndroidStatus?: boolean;
   createTransport: () => AiTransport;
   initialTarget?: string;
-  onAdoptRecord: (record: DabingliRecord) => Promise<boolean>;
+  onAdoptRecord: (record: DabingliRecord, paths: readonly string[]) => Promise<boolean>;
+  onRawNotesChange?: (value: string) => void;
+  canUndoAdoption?: boolean;
+  onUndoAdoption?: () => Promise<boolean>;
   onConfirmField: (path: string) => Promise<boolean>;
   onJumpToPath: (path: string) => void;
   onOpenApiSettings?: () => void;
@@ -118,6 +121,9 @@ export function AiAssistantPanel({
   createTransport,
   initialTarget = 'hpi.symptoms',
   onAdoptRecord,
+  onRawNotesChange,
+  canUndoAdoption = false,
+  onUndoAdoption,
   onConfirmField,
   onJumpToPath,
   onOpenApiSettings,
@@ -126,7 +132,8 @@ export function AiAssistantPanel({
   const [organizeStep, setOrganizeStep] = useState<OrganizeStep>(1);
   const [resultAdopted, setResultAdopted] = useState(false);
   const [target, setTarget] = useState(initialTarget);
-  const [notes, setNotes] = useState('');
+  const [fallbackNotes, setFallbackNotes] = useState('');
+  const notes = onRawNotesChange ? String(record.rawNotes ?? '') : fallbackNotes;
   const [recognizeText, setRecognizeText] = useState('');
   const [recognizeImage, setRecognizeImage] = useState<AiImageAttachment | null>(null);
   const [processingImage, setProcessingImage] = useState(false);
@@ -194,6 +201,12 @@ export function AiAssistantPanel({
     }
     setOrganizeStep(1);
     setFocusNotes(true);
+  }
+
+  function changeNotes(value: string): void {
+    if (onRawNotesChange) onRawNotesChange(value);
+    else setFallbackNotes(value);
+    resetPreview();
   }
 
   function resetPreview(): void {
@@ -342,7 +355,8 @@ export function AiAssistantPanel({
         Array.from(selected),
         allowReplace,
       );
-      const saved = await onAdoptRecord(next);
+      const paths = Array.from(selected).map((index) => result.suggestions[index]?.path).filter((path): path is string => Boolean(path));
+      const saved = await onAdoptRecord(next, paths);
       if (!saved) return;
       setStatus('已采纳并保存到草稿，内容仍为「未核对」；请逐项确认。');
       setResultAdopted(true);
@@ -462,15 +476,21 @@ export function AiAssistantPanel({
                 description="贴上原始笔记，AI 会大致填入病历，再由你逐项修改核对。"
                 action="粘贴笔记开始" disabled={busy || processingImage} onAction={startNotes} /> : null}
               <label className="ai-field">
-                <span>问诊笔记（仅用于本次请求）</span>
+                <span>问诊笔记（随病历保存在本机）</span>
                 <textarea
                   ref={notesInputRef}
                   rows={4}
                   value={notes}
-                  onChange={(event) => { setNotes(event.target.value); resetPreview(); }}
+                  onChange={(event) => changeNotes(event.target.value)}
                   placeholder="输入需要整理的问诊笔记；姓名、电话、地址等会尝试在发送前隐去"
                 />
               </label>
+              <div className="ai-field-actions">
+                <button type="button" className="button secondary" disabled={busy || processingImage || !notes.trim()} onClick={prepare}>
+                  重新整理
+                </button>
+                <span className="field-hint">笔记会随当前病历自动保存；修改后可随时重新整理。</span>
+              </div>
             </>
           ) : null}
           {operation === 'recognize' ? (
@@ -696,7 +716,7 @@ export function AiAssistantPanel({
           )}
           {result.dropped.length ? (
             <details className="ai-dropped">
-              <summary>{result.dropped.length} 条建议因格式问题未采用</summary>
+              <summary>{result.dropped.length} 条建议未通过核对，未采用</summary>
               <ul>
                 {result.dropped.map((entry, index) => (
                   <li key={`${entry.path}-${index}`}>
@@ -740,6 +760,13 @@ export function AiAssistantPanel({
             </div>
           ) : null}
         </section>
+      ) : null}
+
+      {canUndoAdoption && onUndoAdoption ? (
+        <div className="button-row">
+          <button type="button" className="button ghost" disabled={busy} onClick={() => void onUndoAdoption()}>撤销本次 AI 采纳</button>
+          <span className="field-hint">只撤销本次采纳，保留后来修改的字段；刷新后失效。</span>
+        </div>
       ) : null}
 
       {operation !== 'organize' || organizeStep === 4 ? (

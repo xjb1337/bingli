@@ -51,10 +51,10 @@ test('P1-5 复现二补充：family.diseaseChecks 同样按勾选表迁移', () 
   assert.match(GENERATOR.generate(out).text, /糖尿病/);
 });
 
-test('P1-5 复现三：ROS 症状布尔 true 视为 asked_positive', () => {
+test('P1-5 旧 ROS 布尔原样保留但不再输出', () => {
   const out = normalize({ ros: { cardio: { palpitation: true } } });
-  assert.equal(SCHEMA.rosFactState(out.ros.cardio.palpitation), 'asked_positive');
-  assert.match(GENERATOR.generate(out).sections['系统回顾'], /循环系统：心悸/);
+  assert.equal(out.ros.cardio.palpitation, true);
+  assert.equal(GENERATOR.generate(out).sections['系统回顾'], undefined);
 });
 
 test('P1-5 复现四：pmh.allergy 布尔 true 输出「有」而不是「／」', () => {

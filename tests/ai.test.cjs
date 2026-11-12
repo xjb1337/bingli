@@ -6,6 +6,15 @@ const record = () => { const r = SCHEMA.emptyRecord(); r.id = 'case_a'; return r
 const request = (r, text = '患者诉咳嗽3天，药名不详，发热未问') => AI.prepare('organize', r, text);
 const response = (text = '患者诉咳嗽3天。', quote = '患者诉咳嗽3天', path = 'hpi.symptoms') => ({suggestions: [{path, text, evidence: [{source: 'note', quote}]}], issues: [], questions: []});
 
+test('检查病历：不再要求系统回顾，也不发送旧 ROS', () => {
+  const r = record();
+  r.hpi.symptoms = '咳嗽3天';
+  r.ros.resp = { cough: { checked: true, detail: '旧回顾独有内容' } };
+  const q = AI.prepare('check', r);
+  assert.match(q.system, /不要要求补写或补问系统回顾/);
+  assert.doesNotMatch(q.user, /旧回顾独有内容|ros\./);
+});
+
 test('AI：已知身份及常见电话身份证不进入发送内容，病例标识仅保留本地', () => {
   const r = record(); Object.assign(r.basic, {name: '张三', phone: '13812345678', address: '测试路99号', recordNo: 'ABC12345'});
   const q = request(r, '张三住测试路99号，病历号ABC12345，电话13812345678，证件110101199001010011，咳嗽3天');
@@ -48,19 +57,19 @@ test('AI：润色只提供选中段落，检查功能没有可写入字段', () 
 });
 test('AI：有效引用可解析，越界、重复字段与伪造引用整单拒绝', () => {
   const q = request(record()); assert.equal(AI.validate(response(), q).suggestions.length, 1);
-  assert.throws(() => AI.validate(response('张三', '患者诉咳嗽3天', 'basic.name'), q), /越界/);
+  assert.match(AI.validate(response('张三', '患者诉咳嗽3天', 'basic.name'), q).dropped[0].reason, /越界/);
   const duplicate = response(); duplicate.suggestions.push(duplicate.suggestions[0]);
-  assert.throws(() => AI.validate(duplicate, q), /重复/);
-  assert.throws(() => AI.validate(response('无发热', '无发热'), q), /无法核实/);
-  assert.throws(() => AI.validate(response('正常', ''), q), /无法核实/);
+  assert.match(AI.validate(duplicate, q).dropped[0].reason, /重复/);
+  assert.match(AI.validate(response('无发热', '无发热'), q).dropped[0].reason, /无法核实/);
+  assert.match(AI.validate(response('正常', ''), q).dropped[0].reason, /无法核实/);
 });
 test('AI：阻止新增数字、偷换时间单位、丢失不详来源与否定限定', () => {
   const q = request(record(), '患者诉咳嗽3天，药名不详，否认胸痛');
-  assert.throws(() => AI.validate(response('咳嗽5天', '咳嗽3天'), q), /数字/);
-  assert.throws(() => AI.validate(response('咳嗽3年', '咳嗽3天'), q), /单位/);
-  assert.throws(() => AI.validate(response('用药治疗', '药名不详'), q), /限定/);
-  assert.throws(() => AI.validate(response('咳嗽3天', '患者诉咳嗽3天'), q), /限定/);
-  assert.throws(() => AI.validate(response('胸痛', '否认胸痛'), q), /否定/);
+  assert.match(AI.validate(response('咳嗽5天', '咳嗽3天'), q).dropped[0].reason, /数字/);
+  assert.match(AI.validate(response('咳嗽3年', '咳嗽3天'), q).dropped[0].reason, /单位/);
+  assert.match(AI.validate(response('用药治疗', '药名不详'), q).dropped[0].reason, /限定/);
+  assert.match(AI.validate(response('咳嗽3天', '患者诉咳嗽3天'), q).dropped[0].reason, /限定/);
+  assert.match(AI.validate(response('胸痛', '否认胸痛'), q).dropped[0].reason, /否定/);
 });
 test('AI：空白、截断和结构异常拒绝，不静默修补 JSON', () => {
   const q = request(record());
@@ -118,4 +127,38 @@ test('AI：脱敏变化仅报告实际替换类别，不返回原始身份信息
     categories: ['姓名', '住院号', '床号', '电话']
   });
   assert.deepEqual(AI.redactionDiff('姓名：[已隐去]，咳嗽3天', record()).categories, []);
+});
+
+test('AI：空格标签、电话、证件和县区级出生地均在发送前脱敏', () => {
+  const text = '姓名 李小虚 住院号 0012345 病案号 BA00057 床号 08，身份证号 99000020000101001X，手机13900001111，座机0577-88001234，出生地 虚构省虚构市虚构县。';
+  const sent = request(record(), text).user;
+  for (const value of ['李小虚', '0012345', 'BA00057', '08', '99000020000101001X', '13900001111', '0577-88001234', '虚构省虚构市虚构县']) {
+    assert.ok(!sent.includes(value), `不应发送身份信息：${value}`);
+  }
+  for (const label of ['姓名', '住院号', '病案号', '床号', '出生地']) assert.ok(sent.includes(`${label}：[已隐去]`));
+});
+
+test('AI：姓名未填写时仍隐去患者称呼后的姓名和详细地址', () => {
+  const text = '患者王小虚，患者周小虚于就诊。现住址 虚构省虚构市虚构区和平路99号3室；患者住虚构省虚构市虚构县星光村17号，出生于虚构省虚构市虚构县。';
+  const diff = AI.redactionDiff(text, record());
+  for (const value of ['王小虚', '周小虚', '虚构省虚构市虚构区和平路99号3室', '虚构省虚构市虚构县星光村17号']) {
+    assert.ok(!diff.text.includes(value), `不应保留：${value}`);
+  }
+  assert.match(diff.text, /患者\[已隐去\]，患者\[已隐去\]于就诊/);
+  assert.match(diff.text, /患者住\[地址已隐去\]/);
+  assert.match(diff.text, /出生于\[已隐去\]/);
+  assert.ok(diff.categories.includes('姓名'));
+  assert.ok(diff.categories.includes('地址'));
+  assert.equal(AI.redact(diff.text, record()), diff.text);
+  const spaced = AI.redact('出生地 虚构省 虚构市 虚构县，现住址 虚构省 虚构市 虚构区 和平路 99号 3室。', record());
+  assert.equal(spaced, '出生地：[已隐去]，现住址：[已隐去]。');
+});
+
+test('AI：脱敏不改变药物、剂量、日期、时间、化验和生命体征', () => {
+  const text = '阿司匹林 100mg qd；2026-10-01，3天前；WBC 12.3×10^9/L，血压 150/90mmHg，脉搏96次/分。患者3天前咳嗽，患者于2026-10-01就诊，患者无明显诱因，患者诉胸闷，患者陈述：无发热。患者高血压，患者曾于2026-10-01就诊，患者经常咳嗽，患者张口呼吸。';
+  const r = record();
+  Object.assign(r.basic, { bedNo: '12', recordNo: '3', phone: '96' });
+  assert.deepEqual(AI.redactionDiff(text, r), { text, categories: [] });
+  assert.ok(request(r, text).user.includes(text));
+  assert.equal(AI.redact('床号12，病历号3，咳嗽3天', r), '床号：[已隐去]，病历号：[已隐去]，咳嗽3天');
 });

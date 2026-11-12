@@ -121,26 +121,34 @@ export function createLocalStorageRepository(
       if (!loaded.ok) throw new Error(loaded.reason ?? '病历列表读取失败');
       const nextList =
         mode === 'replace'
-          ? RECORD_CORE.replaceImport(parsed.records)
+          ? RECORD_CORE.replaceImport(parsed.records, loaded.list)
           : RECORD_CORE.mergeImport(loaded.list, parsed.records).list;
       const saved = RECORD_CORE.saveList(storage, nextList);
       if (!saved.ok) throw new Error(saved.reason ?? '写入病历列表失败');
 
-      const first = parsed.records[0];
-      if (first) RECORD_CORE.saveCurrent(storage, first.data, Number(first.data.meta.revision) || 0);
+      const firstId = parsed.records[0]?.id;
+      const first = firstId ? nextList.find((item) => item.id === firstId) : undefined;
+      if (first) {
+        RECORD_CORE.saveCurrent(storage, first.data, Number(first.data.meta?.revision) || 0);
+      }
       return {
         mode,
         recordCount: parsed.records.length,
         ...(first ? { firstRecordId: first.id } : {}),
       };
     },
-    async exportBackup(scope: BackupScope = 'all'): Promise<ExportBundle> {
+    async exportBackup(
+      scope: BackupScope = 'all',
+      options: { includeNotes?: boolean } = {},
+    ): Promise<ExportBundle> {
       const loaded = RECORD_CORE.loadList(storage);
       if (!loaded.ok) throw new Error(loaded.reason ?? '病历列表读取失败');
       const current = RECORD_CORE.loadCurrent(storage, SCHEMA.emptyRecord, deptKeys);
       return createBackupBundle(
         scope === 'current' ? [] : loaded.list,
         current.ok ? current.record : null,
+        undefined,
+        options,
       );
     },
     async listRecoveryCopies(): Promise<RecoveryCopySummary[]> {

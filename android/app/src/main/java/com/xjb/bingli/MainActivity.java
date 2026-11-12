@@ -4,6 +4,7 @@ import android.app.*;
 import android.os.*;
 import android.content.*;
 import android.net.Uri;
+import android.print.*;
 import android.provider.MediaStore;
 import android.webkit.*;
 import android.view.*;
@@ -29,10 +30,12 @@ public class MainActivity extends Activity {
     private LegacyMigrator migrator;
     private LinearLayout root;
     private WebView migrationWeb;
+    private WebView printWeb;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         clearCameraCache();
+        clearShareCache();
         aiKeys = new AIKeyStore(this);
         aiClient = new DeepSeekClient();
         // One owner for system bars/cutouts on every supported Android version.
@@ -129,6 +132,31 @@ public class MainActivity extends Activity {
     private void clearCameraCache() {
         File[] old = new File(getCacheDir(), "camera").listFiles();
         if (old != null) for (File file : old) file.delete();
+    }
+
+    /** Share attachments are temporary; clear stale patient text on every launch/share. */
+    private void clearShareCache() {
+        File[] old = new File(getCacheDir(), "share").listFiles();
+        if (old != null) for (File file : old) file.delete();
+    }
+
+    private String safeShareName(String filename) {
+        String base = filename == null ? "病历.txt" : new File(filename).getName();
+        base = base.replaceAll("[\\\\/:*?\"<>|\\r\\n]+", "_").trim();
+        if (base.isEmpty()) base = "病历.txt";
+        if (!base.toLowerCase(java.util.Locale.ROOT).endsWith(".txt")) base += ".txt";
+        return base;
+    }
+
+    /** Offscreen print WebView is only needed while the system print dialog is open. */
+    private void destroyPrintWeb() {
+        if (printWeb == null) return;
+        if (printWeb.getParent() instanceof android.view.ViewGroup) {
+            ((android.view.ViewGroup) printWeb.getParent()).removeView(printWeb);
+        }
+        printWeb.stopLoading();
+        printWeb.destroy();
+        printWeb = null;
     }
 
     /** Deletes the single cancelled camera capture; never used after a successful capture. */
@@ -272,6 +300,65 @@ public class MainActivity extends Activity {
                 try { startActivityForResult(intent, 42); } catch (ActivityNotFoundException e) { exportText=null; }
             });
         }
+        @JavascriptInterface public void share(String text, String filename, String mime) {
+            if (text == null || text.length() > 8 * 1024 * 1024) return;
+            final String name = safeShareName(filename);
+            runOnUiThread(() -> {
+                try {
+                    File dir = new File(getCacheDir(), "share");
+                    if (!dir.exists() && !dir.mkdirs()) throw new IOException("无法创建分享缓存目录");
+                    clearShareCache();
+                    File file = new File(dir, name);
+                    try (OutputStream out = new FileOutputStream(file)) {
+                        out.write(text.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    }
+                    Uri uri = FileProvider.getUriForFile(MainActivity.this, getPackageName() + ".files", file);
+                    Intent send = new Intent(Intent.ACTION_SEND)
+                        .setType("text/plain")
+                        .putExtra(Intent.EXTRA_TEXT, text)
+                        .putExtra(Intent.EXTRA_SUBJECT, name)
+                        .putExtra(Intent.EXTRA_STREAM, uri)
+                        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    send.setClipData(ClipData.newRawUri(name, uri));
+                    startActivity(Intent.createChooser(send, "分享病历"));
+                } catch (Exception e) {
+                    clearShareCache();
+                    Toast.makeText(MainActivity.this, "分享失败：" + (e.getMessage() == null ? "无法读取病历" : e.getMessage()), Toast.LENGTH_LONG).show();
+                }
+            });
+        }
+        @JavascriptInterface public void printDocument(String html, String title) {
+            if (html == null || html.length() > 8 * 1024 * 1024) return;
+            final String documentTitle = title == null || title.trim().isEmpty() ? "病历" : title.trim();
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                destroyPrintWeb();
+                WebView view = new WebView(MainActivity.this);
+                printWeb = view;
+                view.setAlpha(0f);
+                WebSettings settings = view.getSettings();
+                settings.setJavaScriptEnabled(false);
+                settings.setBlockNetworkLoads(true);
+                settings.setAllowFileAccess(false);
+                final boolean[] printStarted = {false};
+                view.setWebViewClient(new WebViewClient() {
+                    @Override public void onPageFinished(WebView loaded, String url) {
+                        if (printWeb != loaded || printStarted[0]) return;
+                        printStarted[0] = true;
+                        try {
+                            PrintManager manager = (PrintManager) getSystemService(PRINT_SERVICE);
+                            if (manager == null) throw new IllegalStateException("系统打印服务不可用");
+                            PrintDocumentAdapter adapter = loaded.createPrintDocumentAdapter(documentTitle);
+                            manager.print(documentTitle, adapter, new PrintAttributes.Builder().build());
+                        } catch (Exception e) {
+                            Toast.makeText(MainActivity.this, "打印失败：" + (e.getMessage() == null ? "无法打开打印服务" : e.getMessage()), Toast.LENGTH_LONG).show();
+                        }
+                    }
+                });
+                root.addView(view, new LinearLayout.LayoutParams(1, 1));
+                view.loadDataWithBaseURL(ORIGIN, html, "text/html", "UTF-8", null);
+            });
+        }
     }
     private void aiResult(String id, org.json.JSONObject result) {
         runOnUiThread(() -> {
@@ -323,6 +410,8 @@ public class MainActivity extends Activity {
     }
     @Override protected void onDestroy() {
         clearCameraCache();
+        clearShareCache();
+        destroyPrintWeb();
         if (aiClient != null) aiClient.close();
         if (updater != null) updater.close();
         if (chooser != null) { chooser.onReceiveValue(null); chooser = null; }

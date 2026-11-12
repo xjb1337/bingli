@@ -22,6 +22,9 @@ import {
   AndroidBridgeTransport,
   WebFetchTransport,
   confirmAiField,
+  createAiAdoptionUndo,
+  undoAiAdoption,
+  type AiAdoptionUndo,
   getAndroidAiBridge,
   type AiTransport,
   type AiTransportFactory,
@@ -43,7 +46,6 @@ import { MarriageStep } from './pages/MarriageStep';
 import { PeStep } from './pages/PeStep';
 import { PersonalStep } from './pages/PersonalStep';
 import { PmhStep } from './pages/PmhStep';
-import { RosStep } from './pages/RosStep';
 import { SummaryStep } from './pages/SummaryStep';
 import { STEPS, stepIndexOf, stepKeyForPath, type StepKey } from './steps';
 import type { StepComponentProps } from './editor-types';
@@ -265,6 +267,7 @@ function EditorApp({
   const [exportText, setExportText] = useState(() =>
     JSON.stringify(RECORD_CORE.buildExport(initial.list, undefined, { includeDraft: true, draft: initial.record }), null, 2),
   );
+  const [exportIncludeNotes, setExportIncludeNotes] = useState(false);
   const [apiKey, setApiKey] = useState('');
   const [webAiModel, setWebAiModel] = useState('deepseek-flash');
   const androidBridge = useMemo(() => getAndroidAiBridge(), []);
@@ -274,6 +277,7 @@ function EditorApp({
   const saveTimer = useRef<number | null>(null);
   const saveFlushRef = useRef(false);
   const recordRef = useRef(record);
+  const [aiUndo, setAiUndo] = useState<AiAdoptionUndo | null>(null);
   const dirtyRef = useRef(dirty);
   recordRef.current = record;
   dirtyRef.current = dirty;
@@ -335,12 +339,18 @@ function EditorApp({
     toastTimer.current = window.setTimeout(() => setToast(null), 2600);
   }
 
-  function refreshExportPreview(nextRecord = record, nextList = list) {
+  function refreshExportPreview(nextRecord = record, nextList = list, includeNotes = exportIncludeNotes) {
     const bundle = RECORD_CORE.buildExport(nextList, undefined, {
       includeDraft: true,
       draft: nextRecord,
+      includeNotes,
     });
     setExportText(JSON.stringify(bundle, null, 2));
+  }
+
+  function changeExportIncludeNotes(value: boolean) {
+    setExportIncludeNotes(value);
+    refreshExportPreview(recordRef.current, list, value);
   }
 
   async function saveAiMutation(nextRecord: DabingliRecord, message: string): Promise<boolean> {
@@ -352,6 +362,7 @@ function EditorApp({
       return false;
     }
     const persisted = saved.record ?? nextRecord;
+    recordRef.current = persisted;
     setRecord(persisted);
     setDirty(false);
     const loaded = await repo.loadList();
@@ -363,8 +374,20 @@ function EditorApp({
     return true;
   }
 
-  async function adoptAiRecord(nextRecord: DabingliRecord): Promise<boolean> {
-    return saveAiMutation(nextRecord, 'AI 建议已采纳，仍需逐项核对');
+  async function adoptAiRecord(nextRecord: DabingliRecord, paths: readonly string[]): Promise<boolean> {
+    const undo = createAiAdoptionUndo(recordRef.current, nextRecord, paths);
+    const saved = await saveAiMutation(nextRecord, 'AI 建议已采纳，仍需逐项核对');
+    if (saved) setAiUndo(undo);
+    return saved;
+  }
+
+  async function undoAiRecord(): Promise<boolean> {
+    if (!aiUndo || aiUndo.recordId !== recordRef.current.id) return false;
+    const undone = undoAiAdoption(recordRef.current, aiUndo);
+    const message = `已撤销 ${undone.restored} 项${undone.kept ? `，保留 ${undone.kept} 项后来修改的内容` : ''}`;
+    const saved = await saveAiMutation(undone.record, message);
+    if (saved) setAiUndo(null);
+    return saved;
   }
 
   async function confirmAiContent(path: string): Promise<boolean> {
@@ -424,6 +447,15 @@ function EditorApp({
       const next = RECORD_CORE.cloneValue(previous);
       RECORD_CORE.setPath(next, path, value);
       RECORD_CORE.markFieldManual(next, path);
+      return next;
+    });
+    setDirty(true);
+  }
+
+  function updateRawNotes(value: string) {
+    setRecord((previous) => {
+      const next = RECORD_CORE.cloneValue(previous);
+      next.rawNotes = String(value).slice(0, 16000);
       return next;
     });
     setDirty(true);
@@ -509,6 +541,29 @@ function EditorApp({
     notify(`已打开 ${item.basic?.name || RECORD_CORE.summarize(item).name}`);
   }
 
+  async function copyRecord(item: RecordListItem) {
+    if (dirtyRef.current) await persistRecord(false);
+    const stored = await repo.loadCurrent(item.id);
+    const source = stored.ok && stored.record ? stored.record : item.data;
+    const copy = RECORD_CORE.copyRecordAsNew(source);
+    const saved = await repo.saveToLibrary(copy, 0);
+    if (!saved.ok) {
+      notify(saved.reason ?? '复制病历保存失败', 'error');
+      return;
+    }
+    const persisted = saved.record ?? copy;
+    setRecord(persisted);
+    setView('editor');
+    setStepIndex(0);
+    setDirty(false);
+    resetValidationState();
+    const loaded = await repo.loadList();
+    const nextList = loaded.ok ? loaded.list : list;
+    if (loaded.ok) setList(nextList);
+    refreshExportPreview(persisted, nextList);
+    notify('已复制为新病历；身份信息、生命体征数值、日期和号码已清空', 'success');
+  }
+
   async function deleteRecord(item: RecordListItem) {
     const nextList = RECORD_CORE.removeRecord(list, item.id);
     const result = await repo.deleteRecord(item.id);
@@ -578,13 +633,14 @@ function EditorApp({
     }
   }
 
-  async function exportJson(scope: 'current' | 'all') {
+  async function exportJson(scope: 'current' | 'all', options: { includeNotes?: boolean } = {}) {
+    const includeNotes = options.includeNotes === true;
     try {
-      const bundle = await repo.exportBackup(scope);
+      const bundle = await repo.exportBackup(scope, { includeNotes });
       const text = serializeBackup(bundle);
       setExportText(text);
       downloadJson(text, scope === 'all' ? 'dabingli-records.json' : `dabingli-${record.id ?? 'record'}.json`);
-      notify('已下载 JSON 备份', 'success');
+      notify(includeNotes ? '已下载 JSON 备份（含原始笔记）' : '已下载 JSON 备份（不含原始笔记）', 'success');
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       notify(`导出失败：${message}`, 'error');
@@ -615,9 +671,6 @@ function EditorApp({
       break;
     case 'pmh':
       stepContent = <PmhStep {...stepProps} />;
-      break;
-    case 'ros':
-      stepContent = <RosStep {...stepProps} />;
       break;
     case 'personal':
       stepContent = <PersonalStep {...stepProps} />;
@@ -809,11 +862,14 @@ function EditorApp({
               activeId={record.id}
               exportText={exportText}
               recovery={recovery}
+              includeNotes={exportIncludeNotes}
               onNew={createNewRecord}
               onOpen={openRecord}
+              onCopy={(item) => void copyRecord(item)}
               onDelete={deleteRecord}
               onImport={importJson}
               onDownload={exportJson}
+              onIncludeNotesChange={changeExportIncludeNotes}
               onRestoreRecovery={restoreRecovery}
             />
           </Suspense>
@@ -833,6 +889,9 @@ function EditorApp({
               initialTarget={step.key === 'hpi' ? 'hpi.symptoms' : Object.keys(AI_FIELDS).find((path) => path.startsWith(`${step.key}.`)) ?? 'hpi.symptoms'}
               createTransport={createAiTransport}
               onAdoptRecord={adoptAiRecord}
+              onRawNotesChange={updateRawNotes}
+              canUndoAdoption={aiUndo?.recordId === record.id}
+              onUndoAdoption={undoAiRecord}
               onConfirmField={confirmAiContent}
               onJumpToPath={jumpToPath}
             />
@@ -843,9 +902,11 @@ function EditorApp({
               settings={settings}
               exportText={exportText}
               recovery={recovery}
+              includeNotes={exportIncludeNotes}
               onChange={saveSettings}
               onImport={importJson}
               onDownload={exportJson}
+              onIncludeNotesChange={changeExportIncludeNotes}
               onRestoreRecovery={restoreRecovery}
             />
           </Suspense>

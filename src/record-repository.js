@@ -39,6 +39,22 @@ const RECORD_REPOSITORY = (() => {
       removeCurrent() {
         try { storage.removeItem(keys.current); return true; } catch (e) { return false; }
       },
+      removeDraft(id) {
+        try { storage.removeItem(keys.draftPrefix + String(id)); return true; } catch (e) { return false; }
+      },
+      storageKeys() {
+        try {
+          const result = [];
+          for (let i = 0; i < storage.length; i++) result.push(storage.key(i));
+          return result;
+        } catch (e) { return []; }
+      },
+      writeRaw(key, value) {
+        return core.safeSet(storage, key, value);
+      },
+      removeRaw(key) {
+        try { storage.removeItem(key); return true; } catch (e) { return false; }
+      },
       loadSettings() {
         return core.safeGetJSON(storage, keys.settings);
       },

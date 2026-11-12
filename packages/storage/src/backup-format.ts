@@ -9,16 +9,24 @@ import {
 
 const DEPARTMENT_KEYS = SCHEMA.DEPARTMENTS.map((department) => department.key);
 
+export interface BackupExportOptions {
+  includeNotes?: boolean;
+}
+
 /** Build the same `{ app, schemaVersion, exportedAt, records }` bundle as the legacy app. */
 export function createBackupBundle(
   list: readonly RecordListItem[],
   draft?: DabingliRecord | null,
   exportedAt?: string,
+  options: BackupExportOptions = {},
 ): ExportBundle {
   return RECORD_CORE.buildExport(
     [...list],
     exportedAt,
-    draft ? { includeDraft: true, draft } : {},
+    {
+      ...(draft ? { includeDraft: true, draft } : {}),
+      ...(options.includeNotes ? { includeNotes: true } : {}),
+    },
   );
 }
 

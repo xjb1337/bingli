@@ -131,6 +131,8 @@ function boot(opts = {}) {
 
   const storage = {
     getItem: k => (memory.has(k) ? memory.get(k) : null),
+    get length() { return memory.size; },
+    key: i => [...memory.keys()][i] ?? null,
     setItem(k, v) {
       if (opts.failWrite) throw new Error('QuotaExceededError');
       memory.set(k, String(v));
@@ -158,8 +160,8 @@ function boot(opts = {}) {
     isNaN,
     parseFloat,
     parseInt,
-    setTimeout: fn => { timeouts.push(fn); return timeouts.length; },
-    clearTimeout: () => {},
+    setTimeout: opts.realTimers ? setTimeout : fn => { timeouts.push(fn); return timeouts.length; },
+    clearTimeout: opts.realTimers ? clearTimeout : () => {},
     setInterval: fn => { intervals.push(fn); return intervals.length; },
     clearInterval: () => {},
     requestAnimationFrame: fn => { try { fn(); } catch (e) {} return 1; },
@@ -167,7 +169,7 @@ function boot(opts = {}) {
     scrollY: 0,
     scrollIntoView: () => {},
     alert: () => {},
-    navigator: {},
+    navigator: opts.locks ? { locks: { request() {} } } : {},
     location: { protocol: 'file:', hostname: '' },
     isSecureContext: false,
     URL: { createObjectURL: () => 'blob:x', revokeObjectURL() {} },
@@ -533,6 +535,111 @@ test('正常列表上合并导入照常工作，现有病历不被丢掉', () =>
   assert.deepEqual(saved.map(x => x.data.basic.name).sort(), ['新导入的', '原来就有的'].sort());
 });
 
+test('合并导入较新但不含原始笔记的备份时保留本机笔记', async () => {
+  const app = boot();
+  app.run(`(() => {
+    const r = APP.getRecord();
+    r.id = 'notes-merge-a1';
+    r.basic.name = '虚构本机较旧患者';
+    r.hpi.symptoms = '虚构本机临床内容';
+    r.rawNotes = '虚构本机笔记';
+    APP._test.saveToLibrary();
+    APP._test.newRecord();
+  })()`);
+  const result = await app.run(`(() => {
+    const existing = APP._test.getList().find(item => item.id === 'notes-merge-a1');
+    const data = JSON.parse(JSON.stringify(existing.data));
+    data.basic.name = '虚构备份较新患者';
+    const bundle = RECORD_CORE.buildExport([{
+      id: existing.id,
+      updatedAt: '2099-01-01T00:00:00.000Z',
+      data
+    }], '2099-01-01T00:00:00.000Z');
+    const parsed = RECORD_CORE.parseImport(
+      JSON.stringify(bundle),
+      SCHEMA.emptyRecord,
+      SCHEMA.DEPARTMENTS.map(department => department.key)
+    );
+    window.__notesIncluded = parsed.records[0].rawNotesIncluded;
+    return APP._test.applyImport('merge', parsed.records);
+  })()`);
+  assert.equal(result.ok, true);
+  assert.equal(result.res.updated, 1);
+  const saved = app.stored(KEYS.list).find(item => item.id === 'notes-merge-a1');
+  assert.equal(saved.data.basic.name, '虚构备份较新患者');
+  assert.equal(saved.data.rawNotes, '虚构本机笔记');
+  assert.equal(saved.rawNotesIncluded, undefined);
+  assert.equal(app.run('window.__notesIncluded'), false);
+});
+
+test('替换导入同 ID 且不含原始笔记的备份时保留本机笔记', async () => {
+  const app = boot();
+  app.run(`(() => {
+    const r = APP.getRecord();
+    r.id = 'notes-replace-a1';
+    r.basic.name = '虚构替换前患者';
+    r.rawNotes = '虚构替换前本机笔记';
+    APP._test.saveToLibrary();
+    APP._test.newRecord();
+  })()`);
+  const result = await app.run(`(() => {
+    const existing = APP._test.getList().find(item => item.id === 'notes-replace-a1');
+    const data = JSON.parse(JSON.stringify(existing.data));
+    data.basic.name = '虚构替换后患者';
+    const bundle = RECORD_CORE.buildExport([{
+      id: existing.id,
+      updatedAt: '2099-01-01T00:00:00.000Z',
+      data
+    }], '2099-01-01T00:00:00.000Z');
+    const parsed = RECORD_CORE.parseImport(
+      JSON.stringify(bundle),
+      SCHEMA.emptyRecord,
+      SCHEMA.DEPARTMENTS.map(department => department.key)
+    );
+    return APP._test.applyImport('replace', parsed.records);
+  })()`);
+  assert.equal(result.ok, true);
+  assert.equal(result.replaced, 1);
+  const saved = app.stored(KEYS.list).find(item => item.id === 'notes-replace-a1');
+  assert.equal(saved.data.basic.name, '虚构替换后患者');
+  assert.equal(saved.data.rawNotes, '虚构替换前本机笔记');
+});
+
+test('导入明确包含笔记的备份时按备份内容还原', async () => {
+  const app = boot();
+  app.run(`(() => {
+    const r = APP.getRecord();
+    r.id = 'notes-restore-a1';
+    r.basic.name = '虚构笔记还原患者';
+    r.rawNotes = '虚构本机旧笔记';
+    APP._test.saveToLibrary();
+    APP._test.newRecord();
+  })()`);
+  const result = await app.run(`(() => {
+    const existing = APP._test.getList().find(item => item.id === 'notes-restore-a1');
+    const data = JSON.parse(JSON.stringify(existing.data));
+    data.basic.name = '虚构笔记还原患者（导入）';
+    data.rawNotes = '虚构备份新笔记';
+    const bundle = RECORD_CORE.buildExport([{
+      id: existing.id,
+      updatedAt: '2099-01-01T00:00:00.000Z',
+      data
+    }], '2099-01-01T00:00:00.000Z', { includeNotes: true });
+    const parsed = RECORD_CORE.parseImport(
+      JSON.stringify(bundle),
+      SCHEMA.emptyRecord,
+      SCHEMA.DEPARTMENTS.map(department => department.key)
+    );
+    window.__notesIncluded = parsed.records[0].rawNotesIncluded;
+    return APP._test.applyImport('merge', parsed.records);
+  })()`);
+  assert.equal(result.ok, true);
+  assert.equal(app.run('window.__notesIncluded'), true);
+  const saved = app.stored(KEYS.list).find(item => item.id === 'notes-restore-a1');
+  assert.equal(saved.data.basic.name, '虚构笔记还原患者（导入）');
+  assert.equal(saved.data.rawNotes, '虚构备份新笔记');
+});
+
 /* ======================= 载入与规范化 ======================= */
 
 test('载入已有病历并把旧结构补齐', () => {
@@ -622,9 +729,31 @@ test('getRecord 返回当前病历对象', () => {
   assert.ok(r && r.basic, '应返回有病历结构的对象');
 });
 
-test('STEPS 有 11 个步骤', () => {
+test('STEPS 有 10 个步骤', () => {
   const app = boot();
-  assert.equal(app.run('APP.STEPS.length'), 11);
+  assert.equal(app.run('APP.STEPS.length'), 10);
+});
+
+test('入院记录表单按医院基本项目排列，旧身份补充资料仍可编辑', () => {
+  const app = boot();
+  const html = app.document.querySelector('#content').innerHTML;
+  const paths = ['name', 'gender', 'age', 'department', 'bedNo', 'recordNo', 'nationality', 'birthPlace', 'marital', 'occupation', 'admitDate', 'recordDate', 'informant', 'reliability'];
+  const positions = paths.map(key => html.search(new RegExp(`data-(?:path|seg)="basic\\.${key}"`)));
+  assert.ok(positions.every(position => position >= 0));
+  assert.equal(positions.join(','), [...positions].sort((left, right) => left - right).join(','));
+  ['birthDate', 'nativePlace', 'workUnit', 'address', 'phone'].forEach(key => assert.ok(html.includes(`data-path="basic.${key}"`)));
+  assert.doesNotMatch(app.run('APP._test.navRowsHtml()'), /系统回顾/);
+});
+
+test('App 检查分类可录入并用于预览，未知旧检查仍可见', () => {
+  const app = boot();
+  app.run('APP.getRecord().auxiliary.items = [{name:"虚构项目",result:"旧结果原文"}]; APP._test.gotoStep("aux")');
+  const html = app.document.querySelector('#content').innerHTML;
+  assert.match(html, /data-aux="category"/);
+  app.document._listeners.get('doc::input')[0]({ target: { dataset: { aux: 'category', idx: '0' }, value: 'special' } });
+  assert.equal(app.run('APP.getRecord().auxiliary.items[0].category'), 'special');
+  assert.match(app.run('GENERATOR.generate(APP.getRecord()).sections["特殊检查"]'), /旧结果原文/);
+  assert.doesNotMatch(app.run('GENERATOR.generate(APP.getRecord()).sections["实验室检查"]'), /旧结果原文/);
 });
 
 test('步骤里不再有「评分自查」，生成病历是最后一步', () => {
@@ -666,11 +795,11 @@ test('折叠补充项在已有内容时自动展开，旧数据仍可编辑', ()
   app.run('APP.getRecord().basic.address = "已有地址"');
   app.run('APP._test.gotoStep("basic")');
   html = app.document.querySelector('#content').innerHTML;
-  assert.match(html, /<details class="optional-details" open>\s*<summary>工作单位和联系方式/);
+  assert.match(html, /<details class="optional-details" open>\s*<summary>出生日期、籍贯、工作单位和联系方式/);
   assert.match(html, /value="已有地址"/);
 });
 
-test('录入步骤顺序与病历章节顺序一致：系统回顾紧接体格检查之后', () => {
+test('录入步骤顺序与病历章节顺序一致且无系统回顾', () => {
   const app = boot();
   // vm 沙箱里的数组 prototype 与宿主不同，deepStrictEqual 会因原型不等而失败，
   // 所以先转成宿主数组再比。
@@ -679,7 +808,7 @@ test('录入步骤顺序与病历章节顺序一致：系统回顾紧接体格�
   // 有人改步骤时只顾一处、把顺序又改乱。
   assert.deepEqual(keys, [
     'basic', 'hpi', 'pmh', 'personal', 'marriage', 'family',
-    'pe', 'ros', 'aux', 'summary', 'output'
+    'pe', 'aux', 'summary', 'output'
   ]);
 });
 
@@ -695,7 +824,7 @@ test('录入步骤顺序与 SECTION_ORDER 的病史部分一一对应', () => {
   const map = {
     basic: '一般项目', hpi: '现病史', pmh: '既往史', ros: '系统回顾',
     personal: '个人史', marriage: '婚育史', family: '家族史',
-    pe: '体格检查', aux: '辅助检查'
+    pe: '体格检查（一）', aux: '实验室检查'
   };
   const pairs = keys.filter(k => map[k]).map(k => [k, sec.indexOf(map[k])]);
   const idx = pairs.map(p => p[1]);
@@ -715,7 +844,8 @@ test('stepIndexOf 认得出步骤键，认不出来的一律回第 0 步', () =>
   const app = boot();
   assert.equal(app.run('APP._test.stepIndexOf("basic")'), 0);
   assert.equal(app.run('APP._test.stepIndexOf("pe")'), 6);
-  assert.equal(app.run('APP._test.stepIndexOf("output")'), 10);
+  assert.equal(app.run('APP._test.stepIndexOf("output")'), 9);
+  assert.equal(app.run('APP._test.stepIndexOf("ros")'), 0);
   // 空串、旧键、拼错的键都不能让页面白屏
   assert.equal(app.run('APP._test.stepIndexOf("")'), 0);
   assert.equal(app.run('APP._test.stepIndexOf(undefined)'), 0);
@@ -726,7 +856,7 @@ test('刷新后回到上次停留的步骤，不必从第一步重新点', () =>
   const app = boot({
     initial: { 'dabingli.settings.v1': JSON.stringify({ rosMode: 'detail', fontScale: 1, lastStep: 'pe' }) }
   });
-  assert.equal(app.document.querySelector('#stepNum').textContent, '7/11');
+  assert.equal(app.document.querySelector('#stepNum').textContent, '7/10');
   assert.match(app.document.querySelector('#stepTitle').textContent, /体格检查/);
 });
 
@@ -734,7 +864,7 @@ test('存档里的步骤键坏掉时退回第一步，不白屏', () => {
   const app = boot({
     initial: { 'dabingli.settings.v1': JSON.stringify({ lastStep: 'steps-changed' }) }
   });
-  assert.equal(app.document.querySelector('#stepNum').textContent, '1/11');
+  assert.equal(app.document.querySelector('#stepNum').textContent, '1/10');
   assert.match(app.document.querySelector('#stepTitle').textContent, /基本情况/);
   assert.ok(app.document.querySelector('#content').innerHTML.length > 100);
 });
@@ -751,16 +881,16 @@ test('切换步骤后立即写回设置，生成页不记', () => {
 
 /* ======================= 步骤导航 ======================= */
 
-test('步骤导航列出全部 11 步，且当前步被标出来', () => {
+test('步骤导航列出全部 10 步，且当前步被标出来', () => {
   const app = boot();
   app.run('APP._test.gotoStep("pmh")');
   const html = app.run('APP._test.navRowsHtml()');
   assert.match(html, /基本情况/);
   assert.match(html, /既往史/);
-  assert.match(html, /系统回顾/);
+  assert.doesNotMatch(html, /系统回顾/);
   assert.match(html, /生成病历/);
   const rows = (html.match(/data-navstep=/g) || []).length;
-  assert.equal(rows, 11, '11 个步骤每步一行');
+  assert.equal(rows, 10, '10 个步骤每步一行');
   assert.match(html, /nav-row cur[^>]*data-navstep="pmh"/, '当前步要带 cur 类');
 });
 
@@ -831,7 +961,7 @@ function clickList(app, attribute, openId) {
   app.run('APP._test.openList()');
   const handler = app.document._listeners.get('<created:div>::click').at(-1);
   const target = {
-    dataset: {},
+    dataset: attribute === 'data-del' ? { del: openId } : {},
     hasAttribute: name => name === attribute,
     closest: selector => selector === '[data-open]' && openId ? { dataset: { open: openId } } : null
   };
@@ -1155,23 +1285,12 @@ test('P0-3 成人月经史不显示儿童提示', () => {
   assert.doesNotMatch(html, /儿童可选「未初潮」/);
 });
 
-test('P1-14 系统回顾三态按钮带 aria-label 并随状态更新', () => {
+test('旧系统回顾步骤键回退到基本情况且不显示三态表单', () => {
   const app = boot();
   app.run('APP._test.gotoStep("ros")');
   const html = app.document.querySelector('#content').innerHTML;
-  assert.match(html, /aria-label="咳嗽：未问"/, '初始应标未问');
-  assert.match(html, /aria-label="发热：未问"/);
-
-  let chip = clickRos(app, 'resp', 'cough');
-  assert.equal(chip.getAttribute('aria-label'), '咳嗽：阴性');
-  assert.equal(app.run('APP.getRecord().ros.resp.cough.factState'), 'asked_negative');
-
-  chip = clickRos(app, 'resp', 'cough');
-  assert.equal(chip.getAttribute('aria-label'), '咳嗽：阳性');
-  assert.equal(app.run('APP.getRecord().ros.resp.cough.factState'), 'asked_positive');
-
-  chip = clickRos(app, 'resp', 'cough');
-  assert.equal(chip.getAttribute('aria-label'), '咳嗽：未问');
+  assert.doesNotMatch(html, /data-ros=|系统回顾/);
+  assert.match(app.document.querySelector('#stepTitle').textContent, /基本情况/);
 });
 
 test('P0-6 系统剩余项全部标阴性后就地刷新，不跳顶且保留阳性', () => {
@@ -1342,4 +1461,260 @@ test('P1-15 深色模式对比度与 focus-visible 规则不再被覆盖', () =>
   assert.match(dark, /\.btn-danger:hover\s*\{\s*background:\s*var\(--red-light\)/, '深色模式危险按钮悬停应用深色变量');
   assert.match(dark, /\.topbar \.btn-icon:active\s*\{\s*background:\s*var\(--primary-soft\)/, '深色模式图标按钮按下应用深色变量');
   assert.doesNotMatch(html, /input:focus,\s*\r?\n\s*textarea:focus,\s*\r?\n\s*select:focus\s*\{[^}]*outline:\s*none/, '输入框 focus 不应删除 focus-visible 轮廓');
+});
+
+/* 导入、删除与草稿回归：测试数据均为虚构记录。 */
+function importedVersion(app, name, stamp = '2099-01-01T00:00:00.000Z') {
+  app.sandbox.importName = name;
+  app.sandbox.importStamp = stamp;
+  return app.run(`(() => {
+    const copy = JSON.parse(JSON.stringify(APP._test.getList().find(x => x.id === APP.getRecord().id)));
+    copy.updatedAt = importStamp;
+    copy.data.updatedAt = importStamp;
+    copy.data.basic.name = importName;
+    return copy;
+  })()`);
+}
+
+test('合并导入后打开被替换的病历，并保存或重启，都不会恢复旧草稿', async () => {
+  const app = boot();
+  app.run(`APP.getRecord().basic.name = '旧记录甲'; APP._test.saveToLibrary()`);
+  const incoming = importedVersion(app, '导入记录甲');
+  const id = incoming.id;
+  app.run('APP._test.newRecord()');
+  app.sandbox.incoming = incoming;
+  const result = await app.run(`APP._test.applyImport('merge', [incoming])`);
+  assert.equal(result.ok, true);
+  assert.equal(result.res.updated, 1);
+  assert.equal(app.memory.has('dabingli.draft.v1.' + id), false);
+  await app.run(`APP._test.openRecord(${JSON.stringify(id)})`);
+  assert.equal(app.run('APP.getRecord().basic.name'), '导入记录甲');
+  assert.equal(await app.run('APP._test.saveToLibrary()'), true);
+  assert.equal(app.stored(KEYS.list).find(x => x.id === id).data.basic.name, '导入记录甲');
+  const restarted = boot({ initial: Object.fromEntries(app.memory) });
+  assert.equal(restarted.run('APP.getRecord().basic.name'), '导入记录甲');
+});
+
+test('正在编辑的病历被导入覆盖时，不同的草稿和未落盘编辑各自另存为副本', async () => {
+  const app = boot();
+  app.run(`APP.getRecord().basic.name = '旧记录乙'; APP._test.saveToLibrary()`);
+  const incoming = importedVersion(app, '导入记录乙');
+  app.run(`APP.getRecord().hpi.symptoms = '已落盘的本机编辑'; APP._test.saveCurrent();
+    APP.getRecord().hpi.symptoms = '较新的未落盘编辑'`);
+  app.sandbox.incoming = incoming;
+  const result = await app.run(`APP._test.applyImport('merge', [incoming])`);
+  assert.equal(result.ok, true);
+  assert.equal(result.preserved, 2);
+  assert.equal(app.run('APP.getRecord().basic.name'), '导入记录乙');
+  const copies = app.stored(KEYS.list).filter(x => x.data.meta.importDraftCopy);
+  assert.deepEqual(copies.map(x => x.data.hpi.symptoms).sort(), ['已落盘的本机编辑', '较新的未落盘编辑'].sort());
+  assert.equal(await app.run('APP._test.saveToLibrary()'), true);
+  assert.equal(app.stored(KEYS.list).find(x => x.id === incoming.id).data.basic.name, '导入记录乙');
+  app.run('APP._test.openList()');
+  assert.match(app.document.body.children.at(-1).innerHTML, /导入前的本机草稿副本/);
+});
+
+test('较新的非当前草稿被安全保留为副本，跳过较旧导入时不动草稿', async () => {
+  const app = boot();
+  app.run(`APP.getRecord().basic.name = '旧记录丙'; APP._test.saveToLibrary()`);
+  const incoming = importedVersion(app, '导入记录丙');
+  app.run(`APP.getRecord().hpi.symptoms = '另一份本机编辑'; APP._test.saveCurrent(); APP._test.newRecord()`);
+  app.sandbox.incoming = incoming;
+  const result = await app.run(`APP._test.applyImport('merge', [incoming])`);
+  assert.equal(result.preserved, 1);
+  assert.equal(app.stored(KEYS.list).find(x => x.data.meta.importDraftCopy).data.hpi.symptoms, '另一份本机编辑');
+  await app.run(`APP._test.openRecord(${JSON.stringify(incoming.id)})`);
+  assert.equal(app.run('APP.getRecord().basic.name'), '导入记录丙');
+  app.run(`APP.getRecord().hpi.symptoms = '导入后继续编辑'; APP._test.saveCurrent()`);
+  const draftBefore = app.memory.get('dabingli.draft.v1.' + incoming.id);
+  incoming.updatedAt = '2000-01-01T00:00:00.000Z';
+  const skipped = await app.run(`APP._test.applyImport('merge', [incoming])`);
+  assert.equal(skipped.res.skipped, 1);
+  assert.equal(app.memory.get('dabingli.draft.v1.' + incoming.id), draftBefore);
+  assert.equal(app.run('APP.getRecord().hpi.symptoms'), '导入后继续编辑');
+});
+
+test('替换导入同一 ID 也保留本机编辑并切换为导入版本', async () => {
+  const app = boot();
+  app.run(`APP.getRecord().basic.name = '旧记录丁'; APP._test.saveToLibrary()`);
+  const incoming = importedVersion(app, '替换记录丁');
+  app.run(`APP.getRecord().hpi.symptoms = '替换前的编辑'`);
+  app.sandbox.incoming = incoming;
+  const result = await app.run(`APP._test.applyImport('replace', [incoming])`);
+  assert.equal(result.ok, true);
+  assert.equal(result.preserved, 1);
+  assert.equal(app.run('APP.getRecord().basic.name'), '替换记录丁');
+  assert.equal(app.stored(KEYS.list).find(x => x.data.meta.importDraftCopy).data.hpi.symptoms, '替换前的编辑');
+});
+
+test('导入列表写失败时，内存列表、当前内容与草稿都不变', async () => {
+  const app = boot();
+  app.run(`APP.getRecord().basic.name = '保留记录戊'; APP._test.saveToLibrary()`);
+  const incoming = importedVersion(app, '未写入记录戊');
+  app.run(`APP.getRecord().hpi.symptoms = '保留中的编辑'; APP._test.saveCurrent()`);
+  const listBefore = app.memory.get(KEYS.list);
+  const draftBefore = app.memory.get('dabingli.draft.v1.' + incoming.id);
+  const set = app.storage.setItem;
+  app.storage.setItem = (k, v) => { if (k === KEYS.list) throw new Error('quota'); set(k, v); };
+  app.sandbox.incoming = incoming;
+  const result = await app.run(`APP._test.applyImport('merge', [incoming])`);
+  assert.equal(result.ok, false);
+  assert.equal(app.memory.get(KEYS.list), listBefore);
+  assert.equal(app.memory.get('dabingli.draft.v1.' + incoming.id), draftBefore);
+  assert.equal(app.run('APP._test.getList()[0].data.basic.name'), '保留记录戊');
+  assert.equal(app.run('APP.getRecord().hpi.symptoms'), '保留中的编辑');
+  assert.match(app.run('APP._test.storageAlertText()'), /导入失败/);
+});
+
+test('有 Web Locks 时导入等待锁内实际写入结果，写满不返回成功', async () => {
+  const app = boot({ locks: true, realTimers: true });
+  app.run(`APP.getRecord().basic.name = '锁测试己'`);
+  assert.equal(await app.run('APP._test.saveToLibrary()'), true);
+  const incoming = importedVersion(app, '未写入的锁测试');
+  const before = app.memory.get(KEYS.list);
+  const set = app.storage.setItem;
+  app.storage.setItem = (k, v) => { if (k === KEYS.list) throw new Error('quota'); set(k, v); };
+  app.sandbox.incoming = incoming;
+  const pending = app.run(`APP._test.applyImport('merge', [incoming])`);
+  assert.equal(typeof pending.then, 'function');
+  assert.equal(app.memory.get(KEYS.list), before);
+  const result = await pending;
+  assert.equal(result.ok, false);
+  assert.equal(app.memory.get(KEYS.list), before);
+  assert.equal(app.run('APP._test.getList()[0].data.basic.name'), '锁测试己');
+  assert.match(app.run('APP._test.storageAlertText()'), /导入失败/);
+});
+
+test('导入后旧草稿暂时删不掉时，重启仍打开导入版本而非旧内容', async () => {
+  const app = boot();
+  app.run(`APP.getRecord().basic.name = '旧记录庚'; APP._test.saveToLibrary()`);
+  const incoming = importedVersion(app, '导入记录庚');
+  const draftKey = 'dabingli.draft.v1.' + incoming.id;
+  const remove = app.storage.removeItem;
+  app.storage.removeItem = key => { if (key === draftKey) throw new Error('unavailable'); remove(key); };
+  app.sandbox.incoming = incoming;
+  assert.equal((await app.run(`APP._test.applyImport('merge', [incoming])`)).ok, true);
+  assert.equal(app.run('APP.getRecord().basic.name'), '导入记录庚');
+  assert.equal(app.memory.has(draftKey), true);
+  assert.equal(app.run('APP._test.saveCurrent()'), false);
+  const restarted = boot({ initial: Object.fromEntries(app.memory) });
+  assert.equal(restarted.run('APP.getRecord().basic.name'), '导入记录庚');
+  assert.equal(restarted.memory.has(draftKey), false);
+});
+
+test('删除列表记录同时删除草稿；删除当前记录后自动保存不会复活它', async () => {
+  const app = boot();
+  app.run(`APP.getRecord().basic.name = '待删除记录辛'; APP._test.saveToLibrary()`);
+  const id = app.run('APP.getRecord().id');
+  assert.ok(app.memory.has('dabingli.draft.v1.' + id));
+  await clickList(app, 'data-del', id);
+  assert.equal(app.stored(KEYS.list).length, 0);
+  assert.equal(app.memory.has('dabingli.draft.v1.' + id), false);
+  assert.notEqual(app.run('APP.getRecord().id'), id);
+  app.intervals.forEach(fn => fn());
+  assert.equal(app.memory.has('dabingli.draft.v1.' + id), false);
+});
+
+test('删除列表写入失败时不删除草稿，也不改变当前记录', async () => {
+  const app = boot();
+  app.run(`APP.getRecord().basic.name = '保留记录壬'; APP._test.saveToLibrary()`);
+  const id = app.run('APP.getRecord().id');
+  const before = app.memory.get(KEYS.list);
+  const set = app.storage.setItem;
+  app.storage.setItem = (k, v) => { if (k === KEYS.list) throw new Error('quota'); set(k, v); };
+  await clickList(app, 'data-del', id);
+  assert.equal(app.memory.get(KEYS.list), before);
+  assert.ok(app.memory.has('dabingli.draft.v1.' + id));
+  assert.equal(app.run('APP.getRecord().id'), id);
+  assert.match(app.run('APP._test.storageAlertText()'), /删除失败/);
+});
+
+test('启动只清理明确删除的孤儿草稿，保护当前、列表中及没有删除标记的草稿', () => {
+  const schema = app_schema();
+  const draft = id => { const r = schema.emptyRecord(); r.id = id; r.hpi.symptoms = '虚构草稿内容'; return JSON.stringify(r); };
+  const prefix = 'dabingli.draft.v1.';
+  const deleted = 'dabingli.deleted-draft.v1.';
+  const initial = {
+    [KEYS.current]: JSON.stringify({ id: 'active' }),
+    [KEYS.list]: JSON.stringify([{ id: 'listed', updatedAt: '2026-01-01', data: JSON.parse(draft('listed')) }]),
+    [prefix + 'active']: draft('active'),
+    [prefix + 'listed']: draft('listed'),
+    [prefix + 'new']: draft('new'),
+    [prefix + 'deleted']: draft('deleted'),
+    [deleted + 'active']: '1', [deleted + 'listed']: '1', [deleted + 'deleted']: '1'
+  };
+  const app = boot({ initial });
+  assert.equal(app.memory.has(prefix + 'deleted'), false);
+  assert.equal(app.memory.has(deleted + 'deleted'), false);
+  for (const id of ['active', 'listed', 'new']) assert.equal(app.memory.has(prefix + id), true);
+  const corrupt = boot({ initial: { ...initial, [KEYS.list]: 'broken' } });
+  assert.equal(corrupt.memory.has(prefix + 'deleted'), true);
+});
+
+test('其他页面导入更新后，旧页面保存前检测到冲突并保留本地编辑', async () => {
+  const original = boot();
+  original.run(`APP.getRecord().basic.name = '跨页旧记录'; APP._test.saveToLibrary()`);
+  const second = boot({ initial: Object.fromEntries(original.memory) });
+  const incoming = importedVersion(second, '跨页导入记录');
+  second.sandbox.incoming = incoming;
+  assert.equal((await second.run(`APP._test.applyImport('merge', [incoming])`)).ok, true);
+  original.run(`APP.getRecord().hpi.symptoms = '跨页未保存内容'`);
+  original.memory.set(KEYS.list, second.memory.get(KEYS.list));
+  assert.equal(original.run('APP._test.saveToLibrary()'), false);
+  assert.equal(original.run('APP.getRecord().hpi.symptoms'), '跨页未保存内容');
+  assert.match(original.run('APP._test.storageAlertText()'), /导入.*新版本/);
+  assert.equal(original.stored(KEYS.list).find(x => x.id === incoming.id).data.basic.name, '跨页导入记录');
+  assert.equal(await original.run(`APP._test.handleAction('keepCopy')`), true);
+  const saved = original.stored(KEYS.list);
+  assert.ok(saved.some(x => x.data.meta.importDraftCopy && x.data.hpi.symptoms === '跨页未保存内容'));
+  assert.equal(saved.find(x => x.id === incoming.id).data.basic.name, '跨页导入记录');
+});
+
+test('跨页导入冲突可载入新版本，之后保存仍保留导入内容', async () => {
+  const oldPage = boot();
+  oldPage.run(`APP.getRecord().basic.name = '跨页旧记录二'; APP._test.saveToLibrary()`);
+  const importingPage = boot({ initial: Object.fromEntries(oldPage.memory) });
+  const incoming = importedVersion(importingPage, '跨页导入记录二');
+  importingPage.sandbox.incoming = incoming;
+  assert.equal((await importingPage.run(`APP._test.applyImport('merge', [incoming])`)).ok, true);
+  assert.equal(await importingPage.run('APP._test.saveToLibrary()'), true);
+  oldPage.memory.set(KEYS.list, importingPage.memory.get(KEYS.list));
+  oldPage.run(`APP.getRecord().hpi.symptoms = '等待用户处理的内容'`);
+  assert.equal(oldPage.run('APP._test.saveCurrent()'), false);
+  oldPage.run(`APP._test.handleAction('loadRemote')`);
+  assert.equal(oldPage.run('APP.getRecord().basic.name'), '跨页导入记录二');
+  assert.equal(await oldPage.run('APP._test.saveToLibrary()'), true);
+  assert.equal(oldPage.stored(KEYS.list).find(x => x.id === incoming.id).data.basic.name, '跨页导入记录二');
+});
+
+test('删除时草稿暂时无法清除，启动后按删除标记重试', async () => {
+  const app = boot();
+  app.run(`APP.getRecord().basic.name = '待清理记录'; APP._test.saveToLibrary()`);
+  const id = app.run('APP.getRecord().id');
+  app.run('APP._test.newRecord()');
+  const key = 'dabingli.draft.v1.' + id;
+  const remove = app.storage.removeItem;
+  app.storage.removeItem = k => { if (k === key) throw new Error('unavailable'); remove(k); };
+  await clickList(app, 'data-del', id);
+  assert.ok(app.memory.has(key));
+  assert.ok(app.memory.has('dabingli.deleted-draft.v1.' + id));
+  const restarted = boot({ initial: Object.fromEntries(app.memory) });
+  assert.equal(restarted.memory.has(key), false);
+});
+
+test('异步导入写入失败时，预览弹窗提示失败且列表不显示导入内容', async () => {
+  const app = boot({ locks: true, realTimers: true });
+  app.run(`APP.getRecord().basic.name = '界面记录癸'`);
+  assert.equal(await app.run('APP._test.saveToLibrary()'), true);
+  const incoming = importedVersion(app, '不会显示的导入记录');
+  const set = app.storage.setItem;
+  app.storage.setItem = (k, v) => { if (k === KEYS.list) throw new Error('quota'); set(k, v); };
+  app.sandbox.incoming = incoming;
+  app.run('APP._test.previewImport({ records: [incoming] })');
+  const handler = app.document._listeners.get('<created:div>::click').at(-1);
+  await handler({ target: { dataset: { import: 'merge' } } });
+  assert.equal(app.el('#toast').textContent, '导入没有写入，请查看页面顶部提示');
+  assert.match(app.document.body.children.at(-1).innerHTML, /界面记录癸/);
+  assert.doesNotMatch(app.document.body.children.at(-1).innerHTML, /不会显示的导入记录/);
+  assert.match(app.document.body.children.at(-1).innerHTML, /导入失败/);
 });

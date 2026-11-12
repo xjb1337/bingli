@@ -1,5 +1,11 @@
 import { useMemo, useState } from 'react';
-import { GENERATOR, type AppSettings, type DabingliRecord, type DocumentWarning } from '@dabingli/domain';
+import {
+  GENERATOR,
+  SCHEMA,
+  type AppSettings,
+  type DabingliRecord,
+  type DocumentWarning,
+} from '@dabingli/domain';
 import { Collapsible } from '../components/Collapsible';
 import { Card, StepShell } from '../components/StepShell';
 import type { StepComponentProps } from '../editor-types';
@@ -38,6 +44,29 @@ export function buildGeneratedDocuments(
   ];
 }
 
+function safeFilePart(value: string, fallback: string): string {
+  const text = String(value ?? '').trim()
+    .replace(/[\\/:*?"<>|\r\n]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return text || fallback;
+}
+
+/** 导出名不使用患者姓名：优先科室，通用科使用病历短 ID。 */
+export function documentFileName(
+  record: DabingliRecord,
+  title: string,
+  today: string = SCHEMA.todayStr(),
+): string {
+  const department = SCHEMA.DEPARTMENTS.find((item) => item.key === record.basic.department);
+  const shortId = String(record.id ?? '').replace(/[^0-9a-z]/gi, '').slice(-6) || '病历';
+  const tag = department && department.key !== 'general' ? department.name : shortId;
+  return [
+    safeFilePart(title || '大病历', '大病历'),
+    safeFilePart(tag, shortId),
+    safeFilePart(record.basic.recordDate || today, today),
+  ].join('_') + '.txt';
+}
+
 export function GeneratedDocuments({
   record,
   rosMode = 'detail',
@@ -74,8 +103,7 @@ export function GeneratedDocuments({
     return window.confirm(`病历里还有 ${count} 处（患侧/对侧/健侧）没改，确定要复制/下载吗？`);
   }
 
-  async function copy(text: string, title: string) {
-    if (!confirmSidePlaceholders()) return;
+  async function writeClipboard(text: string): Promise<boolean> {
     try {
       if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(text);
@@ -89,9 +117,36 @@ export function GeneratedDocuments({
         document.execCommand('copy');
         area.remove();
       }
-      setStatus(`已复制${title}`);
+      return true;
     } catch {
+      return false;
+    }
+  }
+
+  async function copy(text: string, title: string) {
+    if (!confirmSidePlaceholders()) return;
+    if (await writeClipboard(text)) {
+      setStatus(`已复制${title}`);
+    } else {
       setStatus(`复制${title}失败，请手动选择文本`);
+    }
+  }
+
+  async function share(text: string, title: string) {
+    if (!confirmSidePlaceholders()) return;
+    if (typeof navigator.share === 'function') {
+      try {
+        await navigator.share({ title, text });
+        setStatus(`已打开系统分享：${title}`);
+        return;
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') return;
+      }
+    }
+    if (await writeClipboard(text)) {
+      setStatus(`当前浏览器不支持直接分享，已复制${title}`);
+    } else {
+      setStatus(`分享${title}失败，请手动选择文本`);
     }
   }
 
@@ -101,10 +156,42 @@ export function GeneratedDocuments({
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = `${title}.txt`;
+    anchor.download = documentFileName(record, title);
     anchor.click();
     URL.revokeObjectURL(url);
     setStatus(`已下载${title}`);
+  }
+
+  function print(text: string, title: string) {
+    if (!confirmSidePlaceholders()) return;
+    if (typeof window.print !== 'function') {
+      setStatus('当前环境不支持打印');
+      return;
+    }
+    const node = document.createElement('article');
+    node.className = 'print-document';
+    const heading = document.createElement('h1');
+    heading.textContent = title;
+    const body = document.createElement('pre');
+    body.textContent = text;
+    node.append(heading, body);
+    document.body.appendChild(node);
+    document.body.classList.add('printing-document');
+    const cleanup = () => {
+      document.body.classList.remove('printing-document');
+      node.remove();
+      window.removeEventListener('afterprint', cleanup);
+    };
+    window.addEventListener('afterprint', cleanup, { once: true });
+    try {
+      window.print();
+      setStatus(`已打开打印：${title}`);
+    } catch {
+      cleanup();
+      setStatus('当前环境不支持打印');
+      return;
+    }
+    window.setTimeout(cleanup, 3000);
   }
 
   return (
@@ -129,6 +216,12 @@ export function GeneratedDocuments({
             </button>
             <button type="button" className="button ghost" onClick={() => download(document.text, document.title)}>
               下载 .txt
+            </button>
+            <button type="button" className="button ghost" onClick={() => void share(document.text, document.title)}>
+              分享
+            </button>
+            <button type="button" className="button ghost" onClick={() => print(document.text, document.title)}>
+              打印 / 存 PDF
             </button>
           </div>
           <pre
@@ -156,7 +249,7 @@ export function OutputStep({
   const warnings = GENERATOR.validateStructured(record);
   return (
     <StepShell
-      eyebrow="第 11 / 11 步"
+      eyebrow="第 10 / 10 步"
       title="生成病历"
       description={STEP_DESCRIPTIONS.output}
     >

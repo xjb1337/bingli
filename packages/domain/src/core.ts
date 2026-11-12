@@ -33,6 +33,7 @@ const RECORD_CORE = (() => {
   const isObject = x => !!x && typeof x === 'object' && !Array.isArray(x);
   const isText = (x, max = 2 * 1024 * 1024) => typeof x === 'string' && x.length <= max;
   const isNum = x => typeof x === 'number' && Number.isFinite(x) && x >= 0;
+  const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
 
   /* ---------------------- 安全键检查（防原型污染） ---------------------- */
 
@@ -119,17 +120,12 @@ const RECORD_CORE = (() => {
       });
     });
 
-    // ROS：旧版用布尔 true 表示阳性 → 现在用三态对象
-    if (isObject(out.ros)) {
-      Object.keys(out.ros).forEach(sysKey => {
-        const sys = out.ros[sysKey];
-        if (!isObject(sys)) return;
-        Object.keys(sys).forEach(symKey => {
-          if (sys[symKey] === true) {
-            sys[symKey] = { checked: true, status: 'asked_positive' };
-          }
-        });
-      });
+    if (isText(out.pmh)) out.pmh = { diseaseDetail: out.pmh };
+    if (Array.isArray(out.auxiliary)) out.auxiliary = { items: out.auxiliary };
+    if (isText(out.auxiliary)) out.auxiliary = { items: [{ name: '旧辅助检查', result: out.auxiliary }] };
+    if (isObject(out.auxiliary) && Array.isArray(out.auxiliary.items)) {
+      out.auxiliary.items = out.auxiliary.items.map(item => isText(item)
+        ? { name: '旧辅助检查', result: item } : item);
     }
 
     return out;
@@ -254,7 +250,7 @@ const RECORD_CORE = (() => {
     for (let i = 0; i < parts.length - 1; i++) {
       const p = parts[i];
       if (DANGEROUS.includes(p)) return obj;
-      if (!isObject(cur[p])) cur[p] = {};
+      if (!isObject(cur[p]) && !Array.isArray(cur[p])) cur[p] = {};
       cur = cur[p];
     }
     const last = parts[parts.length - 1];
@@ -717,6 +713,9 @@ const RECORD_CORE = (() => {
     ) || (isObject(raw.hpi) && Object.values(raw.hpi).some(v => isText(v) && v.trim() !== ''));
 
     const legacyUnmapped = {};
+    ['pmh', 'auxiliary'].forEach(key => {
+      if (isText(raw[key])) legacyUnmapped[key] = raw[key];
+    });
     const filled = deepMerge(emptyRecord(), adaptLegacyShapes(raw), (path, value) => {
       legacyUnmapped[path] = cloneValue(value);
     });
@@ -731,6 +730,7 @@ const RECORD_CORE = (() => {
     }
 
     filled.schemaVersion = SCHEMA_VERSION;
+    filled.rawNotes = isText(filled.rawNotes) ? filled.rawNotes : '';
 
     // ---- 元数据与迁移（v2 → v3）----
     if (!isObject(filled.meta)) filled.meta = {};
@@ -938,6 +938,162 @@ const RECORD_CORE = (() => {
     return (Array.isArray(list) ? list : []).find(x => x && x.id === id) || null;
   }
 
+  /**
+   * 病历列表搜索：支持姓名、主诉、科室、诊断的部分匹配。
+   * 科室存的是英文键，界面可传 departmentName 把显示名也纳入匹配。
+   */
+  function searchRecords(list, query, options) {
+    const source = Array.isArray(list) ? list : [];
+    const terms = String(query == null ? '' : query).trim().toLocaleLowerCase('zh-CN')
+      .split(/\s+/).filter(Boolean);
+    if (!terms.length) return source.slice();
+    const departmentName = options && typeof options.departmentName === 'function'
+      ? options.departmentName : null;
+    return source.filter(item => {
+      const data = item && item.data ? item.data : (item || {});
+      const basic = data.basic || {};
+      const diagnoses = [
+        ...((data.diagnosis && data.diagnosis.confirmed) || []),
+        ...((data.discharge && data.discharge.diagnoses) || [])
+      ];
+      const dept = String(basic.department || '');
+      const text = [
+        basic.name,
+        basic.chiefComplaint,
+        dept,
+        departmentName ? departmentName(dept) : '',
+        ...diagnoses
+      ].map(value => String(value == null ? '' : value).toLocaleLowerCase('zh-CN')).join('\n');
+      return terms.every(term => text.includes(term));
+    });
+  }
+
+  /** 复制为新病历时必须清空的身份、日期、号码和生命体征字段。 */
+  const COPY_CLEARED_PATHS = Object.freeze([
+    'basic.name',
+    'basic.gender',
+    'basic.age',
+    'basic.birthDate',
+    'basic.marital',
+    'basic.nativePlace',
+    'basic.birthPlace',
+    'basic.nationality',
+    'basic.occupation',
+    'basic.workUnit',
+    'basic.address',
+    'basic.phone',
+    'basic.recordNo',
+    'basic.bedNo',
+    'basic.admitDate',
+    'basic.admitTime',
+    'basic.recordDate',
+    'basic.recordTime',
+    'basic.informant',
+    'basic.reliability',
+    'menstruation.lmp',
+    'childbirth.lastBirth',
+    'soap.recordTime',
+    'discharge.dischargeDate'
+  ]);
+  const COPY_OPTIONAL_IDENTITY_PATHS = Object.freeze([
+    'basic.idCard',
+    'basic.idNumber',
+    'basic.medicalRecordNo',
+    'basic.caseNo',
+    'basic.admissionNo',
+    'basic.outpatientNo'
+  ]);
+
+  const SENSITIVE_LEGACY_SEGMENTS = new Set([
+    'basic', 'name', 'patientname', 'gender', 'age', 'birthdate', 'birthplace', 'nativeplace',
+    'marital', 'marriage', 'nationality', 'occupation', 'workunit', 'address', 'phone',
+    'tel', 'telephone', 'mobile', 'contact', 'recordno', 'bedno', 'admissionno',
+    'medicalrecordno', 'caseno', 'outpatientno', 'id', 'idcard', 'idnumber', 'informant',
+    'reliability', 'lmp', 'lastbirth', 'patient', 'patientid', 'sex', 'dob', 'mrn',
+    'email', 'wechat', 'qq', 'insurance'
+  ]);
+
+  function isClearedFieldStatePath(path) {
+    const key = String(path || '');
+    if (COPY_CLEARED_PATHS.includes(key) || COPY_OPTIONAL_IDENTITY_PATHS.includes(key)) return true;
+    if (key === 'pe.vitals' || key.indexOf('pe.vitals.') === 0) return true;
+    return /^auxiliary\.items(?:\.\d+)?\.(?:date|no)$/i.test(key);
+  }
+
+  function isSensitiveLegacyPath(path) {
+    return String(path || '').split('.').some(raw => {
+      const key = raw.toLowerCase().replace(/[\s_-]+/g, '');
+      if (!key) return false;
+      if (key.indexOf('basic') === 0 || SENSITIVE_LEGACY_SEGMENTS.has(key)) return true;
+      return /(date|time|number|phone|mobile|tel|address|birth|name|patient|contact|recordno|bedno|admissionno|medicalrecordno|caseno|outpatientno|marital|nationality|occupation|workunit|informant|reliability|lmp|lastbirth|idcard|idnumber|sex|dob|mrn|email|wechat|qq|insurance|no)$/.test(key);
+    });
+  }
+
+  function blankValueShape(value) {
+    if (Array.isArray(value)) return value.map(blankValueShape);
+    if (isObject(value)) {
+      const out = {};
+      Object.keys(value).forEach(key => { out[key] = blankValueShape(value[key]); });
+      return out;
+    }
+    return '';
+  }
+
+  /**
+   * 从一份病历复制出“新患者病历”：保留病种/模板结构和临床描述，
+   * 清空身份信息、生命体征数值、日期、号码与原始笔记，并分配新 id。
+   */
+  function copyRecordAsNew(record, options) {
+    if (!isObject(record)) fail('病历内容无效');
+    const opts = isObject(options) ? options : {};
+    const copy = cloneValue(record);
+    const now = opts.now || new Date().toISOString();
+    copy.id = opts.id || uid();
+    copy.updatedAt = now;
+    copy.schemaVersion = SCHEMA_VERSION;
+    copy.rawNotes = '';
+    if (!isObject(copy.meta)) copy.meta = {};
+    copy.meta.createdAt = now;
+    copy.meta.updatedAt = now;
+    copy.meta.revision = 0;
+    copy.meta.lastTemplateFill = null;
+    delete copy.meta.importDraftCopy;
+    delete copy.__importGuard;
+    copy.meta.conflicts = {};
+    copy.meta.migratedFrom = null;
+    copy.meta.migrationNotes = [];
+    if (!isObject(copy.meta.fieldStates)) copy.meta.fieldStates = {};
+    Object.keys(copy.meta.fieldStates).forEach(path => {
+      if (isClearedFieldStatePath(path)) delete copy.meta.fieldStates[path];
+    });
+    if (!isObject(copy.meta.legacyUnmapped)) copy.meta.legacyUnmapped = {};
+    Object.keys(copy.meta.legacyUnmapped).forEach(path => {
+      if (isSensitiveLegacyPath(path) || isClearedFieldStatePath(path)) {
+        delete copy.meta.legacyUnmapped[path];
+      }
+    });
+    COPY_CLEARED_PATHS.forEach(path => {
+      if (getPath(copy, path) !== undefined) setPath(copy, path, '');
+    });
+    COPY_OPTIONAL_IDENTITY_PATHS.forEach(path => {
+      if (getPath(copy, path) !== undefined) setPath(copy, path, '');
+    });
+    if (copy.pe && isObject(copy.pe.vitals)) copy.pe.vitals = blankValueShape(copy.pe.vitals);
+    if (copy.auxiliary && Array.isArray(copy.auxiliary.items)) {
+      copy.auxiliary.items = copy.auxiliary.items.map(item => {
+        if (!isObject(item)) return item;
+        const next = cloneValue(item);
+        if (next.date !== undefined) next.date = '';
+        if (next.no !== undefined) next.no = '';
+        return next;
+      });
+    }
+    if (copy.discharge && copy.discharge.diagnosesConfirmed !== undefined) {
+      copy.discharge.diagnosesConfirmed = false;
+    }
+    return copy;
+  }
+
   /* ---------------------- 导出 / 导入 ---------------------- */
 
   /**
@@ -946,6 +1102,7 @@ const RECORD_CORE = (() => {
    */
   function buildExport(list, isoNow, opts) {
     const options = isObject(opts) ? opts : {};
+    const includeNotes = options.includeNotes === true;
     let base = Array.isArray(list) ? list : [];
     if (options.includeDraft && isObject(options.draft)) {
       base = upsertRecord(base, options.draft, isoNow).list;
@@ -954,7 +1111,9 @@ const RECORD_CORE = (() => {
       .filter(x => x && isObject(x.data))
       .map(x => {
         assertSafeKeys(x.data);
-        return { id: x.id, updatedAt: x.updatedAt, data: x.data };
+        const data = cloneValue(x.data);
+        if (!includeNotes) delete data.rawNotes;
+        return { id: x.id, updatedAt: x.updatedAt, data };
       });
     const out = {
       app: 'dabingli',
@@ -963,6 +1122,7 @@ const RECORD_CORE = (() => {
       records
     };
     if (options.includeDraft && isObject(options.draft)) out.includesDraft = true;
+    if (includeNotes) out.includesNotes = true;
     return out;
   }
 
@@ -991,17 +1151,19 @@ const RECORD_CORE = (() => {
       if (!parsed.records.length) fail('备份中没有病历数据');
       const records = parsed.records.map((item, i) => {
         const body = isObject(item) && isObject(item.data) ? item.data : item;
+        const rawNotesIncluded = isObject(body) && parsed.includesNotes === true && hasOwn(body, 'rawNotes');
         try {
           return {
             id: (isObject(item) && isText(item.id) && item.id) || uid(),
             updatedAt: (isObject(item) && isText(item.updatedAt) && item.updatedAt) || '',
+            rawNotesIncluded,
             data: normalizeRecord(body, emptyRecord, validDeptKeys)
           };
         } catch (e) {
           fail(`第 ${i + 1} 份病历无法识别：${e.message}`);
         }
       });
-      return { records, mode: 'bundle' };
+      return { records, mode: 'bundle', includesNotes: parsed.includesNotes === true };
     }
 
     // 单份病历
@@ -1010,13 +1172,28 @@ const RECORD_CORE = (() => {
         records: [{
           id: isText(parsed.id) ? parsed.id : uid(),
           updatedAt: isText(parsed.updatedAt) ? parsed.updatedAt : '',
+          rawNotesIncluded: false,
           data: normalizeRecord(parsed, emptyRecord, validDeptKeys)
         }],
-        mode: 'single'
+        mode: 'single',
+        includesNotes: false
       };
     }
 
     fail('无法识别的文件格式（既不是备份包，也不是单份病历）');
+  }
+
+  function finalizeImportedItem(item, existing) {
+    if (!isObject(item)) return item;
+    const out = cloneValue(item);
+    const data = isObject(out.data) ? out.data : out;
+    const existingData = existing && (isObject(existing.data) ? existing.data : existing);
+    if (out.rawNotesIncluded !== true && isObject(data) && isObject(existingData)
+      && typeof existingData.rawNotes === 'string') {
+      data.rawNotes = existingData.rawNotes;
+    }
+    delete out.rawNotesIncluded;
+    return out;
   }
 
   /**
@@ -1030,14 +1207,14 @@ const RECORD_CORE = (() => {
     (imported || []).forEach(item => {
       const idx = out.findIndex(x => x && x.id === item.id);
       if (idx < 0) {
-        out.unshift(item);
+        out.unshift(finalizeImportedItem(item, null));
         added++;
         return;
       }
       const existingTime = String(out[idx].updatedAt || '');
       const incomingTime = String(item.updatedAt || '');
       if (incomingTime > existingTime) {
-        out[idx] = item;
+        out[idx] = finalizeImportedItem(item, out[idx]);
         updated++;
       } else {
         skipped++;
@@ -1049,8 +1226,14 @@ const RECORD_CORE = (() => {
   /**
    * 完整恢复（替换）导入结果
    */
-  function replaceImport(imported) {
-    return Array.isArray(imported) ? [...imported] : [];
+  function replaceImport(imported, existingList) {
+    const existingById = new Map(
+      (Array.isArray(existingList) ? existingList : [])
+        .filter(item => item && item.id)
+        .map(item => [item.id, item])
+    );
+    return (Array.isArray(imported) ? imported : [])
+      .map(item => finalizeImportedItem(item, existingById.get(item && item.id) || null));
   }
 
   /* ---------------------- 设置 ---------------------- */
@@ -1353,6 +1536,7 @@ const RECORD_CORE = (() => {
     marriageValue, marriageConflict, resolveMarriage,
     normalizeRecord, lookLikeRecord,
     uid, summarize, sortByUpdated, upsertRecord, removeRecord, findRecord, mergeListForWrite,
+    searchRecords, copyRecordAsNew,
     buildExport, parseImport, mergeImport, replaceImport,
     normalizeSettings,
     memoryStorage, safeSet, safeGetJSON,

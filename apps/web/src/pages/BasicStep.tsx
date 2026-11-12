@@ -45,26 +45,11 @@ export function BasicStep({ record, update, replaceRecord, errors, notify }: Ste
 
   return (
     <StepShell
-      eyebrow="第 1 / 11 步"
+      eyebrow="第 1 / 10 步"
       title="基本情况"
       description={STEP_DESCRIPTIONS.basic}
     >
-      <Card title="科室与起点">
-        <FormGrid>
-          <FieldRenderer
-            path="basic.department"
-            label="科室"
-            value={stringAt(record, 'basic.department')}
-            onChange={update}
-            kind="select"
-            options={SCHEMA.DEPARTMENTS.map((department) => ({
-              value: department.key,
-              label: department.name,
-            }))}
-            hint="选择科室后，查体步骤会显示对应专科项目。"
-            error={errors['basic.department']}
-          />
-        </FormGrid>
+      <Card title="模板起点（可选）">
         <Collapsible
           title={`用模板开始（可选，${templates.length} 个病种）`}
           defaultOpen={false}
@@ -143,14 +128,6 @@ export function BasicStep({ record, update, replaceRecord, errors, notify }: Ste
             error={errors['basic.gender']}
           />
           <FieldRenderer
-            path="basic.birthDate"
-            label="出生日期"
-            value={stringAt(record, 'basic.birthDate')}
-            onChange={update}
-            kind="date"
-            error={errors['basic.birthDate']}
-          />
-          <FieldRenderer
             path="basic.age"
             label="年龄"
             value={stringAt(record, 'basic.age')}
@@ -161,6 +138,18 @@ export function BasicStep({ record, update, replaceRecord, errors, notify }: Ste
             error={errors['basic.age']}
           />
           <FieldRenderer
+            path="basic.department"
+            label="科别"
+            value={stringAt(record, 'basic.department')}
+            onChange={update}
+            kind="select"
+            options={SCHEMA.DEPARTMENTS.map((department) => ({ value: department.key, label: department.name }))}
+            hint="选择科别后，查体步骤会显示对应专科项目。"
+            error={errors['basic.department']}
+          />
+          <FieldRenderer path="basic.bedNo" label="床号" value={stringAt(record, 'basic.bedNo')} onChange={update} error={errors['basic.bedNo']} />
+          <FieldRenderer path="basic.recordNo" label="住院号" value={stringAt(record, 'basic.recordNo')} onChange={update} error={errors['basic.recordNo']} />
+          <FieldRenderer
             path="basic.nationality"
             label="民族"
             value={stringAt(record, 'basic.nationality')}
@@ -168,6 +157,7 @@ export function BasicStep({ record, update, replaceRecord, errors, notify }: Ste
             placeholder="汉族"
             error={errors['basic.nationality']}
           />
+          <FieldRenderer path="basic.birthPlace" label="出生地" value={stringAt(record, 'basic.birthPlace')} onChange={update} error={errors['basic.birthPlace']} />
           <FieldRenderer
             path="basic.marital"
             label="婚姻"
@@ -184,38 +174,6 @@ export function BasicStep({ record, update, replaceRecord, errors, notify }: Ste
             onChange={update}
             placeholder="退休 / 农民 / 工人…"
             error={errors['basic.occupation']}
-          />
-          <FieldRenderer
-            path="basic.nativePlace"
-            label="籍贯"
-            value={stringAt(record, 'basic.nativePlace')}
-            onChange={update}
-            placeholder="浙江温州"
-            error={errors['basic.nativePlace']}
-          />
-          <FieldRenderer
-            path="basic.birthPlace"
-            label="出生地"
-            value={stringAt(record, 'basic.birthPlace')}
-            onChange={update}
-            placeholder="浙江温州"
-            error={errors['basic.birthPlace']}
-          />
-          <FieldRenderer
-            path="basic.recordNo"
-            label="病历号 / 住院号"
-            value={stringAt(record, 'basic.recordNo')}
-            onChange={update}
-            placeholder="如：01234567"
-            error={errors['basic.recordNo']}
-          />
-          <FieldRenderer
-            path="basic.bedNo"
-            label="床号"
-            value={stringAt(record, 'basic.bedNo')}
-            onChange={update}
-            placeholder="如：32 / 12-3"
-            error={errors['basic.bedNo']}
           />
           <FieldRenderer
             path="basic.admitDate"
@@ -267,8 +225,10 @@ export function BasicStep({ record, update, replaceRecord, errors, notify }: Ste
             error={errors['basic.reliability']}
           />
         </FormGrid>
-        <Collapsible title="工作单位和联系方式">
+        <Collapsible title="出生日期、籍贯、工作单位和联系方式（补充资料）">
           <FormGrid>
+            <FieldRenderer path="basic.birthDate" label="出生日期" value={stringAt(record, 'basic.birthDate')} onChange={update} kind="date" error={errors['basic.birthDate']} />
+            <FieldRenderer path="basic.nativePlace" label="籍贯" value={stringAt(record, 'basic.nativePlace')} onChange={update} error={errors['basic.nativePlace']} />
             <FieldRenderer
               path="basic.workUnit"
               label="工作单位"

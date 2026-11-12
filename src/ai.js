@@ -10,8 +10,8 @@ const AI_ASSIST = (() => {
   const $ = id => panel.querySelector('#' + id);
   function status(text) { if (panel) { $('aiStatus').textContent = text; $('aiStatus').focus(); } }
   function close(force = false) {
-    const hasDraft = panel && (($('aiNotes') && $('aiNotes').value.trim()) || ($('aiRecognizeText') && $('aiRecognizeText').value.trim()) || recognizeImage);
-    if (force !== true && panel && (pending || hasDraft) && !window.confirm('关闭会取消请求并清除本窗口的原始笔记和图片。已采纳到病历的内容会保留。确定关闭？')) return;
+    const hasDraft = panel && (($('aiRecognizeText') && $('aiRecognizeText').value.trim()) || recognizeImage || request);
+    if (force !== true && panel && (pending || hasDraft) && !window.confirm('关闭会取消请求并清除本页未发送的文字和图片；原始笔记已随病历保存在本机。已采纳到病历的内容会保留。确定关闭？')) return;
     if (pending) bridge().aiCancel(pending);
     clearTimeout(timer); pending = null; request = null; result = null; busy = false; processingImage = false; recognizeImage = null; organizeStep = 1; resultAdopted = false;
     if (panel) {
@@ -155,7 +155,7 @@ const AI_ASSIST = (() => {
     panel.innerHTML = `
       <div class="ai-heading"><div class="ai-heading-copy"><span class="ai-eyebrow">DEEPSEEK · 填写辅助</span><h1 id="aiTitle">AI 病历助手</h1></div><button id="aiClose" type="button" class="btn btn-ghost ai-close">关闭</button></div>
       <p class="ai-subtitle">整理、润色或识别资料，确认后才写入病历。</p>
-      <div class="ai-note" id="aiIntro"><span class="ai-note-icon" aria-hidden="true">i</span><p>只处理你选择的资料。结果须核对后采纳；未问、未查、不详不得当成正常。联网内容将发送至 DeepSeek。识别结果只填病史、生命体征、查体与系统回顾等白名单字段，不写诊断或处方。</p></div>
+      <div class="ai-note" id="aiIntro"><span class="ai-note-icon" aria-hidden="true">i</span><p>只处理你选择的资料。结果须核对后采纳；未问、未查、不详不得当成正常。联网内容将发送至 DeepSeek。识别结果只填病史、生命体征与查体等白名单字段，不写诊断或处方。</p></div>
       <button id="aiUnreviewed" type="button" class="btn ai-review-reminder" hidden></button>
       <details id="aiOnboarding" class="ai-onboarding">
         <summary>如何获取 DeepSeek API Key · API 设置</summary>
@@ -169,8 +169,8 @@ const AI_ASSIST = (() => {
       <div class="ai-field"><label for="aiOperation">需要什么帮助</label><select id="aiOperation">${Object.entries(AI_CORE.operations).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></div>
       <nav id="aiProgress" class="ai-progress" aria-label="整理填表进度"><ol>${['贴笔记', '预览确认', '建议对照', '已采纳/回表单'].map((label, i) => `<li><button type="button" data-ai-step="${i + 1}"><span aria-hidden="true">${i + 1}</span>${label}</button></li>`).join('')}</ol></nav>
       <div id="aiTargetWrap" class="ai-field" hidden><label for="aiTarget">选择要润色的段落</label><select id="aiTarget">${Object.entries(AI_CORE.fields).filter(([k]) => k !== 'summary').map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('')}</select></div>
-      <div id="aiNotesEmpty">${emptyState('从一段问诊笔记开始', '贴上原始笔记，AI 会大致填入病历，再由你逐项修改核对。', '粘贴笔记开始')}</div>
-      <div id="aiNotesWrap" class="ai-field"><label for="aiNotes">原始问诊笔记（仅在本页保留）</label><textarea id="aiNotes" rows="5" maxlength="16000" placeholder="如：患者诉咳嗽3天，昨晚加重，发热情况未问，既往有高血压，具体用药不详。"></textarea></div>
+      <div id="aiNotesEmpty">${emptyState('从一段问诊笔记开始', '贴上原始笔记，AI 会整理文字、数值和选择项，供你逐项核对采纳。', '粘贴笔记开始')}</div>
+      <div id="aiNotesWrap" class="ai-field"><label for="aiNotes">原始问诊笔记（随病历保存在本机）</label><textarea id="aiNotes" rows="5" maxlength="16000" placeholder="如：患者诉咳嗽3天，昨晚加重，发热情况未问，既往有高血压，具体用药不详。"></textarea><div class="ai-field-actions"><button id="aiReorganize" type="button" class="btn btn-ghost">重新整理</button><span class="hint">笔记会自动保存；完成后可随时回来修改并重新整理。</span></div></div>
       <div id="aiRecognizeWrap" hidden>
         <div class="ai-section-head"><strong>识别来源</strong><span>图片与文字可同时发送</span></div>
         <div class="ai-image-actions" role="group" aria-label="添加识别资料">
@@ -206,7 +206,7 @@ const AI_ASSIST = (() => {
       <div class="ai-status-wrap"><p id="aiStatus" role="status" aria-live="polite" tabindex="-1"></p><div id="aiLoading" class="ai-loading" role="status" aria-live="polite" hidden><div class="ai-loading-head"><span class="ai-spinner" aria-hidden="true"></span><div><strong>AI 正在整理资料</strong><span>请保持本页打开，生成期间不会写入病历。</span></div></div><div class="ai-skeleton" aria-hidden="true"><span></span><span></span><span></span></div></div></div>
       <button id="aiCancel" class="btn btn-ghost" hidden>取消请求</button>
       <div id="aiResult"></div><div id="aiReview" tabindex="-1"></div>
-      <button id="aiUndo" class="btn btn-ghost">撤销上一步可撤销操作</button>
+      <button id="aiUndo" class="btn btn-ghost">撤销本次 AI 采纳</button>
     `;
     document.body.classList.add('ai-view');
     document.body.appendChild(panel);
@@ -244,7 +244,13 @@ const AI_ASSIST = (() => {
       if (step === 2 && resultAdopted) { prepare(); return; }
       organizeStep = step; updateFlow();
     });
-    $('aiTarget').onchange = invalidate; $('aiNotes').oninput = invalidate;
+    $('aiNotes').value = String(APP.getRecord().rawNotes || '');
+    $('aiTarget').onchange = invalidate;
+    $('aiNotes').oninput = () => { APP.setRawNotes($('aiNotes').value); invalidate(); };
+    $('aiReorganize').onclick = () => {
+      if (busy || processingImage || !$('aiNotes').value.trim()) return;
+      prepare();
+    };
     $('aiRecognizeText').oninput = invalidate;
     $('aiCameraButton').onclick = () => $('aiCameraInput').click();
     $('aiGalleryButton').onclick = () => $('aiGalleryInput').click();
@@ -255,7 +261,7 @@ const AI_ASSIST = (() => {
     $('aiPrepare').onclick = prepare;
     $('aiSend').onclick = send;
     $('aiCancel').onclick = () => { if (pending) bridge().aiCancel(pending); pending = null; clearTimeout(timer); setBusy(false); status('已取消，病历未改动；可再次发送'); };
-    $('aiUndo').onclick = () => { if (!busy) { APP.undoAI(); invalidate(); pendingFields(); status('已请求撤销，请检查病历及保存状态'); } };
+    $('aiUndo').onclick = () => { if (!busy && APP.undoAI()) { invalidate(); pendingFields(); status('已处理撤销，请检查病历及保存状态'); } };
     renderRecognizeImage(); pendingFields(); refreshModel(); reminderOffset(); $('aiClose').focus();
   }
   function refreshModel() {
@@ -298,7 +304,7 @@ const AI_ASSIST = (() => {
   }
   function setBusy(value) {
     busy = value;
-    ['aiOperation', 'aiTarget', 'aiNotes', 'aiRecognizeText', 'aiPrepare', 'aiSend', 'aiSettings', 'aiRefreshSettings', 'aiUndo', 'aiCameraButton', 'aiGalleryButton', 'aiImageClear'].forEach(id => { if ($(id)) $(id).disabled = value || (id === 'aiPrepare' && processingImage); });
+    ['aiOperation', 'aiTarget', 'aiNotes', 'aiRecognizeText', 'aiPrepare', 'aiReorganize', 'aiSend', 'aiSettings', 'aiRefreshSettings', 'aiUndo', 'aiCameraButton', 'aiGalleryButton', 'aiImageClear'].forEach(id => { if ($(id)) $(id).disabled = value || (id === 'aiPrepare' && processingImage); });
     if (panel) {
       panel.setAttribute('aria-busy', value ? 'true' : 'false');
       if ($('aiLoading')) $('aiLoading').hidden = !value;
@@ -331,7 +337,7 @@ const AI_ASSIST = (() => {
       result = AI_CORE.validate(response.content, request); model = response.model || model;
       const r = APP.getRecord();
       const dropped = result.dropped || [];
-      const droppedHtml = dropped.length ? '<details class="ai-dropped"><summary>' + dropped.length + ' 条建议因格式问题未采用</summary><ul>' + dropped.map(d => '<li>' + (d.path ? esc(AI_CORE.labels[d.path] || d.path) + '：' : '') + esc(d.reason) + '</li>').join('') + '</ul></details>' : '';
+      const droppedHtml = dropped.length ? '<details class="ai-dropped"><summary>' + dropped.length + ' 条建议未通过核对，未采用</summary><ul>' + dropped.map(d => '<li>' + (d.path ? esc(AI_CORE.labels[d.path] || d.path) + '：' : '') + esc(d.reason) + '</li>').join('') + '</ul></details>' : '';
       $('aiResult').innerHTML = '<div class="ai-result-heading"><h3>建议对照 · 尚未写入</h3><span class="ai-badge">未核对</span></div><p class="hint">引用真实不代表建议一定正确。逐项检查否定词、时间、药名、剂量和来源。</p>' + result.suggestions.map((s, i) => {
         const original = AI_CORE.displayValue(s.path, RECORD_CORE.getPath(r, s.path)) || '';
         const kindLabel = s.kind === 'choice' ? '选择项 · 默认不勾选' : s.kind === 'number' ? '数值项 · 待核对' : '文本项 · 待核对';
@@ -342,7 +348,7 @@ const AI_ASSIST = (() => {
       bindEmptyActions($('aiResult'));
       if (result.suggestions.length) $('aiApply').onclick = apply;
       organizeStep = 3; updateFlow();
-      status('生成完成；请核对后勾选采纳。AI 检查不能证明病历正确或完整' + (dropped.length ? '；' + dropped.length + ' 条建议因格式问题未采用' : ''));
+      status('生成完成；请核对后勾选采纳。AI 检查不能证明病历正确或完整' + (dropped.length ? '；' + dropped.length + ' 条建议未通过核对，未采用' : ''));
     } catch (e) { result = null; status(e.message || '结果校验失败，未写入病历'); }
   }
   async function apply() {
@@ -358,7 +364,7 @@ const AI_ASSIST = (() => {
       $('aiApply').hidden = true;
       $('aiConsent').checked = false; $('aiSend').disabled = true;
       pendingFields();
-      status(applied.saved ? '已采纳 ' + applied.count + ' 项并保存到草稿，仍待逐项核对；可撤销上一步' : '已采纳到内存，但保存失败；请立即导出备份并处理主页面提示');
+      status(applied.saved ? '已采纳 ' + applied.count + ' 项并保存到草稿，仍待逐项核对；可撤销本次采纳' : '已采纳到内存，但保存失败；请立即导出备份并处理主页面提示');
     } catch (e) { if (!panel) return; if ($('aiApply')) $('aiApply').disabled = false; status(e.message); }
   }
   return {open, close, receive, isOpen: () => !!panel};

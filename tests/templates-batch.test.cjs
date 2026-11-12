@@ -544,9 +544,9 @@ test('模板不许把生命体征数字带进生成结果（模板只给文字�
   const bad = [];
   ALL.forEach(t => {
     const text = textOf(t.key);
-    const peIdx = text.indexOf('【体格检查】');
-    if (peIdx < 0) { bad.push(`${t.key}: 生成结果里没有【体格检查】`); return; }
-    const peSec = text.slice(peIdx + '【体格检查】'.length).split('\n【')[0];
+    const peIdx = text.indexOf('【体格检查（一）】');
+    if (peIdx < 0) { bad.push(`${t.key}: 生成结果里没有【体格检查（一）】`); return; }
+    const peSec = text.slice(peIdx + '【体格检查（一）】'.length).split('\n【')[0];
     const first = linesOf(peSec)[0] || '';
     // 生命体征行允许保留 schema 的空位符「／」，但不许出现阿拉伯数字
     if (/[0-9]/.test(first)) bad.push(`${t.key}: 生命体征行出现数字「${first.trim().slice(0, 40)}」`);

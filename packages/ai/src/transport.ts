@@ -40,12 +40,12 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-/** Recognise requests get a larger completion budget; older callers only carry operation in user JSON. */
+/** Structured suggestions need a larger completion budget, including older callers with only user JSON. */
 function isRecognizeTransportRequest(request: AiTransportRequest): boolean {
-  if (request.operation === 'recognize') return true;
+  if (request.operation === 'recognize' || request.operation === 'organize') return true;
   try {
     const payload = JSON.parse(request.user);
-    return isObject(payload) && payload.operation === AI_OPERATIONS.recognize;
+    return isObject(payload) && (payload.operation === AI_OPERATIONS.recognize || payload.operation === AI_OPERATIONS.organize);
   } catch {
     return false;
   }

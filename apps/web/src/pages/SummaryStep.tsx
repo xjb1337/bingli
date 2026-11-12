@@ -72,7 +72,7 @@ export function SummaryStep({ record, update, errors, onJump }: StepComponentPro
 
   return (
     <StepShell
-      eyebrow="第 10 / 11 步"
+      eyebrow="第 9 / 10 步"
       title="摘要与诊断"
       description={STEP_DESCRIPTIONS.summary}
     >

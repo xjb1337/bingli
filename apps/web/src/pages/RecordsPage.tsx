@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { RECORD_CORE, SCHEMA, type RecordListItem } from '@dabingli/domain';
 import type { RecoveryCopySummary } from '@dabingli/storage';
 import { DataTransferPanel } from '../components/DataTransferPanel';
@@ -9,27 +9,40 @@ export function RecordsPage({
   activeId,
   exportText,
   recovery,
+  includeNotes,
   onNew,
   onOpen,
+  onCopy,
   onDelete,
   onImport,
   onDownload,
+  onIncludeNotesChange,
   onRestoreRecovery,
 }: {
   list: readonly RecordListItem[];
   activeId?: string;
   exportText: string;
   recovery?: RecoveryCopySummary | null;
+  includeNotes: boolean;
   onNew: () => void;
   onOpen: (record: RecordListItem) => void;
+  onCopy: (record: RecordListItem) => void;
   onDelete: (record: RecordListItem) => void;
   onImport: (raw: string, mode: 'merge' | 'replace') => void;
-  onDownload: (scope: 'current' | 'all') => void;
+  onDownload: (scope: 'current' | 'all', options?: { includeNotes?: boolean }) => void;
+  onIncludeNotesChange: (value: boolean) => void;
   onRestoreRecovery?: () => void;
 }) {
+  const [query, setQuery] = useState('');
+  const departmentNames = useMemo(
+    () => new Map(SCHEMA.DEPARTMENTS.map((item) => [item.key, item.name])),
+    [],
+  );
   const summaries = useMemo(() => {
-    const departmentNames = new Map(SCHEMA.DEPARTMENTS.map((item) => [item.key, item.name]));
-    return RECORD_CORE.sortByUpdated([...list]).map((item) => {
+    const matched = RECORD_CORE.searchRecords([...list], query, {
+      departmentName: (key) => departmentNames.get(key) ?? key,
+    });
+    return RECORD_CORE.sortByUpdated(matched).map((item) => {
       const summary = RECORD_CORE.summarize(item);
       return {
         item,
@@ -37,20 +50,38 @@ export function RecordsPage({
         departmentName: departmentNames.get(summary.department) ?? summary.department ?? '未选科室',
       };
     });
-  }, [list]);
+  }, [departmentNames, list, query]);
+  const searchTerm = query.trim();
+  const countLabel = searchTerm ? `${summaries.length}/${list.length}` : String(list.length);
 
   return (
     <section className="workspace-page" aria-labelledby="records-heading">
       <header className="page-header">
         <div>
           <div className="eyebrow">本机病历</div>
-          <h2 id="records-heading">病历列表</h2>
+          <div className="records-heading-row">
+            <h2 id="records-heading">病历列表</h2>
+            <span className="record-count" role="status" aria-label={`病历数量：${countLabel}`}>
+              {countLabel}
+            </span>
+          </div>
           <p>病历保存在本机 IndexedDB；旧 localStorage 只在首次启动时只读迁移，原数据不会删除。</p>
         </div>
         <button type="button" className="button primary" onClick={onNew}>
           + 新建病历
         </button>
       </header>
+
+      <label className="record-search">
+        <span>搜索病历</span>
+        <input
+          type="search"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="姓名、主诉、科室、诊断，支持部分匹配"
+          autoComplete="off"
+        />
+      </label>
 
       <div className="record-grid">
         {summaries.length ? (
@@ -74,9 +105,18 @@ export function RecordsPage({
                 </button>
                 <button
                   type="button"
+                  className="button ghost"
+                  onClick={() => {
+                    if (window.confirm('复制为新病历？将保留科室和病种相关结构，清空身份信息、生命体征数值、日期和号码，且不复制原始笔记。')) onCopy(item);
+                  }}
+                >
+                  复制为新病历
+                </button>
+                <button
+                  type="button"
                   className="button ghost danger"
                   onClick={() => {
-                    if (window.confirm(`删除“${summary.name}”及其草稿吗？`)) onDelete(item);
+                    if (window.confirm(`删除“${summary.name}”及其草稿（含原始笔记）吗？`)) onDelete(item);
                   }}
                 >
                   删除
@@ -84,6 +124,11 @@ export function RecordsPage({
               </div>
             </article>
           ))
+        ) : query.trim() ? (
+          <div className="empty-state empty-state--records">
+            <h3>没有匹配的病历</h3>
+            <p>未找到“{query.trim()}”。可换用姓名、主诉、科室或诊断的部分文字。</p>
+          </div>
         ) : (
           <div className="empty-state empty-state--records">
             <span className="empty-state-icon" aria-hidden="true">
@@ -104,6 +149,8 @@ export function RecordsPage({
         <DataTransferPanel
           exportText={exportText}
           recovery={recovery}
+          includeNotes={includeNotes}
+          onIncludeNotesChange={onIncludeNotesChange}
           onImport={onImport}
           onDownload={onDownload}
           onRestoreRecovery={onRestoreRecovery}

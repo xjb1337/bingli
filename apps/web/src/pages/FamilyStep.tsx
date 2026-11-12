@@ -8,7 +8,7 @@ import { STEP_DESCRIPTIONS } from '../steps';
 export function FamilyStep({ record, update, errors }: StepComponentProps) {
   return (
     <StepShell
-      eyebrow="第 6 / 11 步"
+      eyebrow="第 6 / 10 步"
       title="家族史"
       description={STEP_DESCRIPTIONS.family}
     >

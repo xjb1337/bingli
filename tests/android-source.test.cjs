@@ -66,3 +66,31 @@ test('P1-11 bridge returns busy and invalid_input codes without falling back to 
   assert.match(mapper,/JSONException/);
   assert.match(mapper,/invalid_input/);
 });
+
+test('3.2 share uses ACTION_SEND with a private FileProvider txt and print uses an offscreen WebView',()=>{
+  const source=readMain();
+  const share=source.slice(source.indexOf('public void share(String text'),source.indexOf('public void printDocument(String html'));
+  assert.match(share,/new Intent\(Intent\.ACTION_SEND\)/);
+  assert.match(share,/setType\("text\/plain"\)/);
+  assert.match(share,/Intent\.EXTRA_TEXT/);
+  assert.match(share,/Intent\.EXTRA_STREAM/);
+  assert.match(share,/FileProvider\.getUriForFile/);
+  assert.match(share,/FLAG_GRANT_READ_URI_PERMISSION/);
+  assert.match(share,/Intent\.createChooser/);
+  assert.match(share,/clearShareCache\(\)/);
+
+  const print=source.slice(source.indexOf('public void printDocument(String html'));
+  assert.match(print,/new WebView\(MainActivity\.this\)/);
+  assert.match(print,/loadDataWithBaseURL\(ORIGIN/);
+  assert.match(print,/createPrintDocumentAdapter\(documentTitle\)/);
+  assert.match(print,/PrintManager/);
+  assert.match(print,/PrintAttributes\.Builder/);
+  assert.match(print,/boolean\[\]\s+printStarted\s*=\s*\{\s*false\s*\}/);
+  assert.match(print,/if \(printWeb != loaded \|\| printStarted\[0\]\) return;/);
+  assert.match(print,/printStarted\[0\] = true;/);
+  assert.match(source,/private void destroyPrintWeb\(\)/);
+  assert.match(source,/onDestroy\(\)\s*\{[^}]*destroyPrintWeb\(\)/s);
+  assert.match(source,/onCreate\([^}]*clearShareCache\(\)/s);
+  const paths=fs.readFileSync(path.join(mainRoot,'res/xml/file_paths.xml'),'utf8');
+  assert.match(paths,/cache-path name="share" path="share\/"/);
+});

@@ -4,14 +4,18 @@ import type { RecoveryCopySummary } from '@dabingli/storage';
 export interface DataTransferPanelProps {
   exportText: string;
   recovery?: RecoveryCopySummary | null;
+  includeNotes: boolean;
+  onIncludeNotesChange: (value: boolean) => void;
   onImport: (raw: string, mode: 'merge' | 'replace') => void;
-  onDownload: (scope: 'current' | 'all') => void;
+  onDownload: (scope: 'current' | 'all', options?: { includeNotes?: boolean }) => void;
   onRestoreRecovery?: () => void;
 }
 
 export function DataTransferPanel({
   exportText,
   recovery,
+  includeNotes,
+  onIncludeNotesChange,
   onImport,
   onDownload,
   onRestoreRecovery,
@@ -23,16 +27,24 @@ export function DataTransferPanel({
   return (
     <div className="data-transfer">
       <div className="button-row">
-        <button type="button" className="button secondary" onClick={() => onDownload('all')}>
+        <button type="button" className="button secondary" onClick={() => onDownload('all', { includeNotes })}>
           下载全部 JSON
         </button>
-        <button type="button" className="button ghost" onClick={() => onDownload('current')}>
+        <button type="button" className="button ghost" onClick={() => onDownload('current', { includeNotes })}>
           下载当前病历
         </button>
         <button type="button" className="button ghost" onClick={() => setShowExport((value) => !value)}>
           {showExport ? '隐藏 JSON 预览' : '查看导出 JSON'}
         </button>
       </div>
+      <label className="export-notes-option">
+        <input
+          type="checkbox"
+          checked={includeNotes}
+          onChange={(event) => onIncludeNotesChange(event.target.checked)}
+        />
+        <span>备份中包含原始笔记（默认关闭；笔记可能含患者信息）</span>
+      </label>
       <div className="import-row">
         <label>
           <span>导入方式</span>

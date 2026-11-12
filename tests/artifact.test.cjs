@@ -192,9 +192,10 @@ test('产物体积在合理范围（手机加载要快）', () => {
   assert.ok(rawKb < 1600, `产物原始体积 ${rawKb.toFixed(1)}KB 偏大，先检查是否模块被重复内联`);
   assert.ok(rawKb > 50, `产物 ${rawKb.toFixed(1)}KB 异常偏小，可能内容缺失`);
 
-  // 压缩体积：限制 APK 内置资源体积。留 400KB 余量，
-  // 够再加 20 份模板而不必回来改这个数字。
-  assert.ok(gzipKb < 400, `产物 gzip 后 ${gzipKb.toFixed(1)}KB，手机上首次打开会明显变慢`);
+  // 压缩体积：限制 APK 内置资源体积。v3.1 基线 gzip 已接近 400KB，
+  // v3.2 的原始笔记、列表搜索/复制、分享与打印再增加约 4KB，
+  // 因此把上限留到 410KB；超过仍说明有异常膨胀。
+  assert.ok(gzipKb < 410, `产物 gzip 后 ${gzipKb.toFixed(1)}KB，手机上首次打开会明显变慢`);
 });
 
 // Product boundary: building an APK must not revive the retired website.

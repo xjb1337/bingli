@@ -13,7 +13,7 @@ export function MarriageStep({ record, update, errors }: StepComponentProps) {
 
   return (
     <StepShell
-      eyebrow="第 5 / 11 步"
+      eyebrow="第 5 / 10 步"
       title="婚姻与生育史"
       description={STEP_DESCRIPTIONS.marriage}
     >

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { RECORD_CORE, type DabingliRecord, type RecordListItem } from '@dabingli/domain';
+import { RECORD_CORE, SCHEMA, type DabingliRecord, type RecordListItem } from '@dabingli/domain';
 import {
   createIndexedDbRepository,
   type IndexedDbRecordRepository,
@@ -9,6 +9,7 @@ import { databaseName, memoryStorage, removeDatabase, type MemoryStorage } from 
 import v1Record from '../../../tests/fixtures/legacy/v1-record.json';
 import v2Record from '../../../tests/fixtures/legacy/v2-record.json';
 import v3Record from '../../../tests/fixtures/legacy/v3-record.json';
+import mergedRecord from '../../../tests/fixtures/template-alignment/legacy-v2-merged.json';
 
 const FIXED_NOW = '2026-11-01T13:00:00.000Z';
 const repositories: IndexedDbRecordRepository[] = [];
@@ -65,6 +66,29 @@ afterEach(async () => {
 });
 
 describe('browser legacy localStorage migration', () => {
+  it('retains raw ROS and merged history across IndexedDB migration, backup and reopening', async () => {
+    const storage = memoryStorage();
+    const keys = RECORD_CORE.STORAGE_KEYS;
+    storage.setItem(keys.list, JSON.stringify([{ id: mergedRecord.id, data: mergedRecord }]));
+    storage.setItem(keys.current, JSON.stringify({ id: mergedRecord.id, at: FIXED_NOW }));
+    const before = storage.snapshot();
+    const name = nextDatabaseName('hospital-legacy');
+    const repository = makeRepository(name, storage);
+    expect((await repository.initialize()).ok).toBe(true);
+    const migrated = (await repository.loadCurrent(mergedRecord.id)).record;
+    expect(migrated?.ros).toEqual(mergedRecord.ros);
+    expect(migrated?.pmh.diseaseDetail).toBe(mergedRecord.pmh);
+    expect(migrated?.auxiliary.items).toHaveLength(4);
+    const bundle = await repository.exportBackup('all');
+    const imported = RECORD_CORE.parseImport(JSON.stringify(bundle), SCHEMA.emptyRecord, SCHEMA.DEPARTMENTS.map(item => item.key));
+    expect(imported.records[0]?.data.ros).toEqual(mergedRecord.ros);
+    expect(imported.records[0]?.data.auxiliary.items).toEqual(migrated?.auxiliary.items);
+    await repository.close();
+    const reopened = makeRepository(name, storage);
+    expect((await reopened.initialize()).ok).toBe(true);
+    expect((await reopened.loadCurrent(mergedRecord.id)).record?.ros).toEqual(mergedRecord.ros);
+    expect(storage.snapshot()).toEqual(before);
+  });
   it('migrates v1/v2/v3 fixtures, preserves unknown fields, and leaves localStorage untouched', async () => {
     const storage = memoryStorage();
     seedLegacy(storage);

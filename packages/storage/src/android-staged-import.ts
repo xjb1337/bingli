@@ -88,7 +88,7 @@ export async function importStagedLegacy(
   for (const record of snapshot.drafts) if (record.id && !byId.has(record.id)) byId.set(record.id, RECORD_CORE.cloneValue(record));
   const records = [...byId.values()];
   const list = records.map((record) => itemFor(record, now));
-  const bundle = createBackupBundle(list, null, now);
+  const bundle = createBackupBundle(list, null, now, { includeNotes: true });
   // importBackup is transactional for IndexedDbRecordRepository and keeps its recovery semantics.
   await repo.importBackup(serializeBackup(bundle), 'replace');
   if (snapshot.currentId) {
@@ -112,7 +112,7 @@ export async function importStagedLegacy(
       diagnosis: JSON.stringify(before.diagnosis) === JSON.stringify(after.diagnosis),
     };
   });
-  const actualBundle = await repo.exportBackup('all');
+  const actualBundle = await repo.exportBackup('all', { includeNotes: true });
   // Repository writes refresh timestamps/revisions when restoring the current draft;
   // compare the exported document content while ignoring those generated fields.
   const stripVolatile = (value: unknown): unknown => {

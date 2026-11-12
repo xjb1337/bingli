@@ -21,7 +21,7 @@ export function PmhStep({ record, update, errors }: StepComponentProps) {
 
   return (
     <StepShell
-      eyebrow="第 3 / 11 步"
+      eyebrow="第 3 / 10 步"
       title="既往史"
       description={STEP_DESCRIPTIONS.pmh}
     >
@@ -59,7 +59,7 @@ export function PmhStep({ record, update, errors }: StepComponentProps) {
             onChange={update}
             kind="textarea"
             rows={3}
-            placeholder="病程、治疗和控制情况"
+            placeholder="如：否认“高血压、糖尿病、肾病、心脏病、肝病、脑血管病、肺病”等病史；如有疾病请写病程及诊治情况"
             hint="填写后直接采用这段文字，不再重复拼勾选疾病。"
             error={errors['pmh.diseaseDetail']}
           />
@@ -104,7 +104,7 @@ export function PmhStep({ record, update, errors }: StepComponentProps) {
             onChange={update}
             kind="textarea"
             rows={2}
-            placeholder="如：2015年阑尾切除术"
+            placeholder="如：否认手术史；有手术请写时间及名称"
             error={errors['pmh.surgery']}
           />
           <FieldRenderer
@@ -141,6 +141,7 @@ export function PmhStep({ record, update, errors }: StepComponentProps) {
             onChange={update}
             kind="textarea"
             rows={2}
+            placeholder="如：预防接种史不详"
             error={errors['pmh.vaccine']}
           />
           <FieldRenderer

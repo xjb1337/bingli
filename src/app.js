@@ -25,7 +25,7 @@ const APP = (() => {
 
   /** 浏览器构建的回退版本；Android 运行时优先读取原生 BuildConfig.VERSION_NAME。 */
   // 与当前 Android 发布线保持一致；原生桥接存在时以 BuildConfig.VERSION_NAME 为准。
-  const APP_VERSION = '3.0.0.8';
+  const APP_VERSION = '3.2.0';
 
   function appVersion() {
     try {
@@ -48,10 +48,13 @@ const APP = (() => {
   let storageAlert = '';
   /** 其他标签页写了更新版本时的冲突状态；有值时禁止本页覆盖 */
   let remoteConflict = null;
+  // 记录当前页面已接受的导入版本，防止其他页面继续保存导入前的内存内容。
+  let activeImportGuard = '';
   /** 本页会话 ID，用于区分「自己的写入」和「其他页面的写入」 */
   const SESSION_ID = 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   /** 撤销栈：只在本机内存里，刷新即失效 */
   const HISTORY = CORE.createHistory(20);
+  let lastAiUndo = null;
   /** 界面层临时展示的生命体征示例值（绝不写入病历） */
   let vitalsExample = null;
 
@@ -62,18 +65,16 @@ const APP = (() => {
    * 步骤清单。
    *
    * 步骤顺序 == 病历章节顺序（见 GENERATOR.SECTION_ORDER），不是两套。
-   * 本顺序由用户明确指定：系统回顾紧接在体格检查之后，不沿用教材的默认章序。
    */
   const STEPS = [
     { key: 'basic', name: '基本情况' },
     { key: 'hpi', name: '现病史' },
     { key: 'pmh', name: '既往史' },
     { key: 'personal', name: '个人史' },
-    { key: 'marriage', name: '婚姻与生育史' },
-    { key: 'family', name: '家庭史' },
-    { key: 'pe', name: '体格检查' },
-    { key: 'ros', name: '系统回顾' },
-    { key: 'aux', name: '辅助检查' },
+    { key: 'marriage', name: '婚育史' },
+    { key: 'family', name: '家族史' },
+    { key: 'pe', name: '体格检查（一）/（二）' },
+    { key: 'aux', name: '实验室 / 特殊检查' },
     { key: 'summary', name: '摘要与诊断' },
     { key: 'output', name: '生成病历' }
   ];
@@ -294,10 +295,36 @@ const APP = (() => {
     return run;
   }
 
+  // 导入和删除必须在列表锁内重新读取、计算并写入，不能提前修改 LIST。
+  function listTransaction(task) {
+    if (!lockAvailable()) return task();
+    const run = listQueue.then(() => withStorageLock('list', task)).catch(() => false);
+    listQueue = run.then(() => {}, () => {});
+    return run;
+  }
+
   /** 普通保存入口：排队写入，不阻塞界面 */
   function saveList(opts = {}) {
     const result = saveListAwait(opts);
     return result && typeof result.then === 'function' ? true : result;
+  }
+
+  function importGuardFor(id) {
+    const loaded = REPO.loadList();
+    const item = loaded.ok && CORE.findRecord(loaded.list, id);
+    return item && item.__importGuard && item.__importGuard.token || '';
+  }
+
+  function detectImportedConflict(item) {
+    const guard = item && item.__importGuard;
+    if (!R || !item || item.id !== R.id || !guard || !guard.token || guard.token === activeImportGuard) return false;
+    const remote = CORE.cloneValue(item.data || item);
+    remote.id = item.id;
+    remote.meta = remote.meta || {};
+    remote.meta.revision = Math.max(Number(remote.meta.revision) || 0, Number(guard.revision) || 0);
+    remoteConflict = { remote, remoteRevision: remote.meta.revision, importToken: guard.token };
+    storageAlert = '其他页面导入了这份病历的新版本。为避免覆盖，本页已暂停保存；请载入新版本或保留当前内容为副本。';
+    return true;
   }
 
   function saveCurrentNow() {
@@ -308,6 +335,14 @@ const APP = (() => {
       return false;
     }
     if (!R) return false;
+    // 导入列表已经落盘但清除旧草稿中断时，绝不能让旧草稿重新覆盖导入版本。
+    const storedList = REPO.loadList();
+    const listed = storedList.ok && CORE.findRecord(storedList.list, R.id);
+    if (detectImportedConflict(listed)) return false;
+    if (listed && supersededDraft(listed) && !removeSupersededDraft(listed)) {
+      storageAlert = '导入后的旧草稿无法清除，已暂停保存。请先导出病历并检查本机存储。';
+      return false;
+    }
     if (remoteConflict) {
       // 其他标签页已有更新版本：在用户选择「载入新版本 / 保留为副本」前不写
       return false;
@@ -398,6 +433,8 @@ const APP = (() => {
     if (!lockAvailable()) return saveCurrentNow();
     const run = saveQueue.then(() =>
       withStorageLock('record:' + id, previousRevision => {
+        const loaded = REPO.loadList();
+        if (loaded.ok && detectImportedConflict(CORE.findRecord(loaded.list, id))) return false;
         if (previousRevision > (Number(R.meta && R.meta.revision) || 0)) {
           remoteConflict = { remote: null, remoteRevision: previousRevision };
           storageAlert = '其他页面已保存了这份病历的更新版本（修订号 '
@@ -504,6 +541,15 @@ const APP = (() => {
   function saveSettings() {
     REPO.saveSettings(settings);
     applyFontScale();
+  }
+
+  /** AI 页原始笔记随当前病历保存；输入走短防抖，生命周期事件立即落盘。 */
+  function setRawNotes(value) {
+    if (!R) return false;
+    const next = String(value == null ? '' : value).slice(0, 16000);
+    if (String(R.rawNotes || '') === next) return true;
+    R.rawNotes = next;
+    return scheduleCurrentSave();
   }
 
   function applyFontScale() {
@@ -734,35 +780,23 @@ const APP = (() => {
     return `
       <div class="card">
         <div class="card-title">基本情况</div>
-        ${select('科室', 'basic.department', deptGroups(), {
-          hint: '选择科室后，体格检查会自动追加该科室的专科查体项目。'
-        })}
         ${renderTemplates()}
         <div class="section-title">一般项目</div>
         ${input('姓名', 'basic.name', { placeholder: '如：张三' })}
         ${seg('性别', 'basic.gender', SCHEMA.GENDERS)}
-        <div class="row2">${input('出生日期', 'basic.birthDate', { type: 'date' })}
         ${input('年龄', 'basic.age', {
           placeholder: '58 或 7月 / 3天',
           hint: '成人填数字；婴儿可填「7月」或「3天」。'
-        })}</div>
+        })}
+        ${select('科别', 'basic.department', deptGroups(), {
+          hint: '选择科别后，体格检查会自动追加该科室的专科查体项目。'
+        })}
+        ${input('床号', 'basic.bedNo', { placeholder: '如：32 / 12-3' })}
+        ${input('住院号', 'basic.recordNo', { placeholder: '如：01234567' })}
         ${input('民族', 'basic.nationality', { placeholder: '汉族', hint: '不填则病历里写「／」。' })}
+        ${input('出生地', 'basic.birthPlace', { placeholder: '按实际出生地填写' })}
         ${seg('婚姻', 'basic.marital', SCHEMA.MARITAL)}
         ${input('职业', 'basic.occupation', { placeholder: '退休 / 农民 / 工人…' })}
-        <div class="row2">${input('籍贯', 'basic.nativePlace', { placeholder: '浙江温州' })}
-          ${input('出生地', 'basic.birthPlace', { placeholder: '浙江温州' })}</div>
-        <details class="optional-details"${hasContact ? ' open' : ''}>
-          <summary>工作单位和联系方式</summary>
-          ${input('工作单位', 'basic.workUnit', { placeholder: '无 / ××公司' })}
-          ${input('通讯地址', 'basic.address', { placeholder: '通讯地址' })}
-          ${input('电话号码', 'basic.phone', { placeholder: '联系电话' })}
-        </details>
-        <div class="row2">${input('病历号 / 住院号', 'basic.recordNo', {
-          placeholder: '如：01234567',
-        })}
-        ${input('床号', 'basic.bedNo', {
-          placeholder: '如：32 / 12-3'
-        })}</div>
         <div class="row2">${input('入院日期', 'basic.admitDate', { type: 'date' })}
           ${input('入院时间', 'basic.admitTime', { type: 'time' })}</div>
         <div class="row2">${input('记录日期', 'basic.recordDate', { type: 'date' })}
@@ -778,6 +812,14 @@ const APP = (() => {
           empty: '未评估',
           hint: '不选＝没评估，病历里写「／」。'
         })}
+        <details class="optional-details"${hasContact || b.birthDate || b.nativePlace ? ' open' : ''}>
+          <summary>出生日期、籍贯、工作单位和联系方式（补充资料）</summary>
+          ${input('出生日期', 'basic.birthDate', { type: 'date' })}
+          ${input('籍贯', 'basic.nativePlace', { placeholder: '按实际籍贯填写' })}
+          ${input('工作单位', 'basic.workUnit', { placeholder: '无 / ××公司' })}
+          ${input('通讯地址', 'basic.address', { placeholder: '通讯地址' })}
+          ${input('电话号码', 'basic.phone', { placeholder: '联系电话' })}
+        </details>
         <div class="section-title">主诉 <span class="tag-req">必填</span></div>
         ${textarea('主诉症状', 'basic.chiefComplaint', {
           rows: 2,
@@ -820,7 +862,7 @@ const APP = (() => {
           rows: 3,
           placeholder: '如：自服布洛芬后体温可暂时下降，未到医院就诊'
         })}
-        ${textarea('一般情况（精神、食欲、睡眠、大小便、体重）', 'hpi.generalCondition', {
+        ${textarea('一般情况（神志、精神、饮食、睡眠、大小便、体重）', 'hpi.generalCondition', {
           rows: 2,
           placeholder: '如：发病以来精神、食欲、睡眠可，大小便正常，体重无明显变化',
           hint: '留空时不会自动填入正常情况。'
@@ -983,7 +1025,7 @@ const APP = (() => {
         ${input('其他疾病', 'pmh.diseaseOther', { placeholder: '补充未列出的疾病' })}
         ${textarea('疾病详情（病程、治疗、控制情况）', 'pmh.diseaseDetail', {
           rows: 3,
-          placeholder: '如：高血压病史 5 年，长期口服氨氯地平 5mg qd，血压控制在 130/80mmHg 左右',
+          placeholder: '如：否认“高血压、糖尿病、肾病、心脏病、肝病、脑血管病、肺病”等病史；如有疾病请写病程及诊治情况',
           hint: '填写此项后会直接采用这里的文字，替代上面的勾选描述。'
         })}
         ${textarea('长期用药史', 'pmh.longTermMeds', {
@@ -1000,11 +1042,11 @@ const APP = (() => {
         ${textarea('传染病史', 'pmh.infection', {
           rows: 2, placeholder: '如：否认肝炎、结核等传染病史'
         })}
-        ${textarea('手术史', 'pmh.surgery', { rows: 2, placeholder: '如：2015年阑尾切除术' })}
+        ${textarea('手术史', 'pmh.surgery', { rows: 2, placeholder: '如：否认手术史；有手术请写时间及名称' })}
         ${textarea('外伤史', 'pmh.trauma', { rows: 2, placeholder: '如：否认外伤史' })}
         ${textarea('输血史', 'pmh.transfusion', { rows: 2, placeholder: '如：否认输血史' })}
         ${textarea('中毒史', 'pmh.poisoning', { rows: 2, placeholder: '如：否认中毒史' })}
-        ${textarea('预防接种史', 'pmh.vaccine', { rows: 2, placeholder: '如：按计划预防接种' })}
+        ${textarea('预防接种史', 'pmh.vaccine', { rows: 2, placeholder: '如：预防接种史不详' })}
         ${textarea('与本病相关病史', 'pmh.relatedHistory', {
           rows: 2,
           placeholder: '如：既往有类似发作史（3年前同样出现右下腹痛，保守治疗好转）',
@@ -1281,7 +1323,7 @@ const APP = (() => {
 
     let html = `
       <div class="card sticky-note">
-        <div><strong>体格检查</strong></div>
+        <div><strong>体格检查（一）</strong></div>
         <div class="hint">
           <b>勾了才算查过。</b>没勾的项目＝本次没做，病历里不会出现，也不会替你写「正常」。
           常规查体项目，可以用每张卡片里的「全选」，或点「常用描述」直接选一句（会自动勾上）。
@@ -1337,6 +1379,7 @@ const APP = (() => {
       });
     });
 
+    html += '<div class="card"><div class="card-title">体格检查（二）：补充及专科情况</div></div>';
     // 专科查体
     (dept.special || []).forEach(spKey => {
       const sp = SCHEMA.PE_SPECIAL[spKey];
@@ -1521,6 +1564,9 @@ const APP = (() => {
     const items = (R.auxiliary && R.auxiliary.items) || [{ name: '', result: '' }];
     const rows = items.map((it, i) => `
       <div class="aux-item">
+        <label class="field">检查分类<select data-aux="category" data-field-path="auxiliary.items.${i}.category" data-idx="${i}" aria-label="检查 ${i + 1} 分类">
+          ${[['', '自动分类（无法判断归实验室）'], ['lab', '实验室检查'], ['special', '特殊检查（影像 / 心电图等）'], ['pathology', '病理检查（归特殊检查）']].map(([value, label]) => `<option value="${value}" ${it.category === value ? 'selected' : ''}>${label}</option>`).join('')}
+        </select></label>
         <div class="aux-row">
           <input type="text" data-aux="name" data-field-path="auxiliary.items.${i}.name" data-idx="${i}" value="${esc(it.name || '')}"
             placeholder="检查项目，如：血常规">
@@ -1540,8 +1586,8 @@ const APP = (() => {
     `).join('');
     return `
       <div class="card">
-        <div class="card-title">辅助检查</div>
-        <div class="hint">填写本次就诊已有的检查结果；没有就留空，生成时这一节写「暂缺」。填了日期会按时间先后排列，在外院做的检查请写明机构名称与检查号。</div>
+        <div class="card-title">实验室检查 / 特殊检查</div>
+        <div class="hint">填写已有检查结果并核对分类；没有就留空，两节分别写「暂缺」。未指定分类的旧条目按项目名自动区分，不确定时归实验室；病理检查归特殊检查。填了日期会按时间先后排列，外院检查请写明机构与检查号。</div>
         <div id="auxList">${rows}</div>
         <button class="btn btn-ghost" data-act="addAux">+ 添加一项</button>
       </div>
@@ -2107,6 +2153,8 @@ const APP = (() => {
         <div class="btn-row">
           <button class="btn" data-act="copyText">复制本篇</button>
           <button class="btn btn-ghost" data-act="downloadTxt">下载 .txt</button>
+          <button class="btn btn-ghost" data-act="shareText">分享</button>
+          <button class="btn btn-ghost" data-act="printText">打印 / 存 PDF</button>
           ${OUT_VIEW === 'record'
             ? '<button class="btn btn-ghost" data-act="copySection">复制某段</button>'
             : ''}
@@ -2259,7 +2307,7 @@ const APP = (() => {
     if (OUT_VIEW === 'discharge') {
       return '出院记录包括入院情况、诊疗经过、出院情况、出院诊断和出院医嘱；出院诊断需要单独填写并确认，不会自动沿用初步诊断。';
     }
-    return '大病历 = 一般项目 → 主诉 → 现病史 → 既往史 → 个人史 → 婚姻史 → 月经与生育史 → 家庭史 → 体格检查 → 系统回顾 → 辅助检查 → 摘要 → 诊断依据 → 初步诊断。';
+    return '入院记录 = 一般项目 → 主诉 → 现病史 → 既往史 → 个人史 → 婚育史 → 家族史 → 体格检查（一） → 体格检查（二）：补充及专科情况 → 实验室检查 → 特殊检查 → 初步诊断。';
   }
 
   /** 取某个生成视图的纯文本（始终按当前 record 现算，不用旧缓存） */
@@ -2656,12 +2704,6 @@ const APP = (() => {
               <button type="button" class="btn btn-ghost btn-mini" data-setting-font="up" aria-label="增大字号">A＋</button>
             </div>
           </div>
-          <div class="settings-row settings-row-stack">
-            ${settingsSeg('系统回顾详略', settings.rosMode, [
-              { value: 'detail', text: '逐系统写出' },
-              { value: 'brief', text: '只写阳性' }
-            ], '只影响生成病历时的系统回顾段落；未问过的项目仍不会被自动写成阴性。')}
-          </div>
           <div class="settings-note">主题颜色跟随设备的浅色 / 深色模式。</div>
         </section>
 
@@ -2672,6 +2714,7 @@ const APP = (() => {
             <button type="button" class="btn btn-ghost" data-settings-action="exportBackup">导出全部备份</button>
             <button type="button" class="btn btn-ghost" data-settings-action="exportCurrentBackup">导出当前病历</button>
           </div>
+          <label class="settings-note"><input type="checkbox" id="settingsExportNotes"> 备份中包含原始笔记（默认关闭；笔记可能含患者信息）</label>
           <div class="settings-note settings-note-warn">病历保存在本机浏览器存储中，备份文件未加密。更换设备或清理数据前，请先导出并妥善保管备份。</div>
         </section>
 
@@ -2984,7 +3027,7 @@ const APP = (() => {
         // 查体项：只刷新这一个条目的「已填 / 系统默认 / 需填」标记，
         // 不整页重绘（否则输入框会失焦、光标跳到开头）。
         if (t.dataset.path.startsWith('pe.')) refreshPeBadge(t);
-        if (t.dataset.path.startsWith('pe.')) CORE.markFieldManual(R, t.dataset.path);
+        if (t.dataset.path.startsWith('pe.') || CORE.fieldState(R, t.dataset.path).source === 'ai') CORE.markFieldManual(R, t.dataset.path);
         // 生命体征的可信范围：边输边标，不等生成时才说
         if (t.dataset.path.startsWith('pe.vitals.')) markVital(t);
         // 过敏史/性别切换需要重绘
@@ -3056,8 +3099,16 @@ const APP = (() => {
         switch (ds.settingsAction) {
           case 'back': closeSettings(); break;
           case 'openList': openList(); break;
-          case 'exportBackup': exportBackup(); break;
-          case 'exportCurrentBackup': exportCurrentBackup(); break;
+          case 'exportBackup': {
+            const box = document.getElementById('settingsExportNotes');
+            exportBackup(!!(box && box.checked));
+            break;
+          }
+          case 'exportCurrentBackup': {
+            const box = document.getElementById('settingsExportNotes');
+            exportCurrentBackup(!!(box && box.checked));
+            break;
+          }
           case 'resetFont':
             settings.fontScale = CORE.SETTINGS_DEFAULTS.fontScale;
             saveSettings();
@@ -3165,6 +3216,7 @@ const APP = (() => {
       if (ds.seg !== undefined && ds.act === undefined) {
         const prevGender = R.basic.gender;
         setPath(R, ds.seg, ds.val);
+        if (CORE.fieldState(R, ds.seg).source === 'ai') CORE.markFieldManual(R, ds.seg);
         saveCurrent();
         const needsRerender =
           ds.seg === 'basic.department' || ds.seg === 'pmh.allergy' ||
@@ -3223,6 +3275,8 @@ const APP = (() => {
           item.status = 'asked_negative';
           item.factState = 'asked_negative';
         }
+        const rosPath = 'ros.' + ds.ros + '.' + ds.sym + '.status';
+        if (CORE.fieldState(R, rosPath).source === 'ai') CORE.markFieldManual(R, rosPath);
         saveCurrent();
         // 更新按钮外观与详情区
         const label = SCHEMA.ROS.find(s => s.key === ds.ros).symptoms.find(s => s.key === ds.sym).label;
@@ -3313,6 +3367,8 @@ const APP = (() => {
       if (ds.pequick !== undefined) {
         const group = R.pe[ds.pequick] || (R.pe[ds.pequick] = {});
         group[ds.pekey] = ds.val;
+        const quickPath = 'pe.' + ds.pequick + '.' + ds.pekey;
+        if (CORE.fieldState(R, quickPath).source === 'ai') CORE.markFieldManual(R, quickPath);
         // 选了一个具体描述 = 这次查过了，自动勾上（专科技巧：不然点了描述却仍标「未查」）
         if (SCHEMA.setPeChecked) SCHEMA.setPeChecked(R, ds.pequick, ds.pekey, true);
         saveCurrent();
@@ -3595,9 +3651,12 @@ const APP = (() => {
       // 首次病程录：按已填内容生成初稿（只补空字段，不覆盖手写内容）
       case 'loadRemote': {
         if (!remoteConflict || !remoteConflict.remote) return;
-        const rec = CORE.normalizeRecord(remoteConflict.remote, SCHEMA.emptyRecord, deptKeys());
-        if (!rec.ok) { toast('新版本无法读取，已保留当前内容'); return; }
-        R = rec.record;
+        let rec;
+        try { rec = CORE.normalizeRecord(remoteConflict.remote, SCHEMA.emptyRecord, deptKeys()); }
+        catch (e) { toast('新版本无法读取，已保留当前内容'); return; }
+        activeImportGuard = remoteConflict.importToken || importGuardFor(rec.id);
+        R = rec;
+        setSessionId(R.id);
         remoteConflict = null;
         storageAlert = '';
         saveCurrent();
@@ -3607,24 +3666,34 @@ const APP = (() => {
       }
       case 'keepCopy': {
         if (!remoteConflict) return;
-        // 两份内容都保留：当前内存内容另存为副本，新版本仍在原 ID 下
+        const original = R;
+        const conflict = remoteConflict;
+        const originalGuard = activeImportGuard;
         const copy = CORE.cloneValue(R);
         copy.id = CORE.uid();
         copy.meta = copy.meta || {};
         copy.meta.revision = 0;
-        copy.meta.updatedAt = new Date().toISOString();
-        if (copy.basic) {
-          copy.basic.name = (copy.basic.name || '未命名') + '（副本）';
-        }
-        LIST = CORE.upsertRecord(LIST, copy, new Date().toISOString()).list;
-        saveList();
+        copy.meta.importDraftCopy = true;
         R = copy;
         remoteConflict = null;
-        storageAlert = '';
-        saveCurrent();
-        render();
-        toast('已保留为副本；原病历的新版本仍在病历列表中');
-        break;
+        activeImportGuard = '';
+        setSessionId(copy.id);
+        return afterSave(saveToLibrary(), ok => {
+          if (!ok) {
+            R = original;
+            remoteConflict = conflict;
+            activeImportGuard = originalGuard;
+            setSessionId(R.id);
+            storageAlert = '草稿副本未能写入列表，当前内容仍在页面中。请先导出病历并重试。';
+            render();
+            toast('保存副本失败，请查看页面顶部提示');
+            return false;
+          }
+          storageAlert = '';
+          render();
+          toast('已保留为副本；原病历的新版本仍在病历列表中');
+          return true;
+        });
       }
       case 'addSoapBasis': {
         ensureSoap().a.basisDetail.push({ diagnosis: '', history: '', pe: '', aux: '' });
@@ -3680,6 +3749,14 @@ const APP = (() => {
         if (!confirmSidePlaceholders()) break;
         const cur = currentOutput();
         downloadText(cur.text, cur.label);
+        break;
+      }
+      case 'shareText': {
+        shareCurrentOutput();
+        break;
+      }
+      case 'printText': {
+        printCurrentOutput();
         break;
       }
       case 'copySection': {
@@ -3850,9 +3927,27 @@ const APP = (() => {
     });
   }
 
+  function safeFilePart(value, fallback) {
+    const text = String(value == null ? '' : value).trim()
+      .replace(/[\\/:*?"<>|\r\n]+/g, '_')
+      .replace(/^_+|_+$/g, '');
+    return text || fallback;
+  }
+
+  /** 导出名不使用患者姓名：优先科室，通用科使用病历短 ID。 */
+  function outputFileName(label) {
+    const dept = SCHEMA.DEPARTMENTS.find(item => item.key === R.basic.department);
+    const shortId = String(R.id || '').replace(/[^0-9a-z]/gi, '').slice(-6) || '病历';
+    const tag = dept && dept.key !== 'general' ? dept.name : shortId;
+    return [
+      safeFilePart(label || '大病历', '大病历'),
+      safeFilePart(tag, shortId),
+      safeFilePart(R.basic.recordDate || SCHEMA.todayStr(), SCHEMA.todayStr())
+    ].join('_') + '.txt';
+  }
+
   function downloadText(text, label) {
-    const name = (R.basic.name || '患者') + '_' + (label || '大病历') + '_' +
-      (R.basic.recordDate || SCHEMA.todayStr()) + '.txt';
+    const name = outputFileName(label);
     if (window.BingliAndroid) { window.BingliAndroid.export(text, name, 'text/plain'); return; }
     const blob = new Blob(['\ufeff' + text], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -3864,6 +3959,64 @@ const APP = (() => {
     document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     toast('已开始下载');
+  }
+
+  function printableHtml(title, text) {
+    return '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">'
+      + '<meta name="viewport" content="width=device-width,initial-scale=1">'
+      + '<title>' + esc(title) + '</title><style>'
+      + '@page{size:A4;margin:16mm}'
+      + 'body{margin:0;color:#111;background:#fff;font-family:"Noto Serif CJK SC","Songti SC",serif;font-size:12pt;line-height:1.75}'
+      + 'h1{margin:0 0 12pt;text-align:center;font-size:16pt}'
+      + 'pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;margin:0}'
+      + '</style></head><body><h1>' + esc(title) + '</h1><pre>' + esc(text) + '</pre></body></html>';
+  }
+
+  function printCurrentOutput() {
+    if (!confirmSidePlaceholders()) return false;
+    const cur = currentOutput();
+    if (window.BingliAndroid && window.BingliAndroid.printDocument) {
+      window.BingliAndroid.printDocument(printableHtml(cur.label, cur.text), cur.label);
+      toast('已打开系统打印');
+      return true;
+    }
+    if (typeof window.print !== 'function') { toast('当前环境不支持打印'); return false; }
+    const node = document.createElement('pre');
+    node.className = 'print-document';
+    node.textContent = cur.text;
+    node.setAttribute('data-print-title', cur.label);
+    document.body.appendChild(node);
+    document.body.classList.add('printing-document');
+    const cleanup = () => {
+      document.body.classList.remove('printing-document');
+      if (node.parentNode) node.parentNode.removeChild(node);
+      window.removeEventListener('afterprint', cleanup);
+    };
+    window.addEventListener('afterprint', cleanup, { once: true });
+    window.print();
+    setTimeout(cleanup, 3000);
+    return true;
+  }
+
+  async function shareCurrentOutput() {
+    if (!confirmSidePlaceholders()) return false;
+    const cur = currentOutput();
+    if (window.BingliAndroid && window.BingliAndroid.share) {
+      window.BingliAndroid.share(cur.text, outputFileName(cur.label), 'text/plain');
+      toast('已打开系统分享');
+      return true;
+    }
+    if (navigator && typeof navigator.share === 'function') {
+      try {
+        await navigator.share({ title: cur.label, text: cur.text });
+        toast('已打开系统分享');
+        return true;
+      } catch (error) {
+        if (error && error.name === 'AbortError') return false;
+      }
+    }
+    await copyToClipboard(cur.text);
+    return true;
   }
 
   /* ========================= 病历列表 ========================= */
@@ -3882,18 +4035,99 @@ const APP = (() => {
     return differs(record, blank, '');
   }
 
-  /** 打开病历：优先读该 id 的最新草稿，草稿缺失/损坏时才退回列表快照 */
-  function recordForOpen(id, fallback) {
-    const draft = REPO.loadCurrent(id);
-    if (draft.ok && draft.record) return draft.record;
+  // 只有明确删除过的记录才会被启动清理处理，其他未入列表的草稿可能仍在编辑。
+  const DELETED_DRAFT_PREFIX = 'dabingli.deleted-draft.v1.';
+
+  function currentPointerId() {
+    const raw = REPO.readRaw(K.current);
+    if (!raw.ok || raw.missing) return '';
+    try {
+      const pointer = JSON.parse(raw.raw);
+      return String(pointer && pointer.id || '');
+    } catch (e) { return ''; }
+  }
+
+  function cleanupDeletedDrafts() {
+    const loaded = REPO.loadList();
+    if (!loaded.ok || currentSaveBlocked) return;
+    const protectedIds = new Set([R && R.id, getSessionId(), currentPointerId()]);
+    const listedIds = new Set(loaded.list.map(item => item && item.id));
+    REPO.storageKeys().filter(key => key && key.indexOf(DELETED_DRAFT_PREFIX) === 0).forEach(key => {
+      const id = key.slice(DELETED_DRAFT_PREFIX.length);
+      if (!id || protectedIds.has(id) || listedIds.has(id)) return;
+      if (REPO.removeDraft(id)) REPO.removeRaw(key);
+    });
+  }
+
+  function supersededDraft(item) {
+    const guard = item && item.__importGuard;
+    if (!guard || !guard.hash) return false;
+    const raw = REPO.readRaw(CORE.draftKey(item.id));
+    return raw.ok && !raw.missing && raw.raw.length === guard.length && CORE.hashText(raw.raw) === guard.hash;
+  }
+
+  function removeSupersededDraft(item) {
+    return !supersededDraft(item) || REPO.removeDraft(item.id);
+  }
+
+  /** 打开病历时保留新草稿，但不能复活导入前被替换的旧草稿。 */
+  function recordForOpen(id, fallback, item) {
+    const superseded = supersededDraft(item);
+    if (superseded) removeSupersededDraft(item);
+    const draft = superseded ? null : REPO.loadCurrent(id);
+    if (draft && draft.ok && draft.record) return draft.record;
     if (fallback) {
+      let record;
       try {
-        return CORE.normalizeRecord(JSON.parse(JSON.stringify(fallback)), SCHEMA.emptyRecord, deptKeys());
+        record = CORE.normalizeRecord(JSON.parse(JSON.stringify(fallback)), SCHEMA.emptyRecord, deptKeys());
       } catch (e) {
-        return deepMerge(SCHEMA.emptyRecord(), JSON.parse(JSON.stringify(fallback)));
+        record = deepMerge(SCHEMA.emptyRecord(), JSON.parse(JSON.stringify(fallback)));
       }
+      record.id = id;
+      record.meta = record.meta || {};
+      // 草稿修订号和跨页锁的修订号只在本机有意义，恢复时不能倒退。
+      let revision = Number(item && item.__importGuard && item.__importGuard.revision) || 0;
+      try {
+        const lock = JSON.parse(localStorage.getItem(storageLockKey('record:' + id)) || 'null');
+        revision = Math.max(revision, Number(lock && lock.lastRevision) || 0);
+      } catch (e) { /* 读取失败时仍保留导入版本 */ }
+      record.meta.revision = Math.max(Number(record.meta.revision) || 0, revision);
+      return record;
     }
     return null;
+  }
+
+  function deleteRecord(id) {
+    const perform = () => listTransaction(() => {
+      const loaded = loadList();
+      if (!loaded.ok) return false;
+      // 标记先写入；只有列表不再包含该 id 时，启动清理才会使用它。
+      const marked = REPO.writeRaw(DELETED_DRAFT_PREFIX + id, '1');
+      const next = CORE.removeRecord(loaded.list, id);
+      if (!REPO.writeList(next)) {
+        if (marked) REPO.removeRaw(DELETED_DRAFT_PREFIX + id);
+        storageAlert = '删除失败：无法写入病历列表。病历和草稿均已保留。';
+        return false;
+      }
+      LIST = next;
+      if (R && R.id === id) {
+        if (saveTimer) clearTimeout(saveTimer);
+        saveTimer = null;
+        saveDirty = false;
+        R = newRecord();
+        setSessionId(R.id);
+        remoteConflict = null;
+        render();
+      }
+      // 其他当前病历尚未落盘时，公共指针仍可能指向刚删除的病历。
+      if (currentPointerId() === id) REPO.removeCurrent();
+      if (REPO.removeDraft(id)) REPO.removeRaw(DELETED_DRAFT_PREFIX + id);
+      else storageAlert = marked
+        ? '病历已从列表删除，但草稿暂时无法清除；下次启动会重试。'
+        : '病历已从列表删除，但草稿暂时无法清除。请检查本机存储后重试。';
+      return true;
+    });
+    return lockAvailable() ? saveQueue.then(perform) : perform();
   }
 
   function switchRecord(next) {
@@ -3907,6 +4141,7 @@ const APP = (() => {
       }
       R = next;
       setSessionId(next.id);
+      activeImportGuard = importGuardFor(next.id);
       step = 0;
       return true;
     };
@@ -3917,11 +4152,27 @@ const APP = (() => {
     return afterSave(saveCurrentAwait(), go);
   }
 
-  function openList() {
-    loadList();
-    const rows = CORE.sortByUpdated(LIST).map(item => {
+  function departmentNameOf(key) {
+    return (SCHEMA.DEPARTMENTS.find(d => d.key === key) || {}).name || '通用';
+  }
+
+  function listRowsHtml(items, query) {
+    if (!LIST.length) {
+      return `<div class="empty-state empty-state--records">
+        <span class="empty-state-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M9 11h7M9 15h5M14 3v5h5"/></svg></span>
+        <strong>还没有保存的病历</strong>
+        <p>先整理当前患者资料，保存后就会出现在这里。</p>
+      </div>`;
+    }
+    if (!items.length) {
+      return `<div class="empty-state empty-state--records">
+        <strong>没有匹配的病历</strong>
+        <p>未找到“${esc(query)}”。可换用姓名、主诉、科室或诊断的部分文字。</p>
+      </div>`;
+    }
+    return items.map(item => {
       const s = CORE.summarize(item);
-      const dept = (SCHEMA.DEPARTMENTS.find(d => d.key === s.department) || {}).name || '通用';
+      const dept = departmentNameOf(s.department);
       return `
         <div class="list-row">
           <span class="list-avatar" aria-hidden="true">${esc((s.name || '病').trim().slice(0, 1))}</span>
@@ -3929,12 +4180,50 @@ const APP = (() => {
             <div class="list-name">${esc(s.name)}
               <span class="list-meta">${esc(s.gender)} ${esc(AGE.display({ age: s.age, birthDate: s.birthDate, admitDate: s.admitDate }))}</span>
             </div>
+            ${item.data && item.data.meta && item.data.meta.importDraftCopy ? '<div class="list-sub">导入前的本机草稿副本</div>' : ''}
             <div class="list-sub">${esc(dept)} · ${esc((s.chiefComplaint || '无主诉').slice(0, 20))}</div>
             <div class="list-sub muted">更新于 ${esc(fmtTime(s.updatedAt))}</div>
           </div>
-          <button class="btn-del" data-del="${esc(s.id)}">删除</button>
+          <div class="list-actions">
+            <button class="btn btn-ghost btn-sm" data-copy="${esc(s.id)}">复制为新病历</button>
+            <button class="btn btn-ghost btn-sm btn-danger" data-del="${esc(s.id)}">删除</button>
+          </div>
         </div>`;
     }).join('');
+  }
+
+  async function copyRecordFromList(id) {
+    const found = CORE.findRecord(LIST, id);
+    if (!found) return false;
+    if (hasRecordContent(R) && !(await saveToLibrary())) return false;
+    const source = recordForOpen(found.id, found.data || found, found);
+    if (!source) return false;
+    source.id = found.id;
+    const copy = CORE.copyRecordAsNew(source);
+    const previous = R;
+    const previousSession = getSessionId();
+    R = copy;
+    setSessionId(copy.id);
+    step = 0;
+    remoteConflict = null;
+    activeImportGuard = '';
+    const saved = await saveToLibrary();
+    if (!saved) {
+      R = previous;
+      setSessionId(previousSession);
+      render();
+      toast('复制失败：新病历未能保存，原病历未改动');
+      return false;
+    }
+    render();
+    toast('已复制为新病历；身份信息、生命体征数值、日期和号码已清空');
+    return true;
+  }
+
+  function openList() {
+    loadList();
+    const initial = CORE.sortByUpdated(LIST);
+    const rows = listRowsHtml(initial, '');
 
     const alertHtml = storageAlert
       ? `<div class="warn-item" style="margin-bottom:10px">${esc(storageAlert)}</div>` : '';
@@ -3948,11 +4237,11 @@ const APP = (() => {
           <button type="button" class="modal-close" data-close aria-label="关闭病历列表">关闭</button>
         </div>
         ${alertHtml}
-        <div class="list-box">${rows || `<div class="empty-state empty-state--records">
-          <span class="empty-state-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M9 11h7M9 15h5M14 3v5h5"/></svg></span>
-          <strong>还没有保存的病历</strong>
-          <p>先整理当前患者资料，保存后就会出现在这里。</p>
-        </div>`}</div>
+        <label class="list-search">
+          <span class="visually-hidden">搜索病历</span>
+          <input type="search" id="recordSearch" placeholder="搜索姓名、主诉、科室、诊断" autocomplete="off">
+        </label>
+        <div class="list-box" id="recordListBox">${rows}</div>
         <div class="btn-row">
           <button class="btn" data-new>新建病历</button>
           <button class="btn btn-ghost" data-backup>导出备份</button>
@@ -3960,14 +4249,36 @@ const APP = (() => {
           <button class="btn btn-ghost" data-import-file>导入备份</button>
           <button class="btn btn-ghost" data-close>关闭</button>
         </div>
+        <label class="hint"><input type="checkbox" id="exportIncludeNotes"> 导出备份时包含原始笔记（默认关闭；笔记可能含患者信息）</label>
         <div class="hint">病历和备份文件未加密，请妥善保管。数据只存在本机浏览器；换设备或清理数据前请先备份。</div>
       </div>`;
     document.body.appendChild(wrap);
 
+    const search = wrap.querySelector('#recordSearch');
+    const listBox = wrap.querySelector('#recordListBox');
+    const count = wrap.querySelector('.modal-count');
+    if (search && listBox) {
+      search.addEventListener('input', () => {
+        const query = String(search.value || '');
+        const trimmed = query.trim();
+        const filtered = CORE.searchRecords(LIST, query, { departmentName: departmentNameOf });
+        listBox.innerHTML = listRowsHtml(CORE.sortByUpdated(filtered), trimmed);
+        if (count) count.textContent = trimmed ? `${filtered.length}/${LIST.length}` : String(LIST.length);
+      });
+    }
+
     wrap.addEventListener('click', async ev => {
       if (ev.target === wrap || ev.target.hasAttribute('data-close')) { wrap.remove(); return; }
-      if (ev.target.hasAttribute('data-backup')) { exportBackup(); return; }
-      if (ev.target.hasAttribute('data-backup-current')) { exportCurrentBackup(); return; }
+      if (ev.target.hasAttribute('data-backup')) {
+        const box = wrap.querySelector('#exportIncludeNotes');
+        exportBackup(!!(box && box.checked));
+        return;
+      }
+      if (ev.target.hasAttribute('data-backup-current')) {
+        const box = wrap.querySelector('#exportIncludeNotes');
+        exportCurrentBackup(!!(box && box.checked));
+        return;
+      }
       if (ev.target.hasAttribute('data-import-file')) { wrap.remove(); importBackup(); return; }
       if (ev.target.hasAttribute('data-new')) {
         if (hasRecordContent(R)) {
@@ -3982,10 +4293,17 @@ const APP = (() => {
       const delId = ev.target.dataset.del;
       if (delId) {
         if (!confirm('确定删除这份病历？删除后无法恢复，建议先导出备份。')) return;
-        LIST = CORE.removeRecord(LIST, delId);
-        await saveListAwait({ replace: true });
+        const deleted = await deleteRecord(delId);
+        if (!deleted) toast('删除失败，请查看页面顶部提示');
         wrap.remove();
         openList();
+        return;
+      }
+      const copyId = ev.target.dataset.copy;
+      if (copyId) {
+        if (!confirm('复制为新病历？将保留科室和病种相关结构，清空身份信息、生命体征数值、日期和号码，且不复制原始笔记。')) return;
+        await copyRecordFromList(copyId);
+        wrap.remove();
         return;
       }
       const openId = ev.target.closest('[data-open]') && ev.target.closest('[data-open]').dataset.open;
@@ -3997,7 +4315,7 @@ const APP = (() => {
         // 保存当前记录可能刚好更新了用户选择的那一条。
         found = CORE.findRecord(LIST, openId) || found;
         // 用 core 规范化，兼容旧版本存档
-        const next = recordForOpen(found.id, found.data || found);
+        const next = recordForOpen(found.id, found.data || found, found);
         if (!next) { wrap.remove(); render(); return; }
         next.id = found.id;
         if (!(await switchRecord(next))) { wrap.remove(); render(); return; }
@@ -4024,7 +4342,11 @@ const APP = (() => {
       return false;
     }
     const before = { id: R.id, updatedAt: R.updatedAt };
+    const previousEntry = CORE.findRecord(LIST, R.id);
     const res = CORE.upsertRecord(LIST, R, new Date().toISOString());
+    if (previousEntry && previousEntry.__importGuard) {
+      res.list.find(item => item.id === res.id).__importGuard = previousEntry.__importGuard;
+    }
     R.id = res.id;
     R.updatedAt = res.list.find(x => x.id === res.id).updatedAt;
     // 先保存当前记录和稳定 ID；若列表写失败，重试会更新同一条记录。
@@ -4052,28 +4374,34 @@ const APP = (() => {
 
   /* ========================= 备份导出 / 导入 ========================= */
 
-  function exportBackup() {
+  function exportBackup(includeNotes = false) {
     // 当前草稿可能比列表里的版本更新，导出前必须让用户明确选择
     const includeDraft = !!R && window.confirm(
       '备份默认包含已保存到「病历列表」的记录。\n\n' +
       '是否同时包含当前正在编辑的最新草稿？\n' +
       '（选「确定」= 包含最新草稿；选「取消」= 只导出病历列表）'
     );
-    const payload = CORE.buildExport(LIST, new Date().toISOString(), { includeDraft, draft: R });
+    const payload = CORE.buildExport(LIST, new Date().toISOString(), {
+      includeDraft,
+      draft: R,
+      includeNotes: includeNotes === true
+    });
     if (!payload.records.length) {
       toast('还没有保存的病历可导出');
       return;
     }
     const name = `大病历备份_${SCHEMA.todayStr()}.json`;
     downloadBlob(JSON.stringify(payload, null, 2), name, 'application/json');
-    toast(`已导出 ${payload.records.length} 份病历${payload.includesDraft ? '（含当前草稿）' : ''}`);
+    toast(`已导出 ${payload.records.length} 份病历${payload.includesDraft ? '（含当前草稿）' : ''}${payload.includesNotes ? '（含原始笔记）' : '（不含原始笔记）'}`);
   }
 
-  function exportCurrentBackup() {
+  function exportCurrentBackup(includeNotes = false) {
     const record = CORE.upsertRecord([], R, new Date().toISOString()).list;
-    const payload = CORE.buildExport(record, new Date().toISOString());
+    const payload = CORE.buildExport(record, new Date().toISOString(), {
+      includeNotes: includeNotes === true
+    });
     downloadBlob(JSON.stringify(payload, null, 2), `当前病历备份_${SCHEMA.todayStr()}.json`, 'application/json');
-    toast('已导出当前病历，请妥善保管未加密的备份');
+    toast(`已导出当前病历${payload.includesNotes ? '（含原始笔记）' : '（不含原始笔记）'}，请妥善保管未加密的备份`);
   }
 
   function downloadBlob(text, filename, mime) {
@@ -4115,30 +4443,109 @@ const APP = (() => {
     input.click();
   }
 
-  /**
-   * 把导入结果落盘，返回 { ok, res }。
-   * 单独抽出来是因为「合并」和「替换」对写入锁的态度相反：
-   *   · 合并要读现有列表，列表读不出来时读到的空数组会覆盖掉原来的记录 → 一律不写
-   *   · 替换是用户明确选择的破坏行为，是列表损坏时唯一允许覆盖的入口 → 先解锁再写
-   */
-  function applyImport(mode, records) {
-    loadList();
-    if (mode === 'merge') {
-      if (listSaveBlocked) {
-        storageAlert = '病历列表读不出来，已停止合并导入以免覆盖原数据。'
-          + '这次导入没有写入任何内容。请先导出原始列表或新建列表。';
-        return { ok: false, blocked: true };
+  // 比较内容时排除保存时间和修订号，但保留字段来源等其他元数据。
+  function importContentKey(record) {
+    const normalized = CORE.normalizeRecord(CORE.cloneValue(record), SCHEMA.emptyRecord, deptKeys());
+    delete normalized.updatedAt;
+    if (normalized.meta) {
+      delete normalized.meta.createdAt;
+      delete normalized.meta.updatedAt;
+      delete normalized.meta.revision;
+    }
+    return CORE.stableStringify(normalized);
+  }
+
+  function applyImportNow(mode, records) {
+    const loaded = loadList();
+    if (mode === 'merge' && !loaded.ok) {
+      storageAlert = '病历列表读不出来，已停止合并导入以免覆盖原数据。'
+        + '这次导入没有写入任何内容。请先导出原始列表或新建列表。';
+      return { ok: false, blocked: true };
+    }
+    const incoming = records.map(item => item.data ? item : {
+      id: item.id, updatedAt: item.updatedAt || '', basic: item.basic, data: item
+    });
+    const res = mode === 'merge' ? CORE.mergeImport(loaded.list, incoming) : null;
+    let next = res ? res.list : CORE.replaceImport(incoming, loaded.list);
+    const changed = next.filter(item => item && CORE.findRecord(loaded.list, item.id) !== item);
+    const guards = [];
+    let preserved = 0;
+    try {
+      changed.forEach(item => {
+        const previous = CORE.findRecord(loaded.list, item.id);
+        const baseline = previous ? importContentKey(previous.data || previous) : null;
+        const raw = REPO.readRaw(CORE.draftKey(item.id));
+        if (!raw.ok) throw Error('无法读取本机草稿');
+        let draft = null;
+        if (!raw.missing) draft = CORE.normalizeRecord(JSON.parse(raw.raw), SCHEMA.emptyRecord, deptKeys());
+        const candidates = [draft];
+        if (R && R.id === item.id) candidates.push(R);
+        const seen = new Set();
+        candidates.forEach(candidate => {
+          if (!candidate || !hasRecordContent(candidate)) return;
+          const key = importContentKey(candidate);
+          if (key === baseline || seen.has(key)) return;
+          seen.add(key);
+          const copy = CORE.cloneValue(candidate);
+          copy.id = CORE.uid();
+          copy.meta = copy.meta || {};
+          copy.meta.revision = 0;
+          copy.meta.importDraftCopy = true;
+          next = CORE.upsertRecord(next, copy, new Date().toISOString()).list;
+          preserved++;
+        });
+        const guard = {
+          token: CORE.uid(),
+          revision: Math.max(Number(draft && draft.meta && draft.meta.revision) || 0,
+            R && R.id === item.id ? Number(R.meta && R.meta.revision) || 0 : 0)
+        };
+        if (!raw.missing) { guard.hash = CORE.hashText(raw.raw); guard.length = raw.raw.length; }
+        const index = next.findIndex(entry => entry && entry.id === item.id);
+        next[index] = { ...next[index], __importGuard: guard };
+        guards.push({ id: item.id, raw: raw.missing ? null : raw.raw });
+      });
+    } catch (e) {
+      storageAlert = '导入失败：本机草稿无法读取，已保留原数据。请先导出原始数据。';
+      return { ok: false };
+    }
+    // 列表、导入版本和所有需要保留的草稿副本只写一次；失败时原样保留。
+    if (!REPO.writeList(next)) {
+      storageAlert = '导入失败：无法写入病历列表，浏览器存储空间可能已满。现有病历和草稿均已保留。';
+      return { ok: false };
+    }
+    LIST = next;
+    listSaveBlocked = false;
+    corruptListRaw = '';
+    guards.forEach(({ id, raw }) => {
+      if (raw !== null) {
+        const current = REPO.readRaw(CORE.draftKey(id));
+        if (current.ok && current.raw === raw) REPO.removeDraft(id);
       }
-      const res = CORE.mergeImport(LIST, records);
-      LIST = res.list;
-      return { ok: saveList(), res };
+    });
+    if (R && guards.some(guard => guard.id === R.id)) {
+      if (saveTimer) clearTimeout(saveTimer);
+      saveTimer = null;
+      saveDirty = false;
+      const imported = CORE.findRecord(LIST, R.id);
+      HISTORY.clear(R.id);
+      R = recordForOpen(R.id, imported.data || imported, imported);
+      activeImportGuard = imported.__importGuard.token;
+      remoteConflict = null;
+      setSessionId(R.id);
+      render();
     }
-    if (listSaveBlocked) {
-      listSaveBlocked = false;
-      corruptListRaw = '';
-    }
-    LIST = CORE.replaceImport(records);
-    return { ok: saveList({ replace: true }), replaced: LIST.length };
+    return res ? { ok: true, res, preserved } : { ok: true, replaced: incoming.length, preserved };
+  }
+
+  /** 有锁时等待实际写入，失败时既不改变内存列表也不清除草稿。 */
+  function applyImport(mode, records) {
+    const finish = result => {
+      if (result && typeof result === 'object') return result;
+      storageAlert = '导入失败：无法取得本机存储锁，现有病历和草稿均已保留。';
+      return { ok: false };
+    };
+    const perform = () => listTransaction(() => applyImportNow(mode, records));
+    return lockAvailable() ? saveQueue.then(perform).then(finish, () => finish(false)) : finish(perform());
   }
 
   /** 导入预览：显示条数与摘要，让用户选择合并或替换 */
@@ -4174,14 +4581,17 @@ const APP = (() => {
           if (listSaveBlocked && !confirm('现有列表已经读不出来，替换会连原始数据一起清掉。'
             + '建议先点顶部横幅里的「导出原始列表」留底。仍要继续？')) return;
         }
-        const out = applyImport(mode, parsed.records);
+        // 防止异步写入期间重复提交；成功提示只在实际落盘之后显示。
+        if (wrap.__importing) return;
+        wrap.__importing = true;
+        const out = await applyImport(mode, parsed.records);
         wrap.remove();
         if (mode === 'merge') {
           toast(out.ok
-            ? `已导入：新增 ${out.res.added}，更新 ${out.res.updated}，跳过 ${out.res.skipped}`
+            ? `已导入：新增 ${out.res.added}，更新 ${out.res.updated}，跳过 ${out.res.skipped}${out.preserved ? `；另存 ${out.preserved} 份本机草稿副本` : ''}`
             : '导入没有写入，请查看页面顶部提示');
         } else {
-          toast(out.ok ? `已替换为导入的 ${out.replaced} 份病历` : '替换没有写入，请查看页面顶部提示');
+          toast(out.ok ? `已替换为导入的 ${out.replaced} 份病历${out.preserved ? `；另存 ${out.preserved} 份本机草稿副本` : ''}` : '替换没有写入，请查看页面顶部提示');
         }
         openList();
       });
@@ -4216,9 +4626,17 @@ const APP = (() => {
 
   function init() {
     loadSettings();
-    if (!loadCurrent()) {
-      R = newRecord();
+    loadList();
+    const loadedCurrent = loadCurrent();
+    const currentId = loadedCurrent && R ? R.id : (getSessionId() || currentPointerId());
+    const listed = currentId && CORE.findRecord(LIST, currentId);
+    if (listed && !currentSaveBlocked && (!loadedCurrent || supersededDraft(listed))) {
+      R = recordForOpen(currentId, listed.data || listed, listed);
+      setSessionId(currentId);
     }
+    if (!R) R = newRecord();
+    activeImportGuard = importGuardFor(R.id);
+    cleanupDeletedDrafts();
 
     // 回到上次停留的那一步。键不认识（改过步骤、旧存档）就退回第一步，
     // 不因为一个字符串对不上就让页面白屏。
@@ -4265,10 +4683,20 @@ const APP = (() => {
 
     // 防误关：尝试保存一次
     window.addEventListener('beforeunload', () => { flushPendingSave(); });
+    // ColorOS 等系统在切后台/拍照时可能直接结束 WebView；pagehide 与
+    // visibilitychange 都要立即刷新防抖中的草稿（含 AI 原始笔记）。
+    window.addEventListener('pagehide', () => { flushPendingSave(); });
 
     // 多标签页：只关心「同一份病历」的草稿键；不同病历各写各的槽位。
     window.addEventListener('storage', ev => {
       if (!ev || !ev.key || !ev.newValue) return;
+      if (ev.key === K.list) {
+        try {
+          const list = JSON.parse(ev.newValue);
+          if (Array.isArray(list) && detectImportedConflict(CORE.findRecord(list, R && R.id))) render();
+        } catch (e) { /* 不因其他页面的损坏数据替换当前内容 */ }
+        return;
+      }
       if (ev.key.indexOf(K.draftPrefix) !== 0) return;
       const id = ev.key.slice(K.draftPrefix.length);
       if (!R || id !== R.id) return;
@@ -4286,6 +4714,10 @@ const APP = (() => {
 
     // 回到前台时若之前有存储异常，重新渲染让提示可见
     document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') {
+        flushPendingSave();
+        return;
+      }
       if (document.visibilityState === 'visible' && storageAlert) render();
     });
   }
@@ -4350,6 +4782,8 @@ const APP = (() => {
 
   return {
     init, getRecord: () => R, STEPS,
+    setRawNotes,
+    flushSave: flushPendingSave,
     jumpToPath: path => { closeSettings(); jumpToPath(path); },
     getAiTarget: () => {
       const key = (STEPS[step] || {}).key;
@@ -4360,7 +4794,7 @@ const APP = (() => {
     async applyAI(request, result, selected, allowReplace, model) {
       if (currentSaveBlocked || listSaveBlocked || remoteConflict) throw Error('请先处理页面上的保存异常或修订冲突');
       const next = AI_CORE.apply(R, request, result, selected, allowReplace, model);
-      snapshot('采纳 AI 建议');
+      lastAiUndo = AI_CORE.createAdoptionUndo(R, next, selected.map(i => result.suggestions[i].path));
       R = next;
       const saved = await saveCurrentAwait();
       render();
@@ -4372,7 +4806,17 @@ const APP = (() => {
       if (path === 'summary') CORE.markDocumentReviewed(R, 'summary');
       saveCurrent(); render(); return true;
     },
-    undoAI: undoLast,
+    undoAI() {
+      if (!lastAiUndo || !R || lastAiUndo.recordId !== R.id) { toast('没有本次 AI 采纳记录'); return false; }
+      if (currentSaveBlocked || listSaveBlocked || remoteConflict) { toast('请先处理保存异常或修订冲突'); return false; }
+      const undone = AI_CORE.undoAdoption(R, lastAiUndo);
+      R = undone.record;
+      lastAiUndo = null;
+      const saved = saveCurrent();
+      render();
+      toast(`已撤销 ${undone.restored} 项${undone.kept ? `，保留 ${undone.kept} 项后来修改的内容` : ''}${saved ? '' : '（尚未写入本机）'}`);
+      return true;
+    },
     // 供测试使用
     _test: {
       saveToLibrary,
@@ -4388,12 +4832,13 @@ const APP = (() => {
         loadList();
         const item = LIST.find(x => x.id === id) || CORE.findRecord(LIST, id);
         if (!item) return false;
-        const next = recordForOpen(id, item.data || item);
+        const next = recordForOpen(id, item.data || item, item);
         if (!next) return false;
         next.id = id;
         return afterSave(switchRecord(next), ok => { if (ok) render(); return ok; });
       },
       openList,
+      handleAction,
       openSettings,
       closeSettings,
       gotoStep,
@@ -4416,6 +4861,8 @@ const APP = (() => {
       navRowsHtml: () => navRowsHtml(),
       // 存储写入锁：测试要能直接触发自动保存、普通保存，并读到锁状态
       saveCurrent, saveCurrentAwait, flushPendingSave, saveWithFeedback, saveList,
+      setRawNotes,
+      outputFileName,
       currentSaveBlocked: () => currentSaveBlocked,
       listSaveBlocked: () => listSaveBlocked,
       corruptCurrentRaw: () => corruptCurrentRaw,
@@ -4425,7 +4872,7 @@ const APP = (() => {
       sessionId: () => getSessionId(),
       discardCorruptCurrent, discardCorruptList,
       // 导入合并/替换的落盘入口：列表损坏时合并必须整单不写，替换要能解锁
-      applyImport
+      applyImport, previewImport
     }
   };
 })();

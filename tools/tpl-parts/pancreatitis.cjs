@@ -31,7 +31,7 @@ module.exports = {
       accompanying: '伴恶心、呕吐胃内容物5～6次，量不多，无咖啡样物；伴腹胀，无发热、寒战',
       negativeDiscriminating: '无呕血、黑便，无腹泻，无黄疸，无胸闷、胸痛，无尿频尿痛',
       treatment: '急诊予禁食、胃肠减压、乳酸钠林格液静脉补液、盐酸布桂嗪止痛，现疼痛较前减轻',
-      generalCondition: '发病以来精神差，未进食，睡眠差，小便量偏少，体重无明显变化',
+      generalCondition: '起病来，神志清，精神差，未进食，睡眠差，小便量偏少，大便未解，体重无明显变化',
       extra: ''
     },
     ros: {
@@ -61,8 +61,8 @@ module.exports = {
       surgery: '否认手术史',
       trauma: '否认外伤史',
       transfusion: '否认输血史',
-      poisoning: '否认毒物接触史',
-      vaccine: '按计划预防接种',
+      poisoning: '否认中毒史',
+      vaccine: '预防接种史不详',
       allergy: '无',
       relatedHistory: '否认长期服用糖皮质激素、噻嗪类利尿剂及硫唑嘌呤等药物史',
       otherTreatDiseases: '',

@@ -2661,6 +2661,20 @@ footer .btn { min-width: 0; min-height: 48px; white-space: nowrap; }
 }
 
 .list-box { max-height: 58vh; padding: 2px; }
+.list-search { display: block; margin: 0 0 10px; }
+.list-search input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 44px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: inherit;
+  background: var(--surface);
+  font: inherit;
+}
+.list-actions { display: flex; flex: 0 0 auto; flex-direction: column; align-items: stretch; gap: 6px; }
+.list-actions .btn { white-space: nowrap; }
 .list-row {
   gap: 11px;
   margin-bottom: 8px;
@@ -3221,6 +3235,8 @@ body.ai-view main.ai-page {
 .ai-page .ai-image-send { flex-wrap: wrap; }
 .ai-page .ai-image-send img { object-fit: contain; flex-shrink: 0; }
 .ai-page .ai-image-send .ai-warning { flex: 1 1 200px; }
+.ai-page .ai-field-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 8px; }
+.ai-page .ai-field-actions .hint { flex: 1 1 180px; margin: 0; }
 .ai-page :is(.ai-source-card, .ai-check, .ai-compare > div) { border-radius: 8px; box-shadow: none; }
 .ai-page .ai-source-card { font: inherit; }
 .ai-page .ai-source-card > span:last-child { min-width: 0; }
@@ -3261,4 +3277,23 @@ body.large-font .ai-page .ai-compare { grid-template-columns: minmax(0, 1fr); }
   body.large-font .ai-page .ai-eyebrow { grid-column: 1; grid-row: 1; }
   body.large-font .ai-page .ai-close { grid-column: 2; grid-row: 1; }
   body.large-font .ai-page .ai-heading h1 { grid-column: 1 / -1; grid-row: 2; }
+}
+
+.print-document { display: none; }
+@page { size: A4; margin: 16mm; }
+@media print {
+  body.printing-document > :not(.print-document) { display: none !important; }
+  body.printing-document .print-document {
+    display: block;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    color: #111;
+    background: #fff;
+    font-family: "Noto Serif CJK SC", "Songti SC", serif;
+    font-size: 12pt;
+    line-height: 1.75;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
 }

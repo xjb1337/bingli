@@ -123,6 +123,16 @@ test('规范化把数字型年龄转成字符串', () => {
 
 /* ======================= 4. 科室迁移 ======================= */
 
+test('逐项编辑检查名称、结果及分类时保留数组与其他旧条目', () => {
+  const record = SCHEMA.emptyRecord();
+  record.auxiliary.items = [{ name: '虚构旧检验', result: '旧结果', no: 'F-01' }, { name: '虚构第二项', result: '完整保留' }];
+  C.setPath(record, 'auxiliary.items.0.category', 'special');
+  C.setPath(record, 'auxiliary.items.0.name', '新项目名称');
+  C.setPath(record, 'auxiliary.items.0.result', '新结果');
+  assert.ok(Array.isArray(record.auxiliary.items));
+  assert.deepEqual(record.auxiliary.items, [{ name: '新项目名称', result: '新结果', no: 'F-01', category: 'special' }, { name: '虚构第二项', result: '完整保留' }]);
+});
+
 test('未知科室回退到通用科，不导致生成报错', () => {
   const r = sampleRecord();
   r.basic.department = 'some-removed-department';
@@ -130,7 +140,7 @@ test('未知科室回退到通用科，不导致生成报错', () => {
   assert.equal(out.basic.department, 'general');
   // 能否正常生成
   const text = GENERATOR.generate(out).text;
-  assert.ok(text.includes('【体格检查】'));
+  assert.ok(text.includes('【体格检查（一）】'));
 });
 
 test('合法科室保持不变', () => {
@@ -450,6 +460,6 @@ test('中文科室名的旧存档能正常生成专科查体', () => {
   assert.equal(r.basic.department, 'digestive');
   // 眉栏科室要写中文名，不是键名
   const t = GENERATOR.generate(r).text;
-  assert.match(t, /科室：消化内科/);
+  assert.match(t, /科别：消化内科/);
   assert.doesNotMatch(t, /科室：digestive/);
 });

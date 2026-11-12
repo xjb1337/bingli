@@ -208,10 +208,10 @@ test('P1-2 admissionPid 不把内部记录 id 当住院号', () => {
   record.basic.age = '45';
   record.basic.department = 'respiratory';
   const text = GENERATOR.generate(record).text;
-  assert.ok(text.includes('PID：／'), `无记录号时 PID 应输出／：${text.split('\n')[1]}`);
+  assert.ok(text.includes('住院号：／'), '无住院号时保留空位');
   assert.ok(!text.includes('PID：legacy-v1-respiratory'), '内部记录 id 不应出现在 PID');
   record.basic.recordNo = 'ZY-0001';
-  assert.ok(GENERATOR.generate(record).text.includes('PID：ZY-0001'));
+  assert.ok(GENERATOR.generate(record).text.includes('住院号：ZY-0001'));
 });
 
 test('P1-3 过敏原手写文本先去尾标点再拼「过敏」', () => {
@@ -235,8 +235,9 @@ test('P1-3 系统回顾详情先去尾标点再拼逗号', () => {
   record.basic.age = '45';
   record.ros.resp = record.ros.resp || {};
   record.ros.resp.fever = { checked: true, time: '3天', detail: '最高39℃，' };
-  const text = GENERATOR.generate(record).text;
-  assert.ok(text.includes('发热3天，最高39℃'), `应拼成「发热3天，最高39℃」：${text}`);
+  const text = GENERATOR.buildROS(record);
+  assert.ok(text.includes('发热3天，最高39℃'), `兼容工具应保留旧格式：${text}`);
+  assert.doesNotMatch(GENERATOR.generate(record).text, /发热3天，最高39℃/);
   assert.ok(!text.includes('，；'), '不应出现「，；」');
   assert.ok(!text.includes('。，'), '不应出现「。，」');
 });
@@ -289,23 +290,23 @@ function consentRecord(withRos) {
   return record;
 }
 
-test('D1 有系统回顾时签名行接在系统回顾末尾且只出现一次', () => {
+test('D1 有旧系统回顾时签名行仍接在家族史末尾且只出现一次', () => {
   const { GENERATOR } = bootGlobals();
   const record = consentRecord(true);
   const generated = GENERATOR.generate(record);
   const text = generated.text;
   assert.equal((text.match(/患者确认以上病史签名/g) || []).length, 1, '签名行全文只能出现一次');
   const familyBody = generated.sections['家族史'];
-  assert.ok(!familyBody.includes('患者确认以上病史签名'), '家族史后不应再出现签名行');
-  assert.ok(generated.sections['系统回顾'].endsWith('患者确认以上病史签名：＿＿＿＿'), '签名行应是系统回顾最后一行');
+  assert.ok(familyBody.endsWith('患者确认以上病史签名：＿＿＿＿'));
+  assert.equal(generated.sections['系统回顾'], undefined);
 
   const plain = GENERATOR.generatePlain(record);
   assert.equal((plain.match(/患者确认以上病史签名/g) || []).length, 1);
   const ir = GENERATOR.buildDocumentIR(record, 'record');
   const rosSection = ir.sections.find(section => section.title === '系统回顾');
   const familySection = ir.sections.find(section => section.title === '家族史');
-  assert.equal(rosSection.paragraphs[rosSection.paragraphs.length - 1], '患者确认以上病史签名：＿＿＿＿');
-  assert.ok(!familySection.paragraphs.join('\n').includes('患者确认以上病史签名'));
+  assert.equal(rosSection, undefined);
+  assert.ok(familySection.paragraphs.join('\n').includes('患者确认以上病史签名'));
 });
 
 test('D1 无系统回顾时签名行仍接在家族史末尾', () => {
