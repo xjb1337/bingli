@@ -126,17 +126,21 @@ describe('v3.2 record notes and list features', () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: '病历列表' }));
     await screen.findByRole('heading', { name: '病历列表' });
+    expect(screen.getByLabelText('病历数量：2')).toHaveTextContent('2');
 
     const search = screen.getByLabelText('搜索病历');
     await user.type(search, '肺炎');
     expect(screen.getByRole('heading', { name: '虚构肺炎患者' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: '虚构胃炎患者' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('病历数量：1/2')).toHaveTextContent('1/2');
 
     await user.clear(search);
     await user.type(search, '不存在');
     expect(screen.getByText('没有匹配的病历')).toBeInTheDocument();
+    expect(screen.getByLabelText('病历数量：0/2')).toHaveTextContent('0/2');
 
     await user.clear(search);
+    expect(screen.getByLabelText('病历数量：2')).toHaveTextContent('2');
     const card = screen.getByRole('heading', { name: '虚构肺炎患者' }).closest('article');
     if (!card) throw new Error('missing record card');
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);

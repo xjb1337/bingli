@@ -51,13 +51,20 @@ export function RecordsPage({
       };
     });
   }, [departmentNames, list, query]);
+  const searchTerm = query.trim();
+  const countLabel = searchTerm ? `${summaries.length}/${list.length}` : String(list.length);
 
   return (
     <section className="workspace-page" aria-labelledby="records-heading">
       <header className="page-header">
         <div>
           <div className="eyebrow">本机病历</div>
-          <h2 id="records-heading">病历列表</h2>
+          <div className="records-heading-row">
+            <h2 id="records-heading">病历列表</h2>
+            <span className="record-count" role="status" aria-label={`病历数量：${countLabel}`}>
+              {countLabel}
+            </span>
+          </div>
           <p>病历保存在本机 IndexedDB；旧 localStorage 只在首次启动时只读迁移，原数据不会删除。</p>
         </div>
         <button type="button" className="button primary" onClick={onNew}>

@@ -4186,7 +4186,7 @@ const APP = (() => {
           </div>
           <div class="list-actions">
             <button class="btn btn-ghost btn-sm" data-copy="${esc(s.id)}">复制为新病历</button>
-            <button class="btn-del" data-del="${esc(s.id)}">删除</button>
+            <button class="btn btn-ghost btn-sm btn-danger" data-del="${esc(s.id)}">删除</button>
           </div>
         </div>`;
     }).join('');
@@ -4256,11 +4256,14 @@ const APP = (() => {
 
     const search = wrap.querySelector('#recordSearch');
     const listBox = wrap.querySelector('#recordListBox');
+    const count = wrap.querySelector('.modal-count');
     if (search && listBox) {
       search.addEventListener('input', () => {
         const query = String(search.value || '');
+        const trimmed = query.trim();
         const filtered = CORE.searchRecords(LIST, query, { departmentName: departmentNameOf });
-        listBox.innerHTML = listRowsHtml(CORE.sortByUpdated(filtered), query.trim());
+        listBox.innerHTML = listRowsHtml(CORE.sortByUpdated(filtered), trimmed);
+        if (count) count.textContent = trimmed ? `${filtered.length}/${LIST.length}` : String(LIST.length);
       });
     }
 

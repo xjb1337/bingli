@@ -233,23 +233,39 @@ test('病历列表支持部分搜索，复制为新病历保留结构并清空�
   })()`);
 
   a.run('APP._test.openList()');
+  const count = () => a.d.querySelector('.modal-count').textContent.trim();
+  assert.equal(count(), '2');
+  const deleteButton = a.d.querySelector('[data-del="search-a"]');
+  assert.ok(deleteButton, '每份病历应有删除按钮');
+  assert.ok(deleteButton.classList.contains('btn'));
+  assert.ok(deleteButton.classList.contains('btn-sm'));
+  assert.ok(deleteButton.classList.contains('btn-danger'));
+  assert.ok(!deleteButton.classList.contains('btn-del'));
+
   const search = a.d.querySelector('#recordSearch');
   search.value = '肺炎';
   search.dispatchEvent(new a.w.Event('input'));
   let html = a.d.querySelector('#recordListBox').innerHTML;
   assert.match(html, /虚构搜索甲/);
   assert.doesNotMatch(html, /虚构搜索乙/);
+  assert.equal(count(), '1/2');
 
   search.value = '不存在';
   search.dispatchEvent(new a.w.Event('input'));
   html = a.d.querySelector('#recordListBox').innerHTML;
   assert.match(html, /没有匹配的病历/);
+  assert.equal(count(), '0/2');
 
   search.value = '虚构搜索';
   search.dispatchEvent(new a.w.Event('input'));
   html = a.d.querySelector('#recordListBox').innerHTML;
   assert.match(html, /虚构搜索甲/);
   assert.match(html, /虚构搜索乙/);
+  assert.equal(count(), '2/2');
+
+  search.value = '';
+  search.dispatchEvent(new a.w.Event('input'));
+  assert.equal(count(), '2');
 
   const copyButton = a.d.querySelector('[data-copy="search-a"]');
   assert.ok(copyButton, '每份病历应有复制为新病历按钮');

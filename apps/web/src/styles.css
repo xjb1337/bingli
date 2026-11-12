@@ -1131,6 +1131,33 @@ textarea[aria-invalid="true"] {
   color: var(--muted);
 }
 
+.records-heading-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.records-heading-row h2 {
+  margin-bottom: 0;
+}
+
+.record-count {
+  display: inline-grid;
+  min-width: 25px;
+  height: 25px;
+  padding: 0 7px;
+  place-items: center;
+  border-radius: 999px;
+  color: var(--primary-strong);
+  background: var(--primary-soft);
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
 .workspace-page {
   display: grid;
   gap: 16px;
