@@ -12,8 +12,8 @@ android {
         minSdk 26
         targetSdk 35
         testInstrumentationRunner 'android.test.InstrumentationTestRunner'
-        versionCode = (project.findProperty('versionCode') ?: '300008').toInteger()
-        versionName = (project.findProperty('versionName') ?: '3.0.0.8')
+        versionCode = (project.findProperty('versionCode') ?: '320000').toInteger()
+        versionName = (project.findProperty('versionName') ?: '3.2.0')
         buildConfigField 'String', 'UPDATE_REPOSITORY', '"xjb1337/bingli"'
     }
     signingConfigs {

@@ -351,6 +351,8 @@ export interface DabingliRecord {
   id?: string;
   schemaVersion?: number;
   updatedAt?: string;
+  /** Original notes entered on the AI page. Kept with the record, excluded from backups by default. */
+  rawNotes?: string;
   meta: RecordMeta;
   documentMeta?: Record<string, unknown>;
   basic: BasicSection;
@@ -451,12 +453,15 @@ export interface SettingsResult {
 export interface ImportRecord {
   id: string;
   updatedAt: string;
+  /** True only when a notes-enabled backup explicitly carried this record's rawNotes key. */
+  rawNotesIncluded?: boolean;
   data: DabingliRecord;
 }
 
 export interface ImportResult {
   records: ImportRecord[];
   mode: 'bundle' | 'single';
+  includesNotes?: boolean;
 }
 
 export interface ExportBundle {
@@ -465,6 +470,7 @@ export interface ExportBundle {
   exportedAt: string;
   records: Array<{ id: string; updatedAt: string; data: DabingliRecord }>;
   includesDraft?: boolean;
+  includesNotes?: boolean;
 }
 
 export interface Department {

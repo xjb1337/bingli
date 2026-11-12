@@ -548,13 +548,14 @@ export class IndexedDbRecordRepository implements RecordRepository {
 
   async importBackup(raw: string, mode: ImportMode): Promise<ImportSummary> {
     const parsed = parseBackup(raw);
-    const importedItems: RecordListItem[] = parsed.records.map((item) => {
+    const importedItems: Array<RecordListItem & { rawNotesIncluded?: boolean }> = parsed.records.map((item) => {
       const data = clone(item.data);
       data.id = item.id;
       if (!data.updatedAt) data.updatedAt = item.updatedAt;
       return {
         id: item.id,
         updatedAt: item.updatedAt,
+        rawNotesIncluded: item.rawNotesIncluded,
         schemaVersion: data.schemaVersion,
         basic: clone(data.basic),
         data,
@@ -576,6 +577,7 @@ export class IndexedDbRecordRepository implements RecordRepository {
           const pointer = await this.db.current.get(CURRENT_KEY);
           const currentDraft = pointer ? await this.db.drafts.get(pointer.id) : undefined;
           const existingDrafts = await this.db.drafts.toArray();
+          const replacedItems = RECORD_CORE.replaceImport(importedItems, existingList);
           const storedSettings = await this.db.settings.get(SETTINGS_KEY);
           const recoveryId = `recovery-${now.replace(/[^0-9A-Za-z]/g, '')}-${RECORD_CORE.uid()}`;
           const recovery: RecoveryCopy = {
@@ -586,7 +588,7 @@ export class IndexedDbRecordRepository implements RecordRepository {
             drafts: clone(existingDrafts),
             currentId: pointer?.id ?? null,
             settings: storedSettings ? clone(storedSettings.data) : null,
-            bundle: createBackupBundle(existingList, currentDraft, now),
+            bundle: createBackupBundle(existingList, currentDraft, now, { includeNotes: true }),
           };
 
           await this.db.meta.put({
@@ -599,12 +601,12 @@ export class IndexedDbRecordRepository implements RecordRepository {
           await this.db.drafts.clear();
           await this.db.current.clear();
 
-          if (importedItems.length) await this.db.records.bulkPut(importedItems);
-          if (importedItems.length) {
-            await this.db.drafts.bulkPut(importedItems.map((item) => clone(item.data)));
+          if (replacedItems.length) await this.db.records.bulkPut(replacedItems);
+          if (replacedItems.length) {
+            await this.db.drafts.bulkPut(replacedItems.map((item) => clone(item.data)));
           }
 
-          const firstRecordId = importedItems[0]?.id;
+          const firstRecordId = replacedItems[0]?.id;
           if (firstRecordId) {
             await this.db.current.put({ key: CURRENT_KEY, id: firstRecordId, at: now });
           }
@@ -618,7 +620,7 @@ export class IndexedDbRecordRepository implements RecordRepository {
         }
 
         const merged = RECORD_CORE.mergeImport(existingList, importedItems);
-        const changed = importedItems.filter((item) => merged.list.includes(item));
+        const changed = merged.list.filter((item) => !existingList.includes(item));
         if (changed.length) {
           await this.db.records.bulkPut(changed.map((item) => clone(item)));
           await this.db.drafts.bulkPut(changed.map((item) => clone(item.data)));
@@ -642,12 +644,15 @@ export class IndexedDbRecordRepository implements RecordRepository {
     );
   }
 
-  async exportBackup(scope: BackupScope = 'all'): Promise<ExportBundle> {
+  async exportBackup(
+    scope: BackupScope = 'all',
+    options: { includeNotes?: boolean } = {},
+  ): Promise<ExportBundle> {
     return this.db.transaction('r', this.db.records, this.db.drafts, this.db.current, async () => {
       const list = scope === 'current' ? [] : await this.db.records.toArray();
       const pointer = await this.db.current.get(CURRENT_KEY);
       const draft = pointer ? await this.db.drafts.get(pointer.id) : undefined;
-      return createBackupBundle(list, draft, this.now());
+      return createBackupBundle(list, draft, this.now(), options);
     });
   }
 

@@ -1248,6 +1248,51 @@ textarea[aria-invalid="true"] {
   font-weight: 700;
 }
 
+.ai-field-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.ai-field-actions .field-hint {
+  flex: 1 1 220px;
+  margin: 0;
+}
+
+.record-search {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+  font-weight: 700;
+}
+
+.record-search input {
+  width: 100%;
+  min-height: 44px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  color: var(--text);
+  background: var(--surface);
+  font: inherit;
+  font-weight: 400;
+}
+
+.export-notes-option {
+  display: flex;
+  min-height: 44px;
+  align-items: flex-start;
+  gap: 9px;
+  margin-block: 8px;
+  cursor: pointer;
+}
+
+.export-notes-option input {
+  flex: 0 0 auto;
+  margin-top: 4px;
+}
+
 .ai-recognize {
   display: grid;
   gap: 8px;
@@ -2974,3 +3019,31 @@ textarea:focus {
 
 .ai-error-guide dt { font-weight: 700; }
 .ai-error-guide dd { margin: 0; }
+
+.print-document { display: none; }
+@page { size: A4; margin: 16mm; }
+@media print {
+  body.printing-document > :not(.print-document) { display: none !important; }
+  body.printing-document .print-document {
+    display: block;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    color: #111;
+    background: #fff;
+    font-family: "Noto Serif CJK SC", "Songti SC", serif;
+    font-size: 12pt;
+    line-height: 1.75;
+  }
+  body.printing-document .print-document h1 {
+    margin: 0 0 12pt;
+    text-align: center;
+    font-size: 16pt;
+  }
+  body.printing-document .print-document pre {
+    margin: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font: inherit;
+  }
+}

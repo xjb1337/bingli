@@ -1,6 +1,6 @@
 {
   "name": "dabingli",
-  "version": "3.0.0.8",
+  "version": "3.2.0",
   "private": true,
   "description": "大病历生成器 Android App：离线填写、病历生成与安全更新",
   "scripts": {

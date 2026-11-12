@@ -114,17 +114,29 @@ export interface CoreApi {
   removeRecord(list: RecordListItem[], id: string): RecordListItem[];
   findRecord(list: RecordListItem[], id: string): RecordListItem | null;
   mergeListForWrite(stored: RecordListItem[], local: RecordListItem[]): RecordListItem[];
+  searchRecords(
+    list: RecordListItem[],
+    query: string,
+    options?: { departmentName?: (key: string) => string },
+  ): RecordListItem[];
+  copyRecordAsNew(
+    record: DabingliRecord,
+    options?: { id?: string; now?: string },
+  ): DabingliRecord;
   buildExport(
     list: RecordListItem[],
     isoNow?: string,
-    options?: { includeDraft?: boolean; draft?: DabingliRecord },
+    options?: { includeDraft?: boolean; draft?: DabingliRecord; includeNotes?: boolean },
   ): ExportBundle;
   parseImport(raw: string, emptyRecord: () => DabingliRecord, validDeptKeys: readonly string[]): ImportResult;
   mergeImport(
     list: RecordListItem[],
     imported: ImportResult['records'],
   ): { list: RecordListItem[]; added: number; updated: number; skipped: number };
-  replaceImport(imported: ImportResult['records']): RecordListItem[];
+  replaceImport(
+    imported: ImportResult['records'],
+    existingList?: RecordListItem[],
+  ): RecordListItem[];
   loadList(storage: StorageLike): LoadListResult;
   loadCurrent(
     storage: StorageLike,

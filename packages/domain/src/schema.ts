@@ -1432,6 +1432,8 @@ const SCHEMA = (() => {
   function emptyRecord() {
     return {
       schemaVersion: 3,
+      // AI 页原始笔记随病历保存；不写入任何展示文书。
+      rawNotes: '',
       // 元数据
       meta: {
         createdAt: new Date().toISOString(),

@@ -10,8 +10,8 @@ const AI_ASSIST = (() => {
   const $ = id => panel.querySelector('#' + id);
   function status(text) { if (panel) { $('aiStatus').textContent = text; $('aiStatus').focus(); } }
   function close(force = false) {
-    const hasDraft = panel && (($('aiNotes') && $('aiNotes').value.trim()) || ($('aiRecognizeText') && $('aiRecognizeText').value.trim()) || recognizeImage);
-    if (force !== true && panel && (pending || hasDraft) && !window.confirm('关闭会取消请求并清除本窗口的原始笔记和图片。已采纳到病历的内容会保留。确定关闭？')) return;
+    const hasDraft = panel && (($('aiRecognizeText') && $('aiRecognizeText').value.trim()) || recognizeImage || request);
+    if (force !== true && panel && (pending || hasDraft) && !window.confirm('关闭会取消请求并清除本页未发送的文字和图片；原始笔记已随病历保存在本机。已采纳到病历的内容会保留。确定关闭？')) return;
     if (pending) bridge().aiCancel(pending);
     clearTimeout(timer); pending = null; request = null; result = null; busy = false; processingImage = false; recognizeImage = null; organizeStep = 1; resultAdopted = false;
     if (panel) {
@@ -155,7 +155,7 @@ const AI_ASSIST = (() => {
     panel.innerHTML = `
       <div class="ai-heading"><div class="ai-heading-copy"><span class="ai-eyebrow">DEEPSEEK · 填写辅助</span><h1 id="aiTitle">AI 病历助手</h1></div><button id="aiClose" type="button" class="btn btn-ghost ai-close">关闭</button></div>
       <p class="ai-subtitle">整理、润色或识别资料，确认后才写入病历。</p>
-      <div class="ai-note" id="aiIntro"><span class="ai-note-icon" aria-hidden="true">i</span><p>只处理你选择的资料。结果须核对后采纳；未问、未查、不详不得当成正常。联网内容将发送至 DeepSeek。识别结果只填病史、生命体征、查体与系统回顾等白名单字段，不写诊断或处方。</p></div>
+      <div class="ai-note" id="aiIntro"><span class="ai-note-icon" aria-hidden="true">i</span><p>只处理你选择的资料。结果须核对后采纳；未问、未查、不详不得当成正常。联网内容将发送至 DeepSeek。识别结果只填病史、生命体征与查体等白名单字段，不写诊断或处方。</p></div>
       <button id="aiUnreviewed" type="button" class="btn ai-review-reminder" hidden></button>
       <details id="aiOnboarding" class="ai-onboarding">
         <summary>如何获取 DeepSeek API Key · API 设置</summary>
@@ -170,7 +170,7 @@ const AI_ASSIST = (() => {
       <nav id="aiProgress" class="ai-progress" aria-label="整理填表进度"><ol>${['贴笔记', '预览确认', '建议对照', '已采纳/回表单'].map((label, i) => `<li><button type="button" data-ai-step="${i + 1}"><span aria-hidden="true">${i + 1}</span>${label}</button></li>`).join('')}</ol></nav>
       <div id="aiTargetWrap" class="ai-field" hidden><label for="aiTarget">选择要润色的段落</label><select id="aiTarget">${Object.entries(AI_CORE.fields).filter(([k]) => k !== 'summary').map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('')}</select></div>
       <div id="aiNotesEmpty">${emptyState('从一段问诊笔记开始', '贴上原始笔记，AI 会整理文字、数值和选择项，供你逐项核对采纳。', '粘贴笔记开始')}</div>
-      <div id="aiNotesWrap" class="ai-field"><label for="aiNotes">原始问诊笔记（仅在本页保留）</label><textarea id="aiNotes" rows="5" maxlength="16000" placeholder="如：患者诉咳嗽3天，昨晚加重，发热情况未问，既往有高血压，具体用药不详。"></textarea></div>
+      <div id="aiNotesWrap" class="ai-field"><label for="aiNotes">原始问诊笔记（随病历保存在本机）</label><textarea id="aiNotes" rows="5" maxlength="16000" placeholder="如：患者诉咳嗽3天，昨晚加重，发热情况未问，既往有高血压，具体用药不详。"></textarea><div class="ai-field-actions"><button id="aiReorganize" type="button" class="btn btn-ghost">重新整理</button><span class="hint">笔记会自动保存；完成后可随时回来修改并重新整理。</span></div></div>
       <div id="aiRecognizeWrap" hidden>
         <div class="ai-section-head"><strong>识别来源</strong><span>图片与文字可同时发送</span></div>
         <div class="ai-image-actions" role="group" aria-label="添加识别资料">
@@ -244,7 +244,13 @@ const AI_ASSIST = (() => {
       if (step === 2 && resultAdopted) { prepare(); return; }
       organizeStep = step; updateFlow();
     });
-    $('aiTarget').onchange = invalidate; $('aiNotes').oninput = invalidate;
+    $('aiNotes').value = String(APP.getRecord().rawNotes || '');
+    $('aiTarget').onchange = invalidate;
+    $('aiNotes').oninput = () => { APP.setRawNotes($('aiNotes').value); invalidate(); };
+    $('aiReorganize').onclick = () => {
+      if (busy || processingImage || !$('aiNotes').value.trim()) return;
+      prepare();
+    };
     $('aiRecognizeText').oninput = invalidate;
     $('aiCameraButton').onclick = () => $('aiCameraInput').click();
     $('aiGalleryButton').onclick = () => $('aiGalleryInput').click();
@@ -298,7 +304,7 @@ const AI_ASSIST = (() => {
   }
   function setBusy(value) {
     busy = value;
-    ['aiOperation', 'aiTarget', 'aiNotes', 'aiRecognizeText', 'aiPrepare', 'aiSend', 'aiSettings', 'aiRefreshSettings', 'aiUndo', 'aiCameraButton', 'aiGalleryButton', 'aiImageClear'].forEach(id => { if ($(id)) $(id).disabled = value || (id === 'aiPrepare' && processingImage); });
+    ['aiOperation', 'aiTarget', 'aiNotes', 'aiRecognizeText', 'aiPrepare', 'aiReorganize', 'aiSend', 'aiSettings', 'aiRefreshSettings', 'aiUndo', 'aiCameraButton', 'aiGalleryButton', 'aiImageClear'].forEach(id => { if ($(id)) $(id).disabled = value || (id === 'aiPrepare' && processingImage); });
     if (panel) {
       panel.setAttribute('aria-busy', value ? 'true' : 'false');
       if ($('aiLoading')) $('aiLoading').hidden = !value;

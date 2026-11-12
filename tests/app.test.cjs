@@ -535,6 +535,111 @@ test('正常列表上合并导入照常工作，现有病历不被丢掉', () =>
   assert.deepEqual(saved.map(x => x.data.basic.name).sort(), ['新导入的', '原来就有的'].sort());
 });
 
+test('合并导入较新但不含原始笔记的备份时保留本机笔记', async () => {
+  const app = boot();
+  app.run(`(() => {
+    const r = APP.getRecord();
+    r.id = 'notes-merge-a1';
+    r.basic.name = '虚构本机较旧患者';
+    r.hpi.symptoms = '虚构本机临床内容';
+    r.rawNotes = '虚构本机笔记';
+    APP._test.saveToLibrary();
+    APP._test.newRecord();
+  })()`);
+  const result = await app.run(`(() => {
+    const existing = APP._test.getList().find(item => item.id === 'notes-merge-a1');
+    const data = JSON.parse(JSON.stringify(existing.data));
+    data.basic.name = '虚构备份较新患者';
+    const bundle = RECORD_CORE.buildExport([{
+      id: existing.id,
+      updatedAt: '2099-01-01T00:00:00.000Z',
+      data
+    }], '2099-01-01T00:00:00.000Z');
+    const parsed = RECORD_CORE.parseImport(
+      JSON.stringify(bundle),
+      SCHEMA.emptyRecord,
+      SCHEMA.DEPARTMENTS.map(department => department.key)
+    );
+    window.__notesIncluded = parsed.records[0].rawNotesIncluded;
+    return APP._test.applyImport('merge', parsed.records);
+  })()`);
+  assert.equal(result.ok, true);
+  assert.equal(result.res.updated, 1);
+  const saved = app.stored(KEYS.list).find(item => item.id === 'notes-merge-a1');
+  assert.equal(saved.data.basic.name, '虚构备份较新患者');
+  assert.equal(saved.data.rawNotes, '虚构本机笔记');
+  assert.equal(saved.rawNotesIncluded, undefined);
+  assert.equal(app.run('window.__notesIncluded'), false);
+});
+
+test('替换导入同 ID 且不含原始笔记的备份时保留本机笔记', async () => {
+  const app = boot();
+  app.run(`(() => {
+    const r = APP.getRecord();
+    r.id = 'notes-replace-a1';
+    r.basic.name = '虚构替换前患者';
+    r.rawNotes = '虚构替换前本机笔记';
+    APP._test.saveToLibrary();
+    APP._test.newRecord();
+  })()`);
+  const result = await app.run(`(() => {
+    const existing = APP._test.getList().find(item => item.id === 'notes-replace-a1');
+    const data = JSON.parse(JSON.stringify(existing.data));
+    data.basic.name = '虚构替换后患者';
+    const bundle = RECORD_CORE.buildExport([{
+      id: existing.id,
+      updatedAt: '2099-01-01T00:00:00.000Z',
+      data
+    }], '2099-01-01T00:00:00.000Z');
+    const parsed = RECORD_CORE.parseImport(
+      JSON.stringify(bundle),
+      SCHEMA.emptyRecord,
+      SCHEMA.DEPARTMENTS.map(department => department.key)
+    );
+    return APP._test.applyImport('replace', parsed.records);
+  })()`);
+  assert.equal(result.ok, true);
+  assert.equal(result.replaced, 1);
+  const saved = app.stored(KEYS.list).find(item => item.id === 'notes-replace-a1');
+  assert.equal(saved.data.basic.name, '虚构替换后患者');
+  assert.equal(saved.data.rawNotes, '虚构替换前本机笔记');
+});
+
+test('导入明确包含笔记的备份时按备份内容还原', async () => {
+  const app = boot();
+  app.run(`(() => {
+    const r = APP.getRecord();
+    r.id = 'notes-restore-a1';
+    r.basic.name = '虚构笔记还原患者';
+    r.rawNotes = '虚构本机旧笔记';
+    APP._test.saveToLibrary();
+    APP._test.newRecord();
+  })()`);
+  const result = await app.run(`(() => {
+    const existing = APP._test.getList().find(item => item.id === 'notes-restore-a1');
+    const data = JSON.parse(JSON.stringify(existing.data));
+    data.basic.name = '虚构笔记还原患者（导入）';
+    data.rawNotes = '虚构备份新笔记';
+    const bundle = RECORD_CORE.buildExport([{
+      id: existing.id,
+      updatedAt: '2099-01-01T00:00:00.000Z',
+      data
+    }], '2099-01-01T00:00:00.000Z', { includeNotes: true });
+    const parsed = RECORD_CORE.parseImport(
+      JSON.stringify(bundle),
+      SCHEMA.emptyRecord,
+      SCHEMA.DEPARTMENTS.map(department => department.key)
+    );
+    window.__notesIncluded = parsed.records[0].rawNotesIncluded;
+    return APP._test.applyImport('merge', parsed.records);
+  })()`);
+  assert.equal(result.ok, true);
+  assert.equal(app.run('window.__notesIncluded'), true);
+  const saved = app.stored(KEYS.list).find(item => item.id === 'notes-restore-a1');
+  assert.equal(saved.data.basic.name, '虚构笔记还原患者（导入）');
+  assert.equal(saved.data.rawNotes, '虚构备份新笔记');
+});
+
 /* ======================= 载入与规范化 ======================= */
 
 test('载入已有病历并把旧结构补齐', () => {

@@ -267,6 +267,7 @@ function EditorApp({
   const [exportText, setExportText] = useState(() =>
     JSON.stringify(RECORD_CORE.buildExport(initial.list, undefined, { includeDraft: true, draft: initial.record }), null, 2),
   );
+  const [exportIncludeNotes, setExportIncludeNotes] = useState(false);
   const [apiKey, setApiKey] = useState('');
   const [webAiModel, setWebAiModel] = useState('deepseek-flash');
   const androidBridge = useMemo(() => getAndroidAiBridge(), []);
@@ -338,12 +339,18 @@ function EditorApp({
     toastTimer.current = window.setTimeout(() => setToast(null), 2600);
   }
 
-  function refreshExportPreview(nextRecord = record, nextList = list) {
+  function refreshExportPreview(nextRecord = record, nextList = list, includeNotes = exportIncludeNotes) {
     const bundle = RECORD_CORE.buildExport(nextList, undefined, {
       includeDraft: true,
       draft: nextRecord,
+      includeNotes,
     });
     setExportText(JSON.stringify(bundle, null, 2));
+  }
+
+  function changeExportIncludeNotes(value: boolean) {
+    setExportIncludeNotes(value);
+    refreshExportPreview(recordRef.current, list, value);
   }
 
   async function saveAiMutation(nextRecord: DabingliRecord, message: string): Promise<boolean> {
@@ -445,6 +452,15 @@ function EditorApp({
     setDirty(true);
   }
 
+  function updateRawNotes(value: string) {
+    setRecord((previous) => {
+      const next = RECORD_CORE.cloneValue(previous);
+      next.rawNotes = String(value).slice(0, 16000);
+      return next;
+    });
+    setDirty(true);
+  }
+
   function replaceRecord(next: DabingliRecord) {
     setRecord(RECORD_CORE.cloneValue(next));
     setDirty(true);
@@ -525,6 +541,29 @@ function EditorApp({
     notify(`已打开 ${item.basic?.name || RECORD_CORE.summarize(item).name}`);
   }
 
+  async function copyRecord(item: RecordListItem) {
+    if (dirtyRef.current) await persistRecord(false);
+    const stored = await repo.loadCurrent(item.id);
+    const source = stored.ok && stored.record ? stored.record : item.data;
+    const copy = RECORD_CORE.copyRecordAsNew(source);
+    const saved = await repo.saveToLibrary(copy, 0);
+    if (!saved.ok) {
+      notify(saved.reason ?? '复制病历保存失败', 'error');
+      return;
+    }
+    const persisted = saved.record ?? copy;
+    setRecord(persisted);
+    setView('editor');
+    setStepIndex(0);
+    setDirty(false);
+    resetValidationState();
+    const loaded = await repo.loadList();
+    const nextList = loaded.ok ? loaded.list : list;
+    if (loaded.ok) setList(nextList);
+    refreshExportPreview(persisted, nextList);
+    notify('已复制为新病历；身份信息、生命体征数值、日期和号码已清空', 'success');
+  }
+
   async function deleteRecord(item: RecordListItem) {
     const nextList = RECORD_CORE.removeRecord(list, item.id);
     const result = await repo.deleteRecord(item.id);
@@ -594,13 +633,14 @@ function EditorApp({
     }
   }
 
-  async function exportJson(scope: 'current' | 'all') {
+  async function exportJson(scope: 'current' | 'all', options: { includeNotes?: boolean } = {}) {
+    const includeNotes = options.includeNotes === true;
     try {
-      const bundle = await repo.exportBackup(scope);
+      const bundle = await repo.exportBackup(scope, { includeNotes });
       const text = serializeBackup(bundle);
       setExportText(text);
       downloadJson(text, scope === 'all' ? 'dabingli-records.json' : `dabingli-${record.id ?? 'record'}.json`);
-      notify('已下载 JSON 备份', 'success');
+      notify(includeNotes ? '已下载 JSON 备份（含原始笔记）' : '已下载 JSON 备份（不含原始笔记）', 'success');
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       notify(`导出失败：${message}`, 'error');
@@ -822,11 +862,14 @@ function EditorApp({
               activeId={record.id}
               exportText={exportText}
               recovery={recovery}
+              includeNotes={exportIncludeNotes}
               onNew={createNewRecord}
               onOpen={openRecord}
+              onCopy={(item) => void copyRecord(item)}
               onDelete={deleteRecord}
               onImport={importJson}
               onDownload={exportJson}
+              onIncludeNotesChange={changeExportIncludeNotes}
               onRestoreRecovery={restoreRecovery}
             />
           </Suspense>
@@ -846,6 +889,7 @@ function EditorApp({
               initialTarget={step.key === 'hpi' ? 'hpi.symptoms' : Object.keys(AI_FIELDS).find((path) => path.startsWith(`${step.key}.`)) ?? 'hpi.symptoms'}
               createTransport={createAiTransport}
               onAdoptRecord={adoptAiRecord}
+              onRawNotesChange={updateRawNotes}
               canUndoAdoption={aiUndo?.recordId === record.id}
               onUndoAdoption={undoAiRecord}
               onConfirmField={confirmAiContent}
@@ -858,9 +902,11 @@ function EditorApp({
               settings={settings}
               exportText={exportText}
               recovery={recovery}
+              includeNotes={exportIncludeNotes}
               onChange={saveSettings}
               onImport={importJson}
               onDownload={exportJson}
+              onIncludeNotesChange={changeExportIncludeNotes}
               onRestoreRecovery={restoreRecovery}
             />
           </Suspense>

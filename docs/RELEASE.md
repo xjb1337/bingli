@@ -49,6 +49,12 @@
 
 ## 版本与身份约束
 
+当前代码线目标版本为 **3.2.0 / versionCode 320000**。`android/app/build.gradle`、
+`package.json`、网页工作区、AI 原始笔记与 Java bridge 均以此版本为准。`.github/workflows/`
+目前仍保留历史发布公式（`300000 + GITHUB_RUN_NUMBER` / `3.0.0.<run>`）；按本轮约束本次
+未修改发布工作流，正式发版前需由维护者在仓库外同步更新 workflow，并确保候选
+`versionCode` 严格高于已发布版本。
+
 发布 workflow 固定使用：
 
 ```text
@@ -64,7 +70,7 @@ minSdk = 26
   拒绝。需要修复时先合并修复，再发起新的 workflow run。
 - 每次发布前仍应人工确认当前 `update.json` 的 `versionCode` 低于候选值；不能使用
   `force` 推送 tag 或手工改写已发布清单来绕过检查。
-- `android/app/build.gradle` 的默认 `300008` 只用于本地构建；release workflow 会用本次 run
+- `android/app/build.gradle` 的默认 `320000` 只用于本地构建；release workflow 会用本次 run
   number 覆盖它。
 
 构建后 workflow 使用 Android build-tools 中的 `aapt2 dump badging` 校验首行包名为

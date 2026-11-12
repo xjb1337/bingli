@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { RECORD_CORE } from '@dabingli/domain';
 import { createIndexedDbRepository, serializeBackup, type IndexedDbRecordRepository } from '../src/index.js';
 import { databaseName, removeDatabase } from './helpers.js';
 import v1Backup from '../../../tests/fixtures/legacy/v1-backup.json';
@@ -167,5 +168,105 @@ describe('IndexedDB repository', () => {
       'legacy-v2-neurology',
       'legacy-v3-psychiatry',
     ]);
+  });
+
+  it('keeps raw notes with the record, hides them by default, and round-trips them when requested', async () => {
+    const source = await openRepository('raw-notes-source');
+    const record = newNamedRecord(source, '虚构笔记患者');
+    record.rawNotes = '虚构原始笔记：随病历保存';
+    const saved = await source.saveToLibrary(record, 0);
+    expect(saved.ok).toBe(true);
+    const id = saved.record?.id;
+    if (!id) throw new Error(saved.reason ?? 'save failed');
+
+    expect((await source.loadCurrent(id)).record?.rawNotes).toBe('虚构原始笔记：随病历保存');
+    const withoutNotes = await source.exportBackup('all');
+    expect(withoutNotes.records.every((entry) => !('rawNotes' in entry.data))).toBe(true);
+    expect(withoutNotes.includesNotes).toBeUndefined();
+
+    const withNotes = await source.exportBackup('all', { includeNotes: true });
+    expect(withNotes.includesNotes).toBe(true);
+    expect(withNotes.records.find((entry) => entry.id === id)?.data.rawNotes)
+      .toBe('虚构原始笔记：随病历保存');
+
+    const target = await openRepository('raw-notes-target');
+    await target.importBackup(serializeBackup(withNotes), 'replace');
+    const restored = (await target.loadList()).list.find((item) => item.id === id);
+    expect(restored?.data.rawNotes).toBe('虚构原始笔记：随病历保存');
+    expect((await target.loadCurrent(id)).record?.rawNotes).toBe('虚构原始笔记：随病历保存');
+
+    const deleted = await target.deleteRecord(id);
+    expect(deleted.ok).toBe(true);
+    expect((await target.loadList()).list.some((item) => item.id === id)).toBe(false);
+    const afterDelete = await target.loadCurrent(id);
+    expect(afterDelete.ok).toBe(true);
+    expect(afterDelete.record?.id).not.toBe(id);
+  });
+
+  it('preserves local raw notes when a newer merge-import backup has no notes', async () => {
+    const repository = await openRepository('raw-notes-merge');
+    const record = newNamedRecord(repository, '虚构本机较旧患者');
+    record.rawNotes = '虚构本机原始笔记';
+    const saved = await repository.saveToLibrary(record, 0);
+    if (!saved.record?.id) throw new Error(saved.reason ?? 'save failed');
+
+    const incoming = RECORD_CORE.cloneValue(saved.record);
+    incoming.basic.name = '虚构备份较新患者';
+    const bundle = RECORD_CORE.buildExport([{
+      id: saved.record.id,
+      updatedAt: '2099-01-01T00:00:00.000Z',
+      data: incoming,
+    }], '2099-01-01T00:00:00.000Z');
+    await repository.importBackup(serializeBackup(bundle), 'merge');
+
+    const restored = (await repository.loadList()).list.find((item) => item.id === saved.record?.id);
+    expect(restored?.data.basic.name).toBe('虚构备份较新患者');
+    expect(restored?.data.rawNotes).toBe('虚构本机原始笔记');
+    expect(restored && 'rawNotesIncluded' in restored).toBe(false);
+  });
+
+  it('preserves local raw notes on replacement import of the same id without notes', async () => {
+    const repository = await openRepository('raw-notes-replace');
+    const record = newNamedRecord(repository, '虚构替换前患者');
+    record.rawNotes = '虚构替换前本机笔记';
+    const saved = await repository.saveToLibrary(record, 0);
+    if (!saved.record?.id) throw new Error(saved.reason ?? 'save failed');
+
+    const incoming = RECORD_CORE.cloneValue(saved.record);
+    incoming.basic.name = '虚构替换后患者';
+    const bundle = RECORD_CORE.buildExport([{
+      id: saved.record.id,
+      updatedAt: '2099-01-01T00:00:00.000Z',
+      data: incoming,
+    }], '2099-01-01T00:00:00.000Z');
+    await repository.importBackup(serializeBackup(bundle), 'replace');
+
+    const restored = (await repository.loadList()).list.find((item) => item.id === saved.record?.id);
+    expect(restored?.data.basic.name).toBe('虚构替换后患者');
+    expect(restored?.data.rawNotes).toBe('虚构替换前本机笔记');
+    expect((await repository.loadCurrent(saved.record.id)).record?.rawNotes).toBe('虚构替换前本机笔记');
+  });
+
+  it('restores notes from a notes-enabled backup even when local notes differ', async () => {
+    const repository = await openRepository('raw-notes-restore');
+    const record = newNamedRecord(repository, '虚构笔记还原患者');
+    record.rawNotes = '虚构本机旧笔记';
+    const saved = await repository.saveToLibrary(record, 0);
+    if (!saved.record?.id) throw new Error(saved.reason ?? 'save failed');
+
+    const incoming = RECORD_CORE.cloneValue(saved.record);
+    incoming.basic.name = '虚构笔记还原患者（导入）';
+    incoming.rawNotes = '虚构备份新笔记';
+    const bundle = RECORD_CORE.buildExport([{
+      id: saved.record.id,
+      updatedAt: '2099-01-01T00:00:00.000Z',
+      data: incoming,
+    }], '2099-01-01T00:00:00.000Z', { includeNotes: true });
+    expect(bundle.includesNotes).toBe(true);
+    await repository.importBackup(serializeBackup(bundle), 'merge');
+
+    const restored = (await repository.loadList()).list.find((item) => item.id === saved.record?.id);
+    expect(restored?.data.basic.name).toBe('虚构笔记还原患者（导入）');
+    expect(restored?.data.rawNotes).toBe('虚构备份新笔记');
   });
 });

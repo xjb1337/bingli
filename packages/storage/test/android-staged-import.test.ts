@@ -13,8 +13,9 @@ function repo(label: string) {
   const r = createIndexedDbRepository({ databaseName: name, autoMigrate: false });
   repositories.push(r); return r;
 }
-function payload(): string {
-  const records = [v1Record, v2Record, v3Record] as any[];
+function payload(mutate?: (records: any[]) => void): string {
+  const records = JSON.parse(JSON.stringify([v1Record, v2Record, v3Record])) as any[];
+  if (mutate) mutate(records);
   const keys: Record<string, string> = {
     [RECORD_CORE.STORAGE_KEYS.list]: JSON.stringify(records.map((data) => ({ id: data.id, updatedAt: data.updatedAt, schemaVersion: data.schemaVersion, basic: data.basic, data } as RecordListItem))),
     [RECORD_CORE.STORAGE_KEYS.current]: JSON.stringify({ id: records[2].id }),
@@ -47,5 +48,19 @@ describe('Android staged legacy import', () => {
     await r.saveToLibrary(record, 0);
     await expect(importStagedLegacy(payload(), r)).rejects.toThrow(/已有数据/);
     expect((await r.loadList()).list[0]!.data.basic.name).toBe('已有患者');
+  });
+  it('keeps raw notes when migrating staged Android legacy data', async () => {
+    const r = repo('android-raw-notes'); await r.initialize();
+    const result = await importStagedLegacy(payload((records) => {
+      records[2].rawNotes = '虚构迁移原始笔记';
+    }), r);
+    expect(result.comparison.records).toBe(true);
+    expect(result.comparison.exportJson).toBe(true);
+    const migrated = (await r.loadList()).list.find((item) => item.id === result.ids[2]);
+    expect(migrated?.data.rawNotes).toBe('虚构迁移原始笔记');
+    const exported = await r.exportBackup('all', { includeNotes: true });
+    expect(exported.includesNotes).toBe(true);
+    expect(exported.records.find((item) => item.id === result.ids[2])?.data.rawNotes)
+      .toBe('虚构迁移原始笔记');
   });
 });

@@ -79,7 +79,7 @@ export interface RecordRepository {
   loadSettings(): Promise<SettingsResult>;
   saveSettings(settings: AppSettings): Promise<SaveResult>;
   importBackup(raw: string, mode: ImportMode): Promise<ImportSummary>;
-  exportBackup(scope?: BackupScope): Promise<ExportBundle>;
+  exportBackup(scope?: BackupScope, options?: { includeNotes?: boolean }): Promise<ExportBundle>;
   listRecoveryCopies(): Promise<RecoveryCopySummary[]>;
   restoreRecovery(id: string): Promise<RestoreSummary>;
   readMeta<T = unknown>(key: string): Promise<T | null>;

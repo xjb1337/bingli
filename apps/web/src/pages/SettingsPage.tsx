@@ -8,17 +8,21 @@ export function SettingsPage({
   settings,
   exportText,
   recovery,
+  includeNotes,
   onChange,
   onImport,
   onDownload,
+  onIncludeNotesChange,
   onRestoreRecovery,
 }: {
   settings: AppSettings;
   exportText: string;
   recovery?: RecoveryCopySummary | null;
+  includeNotes: boolean;
   onChange: (settings: AppSettings) => void;
   onImport: (raw: string, mode: 'merge' | 'replace') => void;
-  onDownload: (scope: 'current' | 'all') => void;
+  onDownload: (scope: 'current' | 'all', options?: { includeNotes?: boolean }) => void;
+  onIncludeNotesChange: (value: boolean) => void;
   onRestoreRecovery?: () => void;
 }) {
   return (
@@ -55,6 +59,8 @@ export function SettingsPage({
         <DataTransferPanel
           exportText={exportText}
           recovery={recovery}
+          includeNotes={includeNotes}
+          onIncludeNotesChange={onIncludeNotesChange}
           onImport={onImport}
           onDownload={onDownload}
           onRestoreRecovery={onRestoreRecovery}

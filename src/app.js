@@ -25,7 +25,7 @@ const APP = (() => {
 
   /** 浏览器构建的回退版本；Android 运行时优先读取原生 BuildConfig.VERSION_NAME。 */
   // 与当前 Android 发布线保持一致；原生桥接存在时以 BuildConfig.VERSION_NAME 为准。
-  const APP_VERSION = '3.0.0.8';
+  const APP_VERSION = '3.2.0';
 
   function appVersion() {
     try {
@@ -541,6 +541,15 @@ const APP = (() => {
   function saveSettings() {
     REPO.saveSettings(settings);
     applyFontScale();
+  }
+
+  /** AI 页原始笔记随当前病历保存；输入走短防抖，生命周期事件立即落盘。 */
+  function setRawNotes(value) {
+    if (!R) return false;
+    const next = String(value == null ? '' : value).slice(0, 16000);
+    if (String(R.rawNotes || '') === next) return true;
+    R.rawNotes = next;
+    return scheduleCurrentSave();
   }
 
   function applyFontScale() {
@@ -2144,6 +2153,8 @@ const APP = (() => {
         <div class="btn-row">
           <button class="btn" data-act="copyText">复制本篇</button>
           <button class="btn btn-ghost" data-act="downloadTxt">下载 .txt</button>
+          <button class="btn btn-ghost" data-act="shareText">分享</button>
+          <button class="btn btn-ghost" data-act="printText">打印 / 存 PDF</button>
           ${OUT_VIEW === 'record'
             ? '<button class="btn btn-ghost" data-act="copySection">复制某段</button>'
             : ''}
@@ -2703,6 +2714,7 @@ const APP = (() => {
             <button type="button" class="btn btn-ghost" data-settings-action="exportBackup">导出全部备份</button>
             <button type="button" class="btn btn-ghost" data-settings-action="exportCurrentBackup">导出当前病历</button>
           </div>
+          <label class="settings-note"><input type="checkbox" id="settingsExportNotes"> 备份中包含原始笔记（默认关闭；笔记可能含患者信息）</label>
           <div class="settings-note settings-note-warn">病历保存在本机浏览器存储中，备份文件未加密。更换设备或清理数据前，请先导出并妥善保管备份。</div>
         </section>
 
@@ -3087,8 +3099,16 @@ const APP = (() => {
         switch (ds.settingsAction) {
           case 'back': closeSettings(); break;
           case 'openList': openList(); break;
-          case 'exportBackup': exportBackup(); break;
-          case 'exportCurrentBackup': exportCurrentBackup(); break;
+          case 'exportBackup': {
+            const box = document.getElementById('settingsExportNotes');
+            exportBackup(!!(box && box.checked));
+            break;
+          }
+          case 'exportCurrentBackup': {
+            const box = document.getElementById('settingsExportNotes');
+            exportCurrentBackup(!!(box && box.checked));
+            break;
+          }
           case 'resetFont':
             settings.fontScale = CORE.SETTINGS_DEFAULTS.fontScale;
             saveSettings();
@@ -3731,6 +3751,14 @@ const APP = (() => {
         downloadText(cur.text, cur.label);
         break;
       }
+      case 'shareText': {
+        shareCurrentOutput();
+        break;
+      }
+      case 'printText': {
+        printCurrentOutput();
+        break;
+      }
       case 'copySection': {
         showSectionPicker();
         break;
@@ -3899,9 +3927,27 @@ const APP = (() => {
     });
   }
 
+  function safeFilePart(value, fallback) {
+    const text = String(value == null ? '' : value).trim()
+      .replace(/[\\/:*?"<>|\r\n]+/g, '_')
+      .replace(/^_+|_+$/g, '');
+    return text || fallback;
+  }
+
+  /** 导出名不使用患者姓名：优先科室，通用科使用病历短 ID。 */
+  function outputFileName(label) {
+    const dept = SCHEMA.DEPARTMENTS.find(item => item.key === R.basic.department);
+    const shortId = String(R.id || '').replace(/[^0-9a-z]/gi, '').slice(-6) || '病历';
+    const tag = dept && dept.key !== 'general' ? dept.name : shortId;
+    return [
+      safeFilePart(label || '大病历', '大病历'),
+      safeFilePart(tag, shortId),
+      safeFilePart(R.basic.recordDate || SCHEMA.todayStr(), SCHEMA.todayStr())
+    ].join('_') + '.txt';
+  }
+
   function downloadText(text, label) {
-    const name = (R.basic.name || '患者') + '_' + (label || '大病历') + '_' +
-      (R.basic.recordDate || SCHEMA.todayStr()) + '.txt';
+    const name = outputFileName(label);
     if (window.BingliAndroid) { window.BingliAndroid.export(text, name, 'text/plain'); return; }
     const blob = new Blob(['\ufeff' + text], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -3913,6 +3959,64 @@ const APP = (() => {
     document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     toast('已开始下载');
+  }
+
+  function printableHtml(title, text) {
+    return '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">'
+      + '<meta name="viewport" content="width=device-width,initial-scale=1">'
+      + '<title>' + esc(title) + '</title><style>'
+      + '@page{size:A4;margin:16mm}'
+      + 'body{margin:0;color:#111;background:#fff;font-family:"Noto Serif CJK SC","Songti SC",serif;font-size:12pt;line-height:1.75}'
+      + 'h1{margin:0 0 12pt;text-align:center;font-size:16pt}'
+      + 'pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;margin:0}'
+      + '</style></head><body><h1>' + esc(title) + '</h1><pre>' + esc(text) + '</pre></body></html>';
+  }
+
+  function printCurrentOutput() {
+    if (!confirmSidePlaceholders()) return false;
+    const cur = currentOutput();
+    if (window.BingliAndroid && window.BingliAndroid.printDocument) {
+      window.BingliAndroid.printDocument(printableHtml(cur.label, cur.text), cur.label);
+      toast('已打开系统打印');
+      return true;
+    }
+    if (typeof window.print !== 'function') { toast('当前环境不支持打印'); return false; }
+    const node = document.createElement('pre');
+    node.className = 'print-document';
+    node.textContent = cur.text;
+    node.setAttribute('data-print-title', cur.label);
+    document.body.appendChild(node);
+    document.body.classList.add('printing-document');
+    const cleanup = () => {
+      document.body.classList.remove('printing-document');
+      if (node.parentNode) node.parentNode.removeChild(node);
+      window.removeEventListener('afterprint', cleanup);
+    };
+    window.addEventListener('afterprint', cleanup, { once: true });
+    window.print();
+    setTimeout(cleanup, 3000);
+    return true;
+  }
+
+  async function shareCurrentOutput() {
+    if (!confirmSidePlaceholders()) return false;
+    const cur = currentOutput();
+    if (window.BingliAndroid && window.BingliAndroid.share) {
+      window.BingliAndroid.share(cur.text, outputFileName(cur.label), 'text/plain');
+      toast('已打开系统分享');
+      return true;
+    }
+    if (navigator && typeof navigator.share === 'function') {
+      try {
+        await navigator.share({ title: cur.label, text: cur.text });
+        toast('已打开系统分享');
+        return true;
+      } catch (error) {
+        if (error && error.name === 'AbortError') return false;
+      }
+    }
+    await copyToClipboard(cur.text);
+    return true;
   }
 
   /* ========================= 病历列表 ========================= */
@@ -4048,11 +4152,27 @@ const APP = (() => {
     return afterSave(saveCurrentAwait(), go);
   }
 
-  function openList() {
-    loadList();
-    const rows = CORE.sortByUpdated(LIST).map(item => {
+  function departmentNameOf(key) {
+    return (SCHEMA.DEPARTMENTS.find(d => d.key === key) || {}).name || '通用';
+  }
+
+  function listRowsHtml(items, query) {
+    if (!LIST.length) {
+      return `<div class="empty-state empty-state--records">
+        <span class="empty-state-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M9 11h7M9 15h5M14 3v5h5"/></svg></span>
+        <strong>还没有保存的病历</strong>
+        <p>先整理当前患者资料，保存后就会出现在这里。</p>
+      </div>`;
+    }
+    if (!items.length) {
+      return `<div class="empty-state empty-state--records">
+        <strong>没有匹配的病历</strong>
+        <p>未找到“${esc(query)}”。可换用姓名、主诉、科室或诊断的部分文字。</p>
+      </div>`;
+    }
+    return items.map(item => {
       const s = CORE.summarize(item);
-      const dept = (SCHEMA.DEPARTMENTS.find(d => d.key === s.department) || {}).name || '通用';
+      const dept = departmentNameOf(s.department);
       return `
         <div class="list-row">
           <span class="list-avatar" aria-hidden="true">${esc((s.name || '病').trim().slice(0, 1))}</span>
@@ -4064,9 +4184,46 @@ const APP = (() => {
             <div class="list-sub">${esc(dept)} · ${esc((s.chiefComplaint || '无主诉').slice(0, 20))}</div>
             <div class="list-sub muted">更新于 ${esc(fmtTime(s.updatedAt))}</div>
           </div>
-          <button class="btn-del" data-del="${esc(s.id)}">删除</button>
+          <div class="list-actions">
+            <button class="btn btn-ghost btn-sm" data-copy="${esc(s.id)}">复制为新病历</button>
+            <button class="btn-del" data-del="${esc(s.id)}">删除</button>
+          </div>
         </div>`;
     }).join('');
+  }
+
+  async function copyRecordFromList(id) {
+    const found = CORE.findRecord(LIST, id);
+    if (!found) return false;
+    if (hasRecordContent(R) && !(await saveToLibrary())) return false;
+    const source = recordForOpen(found.id, found.data || found, found);
+    if (!source) return false;
+    source.id = found.id;
+    const copy = CORE.copyRecordAsNew(source);
+    const previous = R;
+    const previousSession = getSessionId();
+    R = copy;
+    setSessionId(copy.id);
+    step = 0;
+    remoteConflict = null;
+    activeImportGuard = '';
+    const saved = await saveToLibrary();
+    if (!saved) {
+      R = previous;
+      setSessionId(previousSession);
+      render();
+      toast('复制失败：新病历未能保存，原病历未改动');
+      return false;
+    }
+    render();
+    toast('已复制为新病历；身份信息、生命体征数值、日期和号码已清空');
+    return true;
+  }
+
+  function openList() {
+    loadList();
+    const initial = CORE.sortByUpdated(LIST);
+    const rows = listRowsHtml(initial, '');
 
     const alertHtml = storageAlert
       ? `<div class="warn-item" style="margin-bottom:10px">${esc(storageAlert)}</div>` : '';
@@ -4080,11 +4237,11 @@ const APP = (() => {
           <button type="button" class="modal-close" data-close aria-label="关闭病历列表">关闭</button>
         </div>
         ${alertHtml}
-        <div class="list-box">${rows || `<div class="empty-state empty-state--records">
-          <span class="empty-state-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M9 11h7M9 15h5M14 3v5h5"/></svg></span>
-          <strong>还没有保存的病历</strong>
-          <p>先整理当前患者资料，保存后就会出现在这里。</p>
-        </div>`}</div>
+        <label class="list-search">
+          <span class="visually-hidden">搜索病历</span>
+          <input type="search" id="recordSearch" placeholder="搜索姓名、主诉、科室、诊断" autocomplete="off">
+        </label>
+        <div class="list-box" id="recordListBox">${rows}</div>
         <div class="btn-row">
           <button class="btn" data-new>新建病历</button>
           <button class="btn btn-ghost" data-backup>导出备份</button>
@@ -4092,14 +4249,33 @@ const APP = (() => {
           <button class="btn btn-ghost" data-import-file>导入备份</button>
           <button class="btn btn-ghost" data-close>关闭</button>
         </div>
+        <label class="hint"><input type="checkbox" id="exportIncludeNotes"> 导出备份时包含原始笔记（默认关闭；笔记可能含患者信息）</label>
         <div class="hint">病历和备份文件未加密，请妥善保管。数据只存在本机浏览器；换设备或清理数据前请先备份。</div>
       </div>`;
     document.body.appendChild(wrap);
 
+    const search = wrap.querySelector('#recordSearch');
+    const listBox = wrap.querySelector('#recordListBox');
+    if (search && listBox) {
+      search.addEventListener('input', () => {
+        const query = String(search.value || '');
+        const filtered = CORE.searchRecords(LIST, query, { departmentName: departmentNameOf });
+        listBox.innerHTML = listRowsHtml(CORE.sortByUpdated(filtered), query.trim());
+      });
+    }
+
     wrap.addEventListener('click', async ev => {
       if (ev.target === wrap || ev.target.hasAttribute('data-close')) { wrap.remove(); return; }
-      if (ev.target.hasAttribute('data-backup')) { exportBackup(); return; }
-      if (ev.target.hasAttribute('data-backup-current')) { exportCurrentBackup(); return; }
+      if (ev.target.hasAttribute('data-backup')) {
+        const box = wrap.querySelector('#exportIncludeNotes');
+        exportBackup(!!(box && box.checked));
+        return;
+      }
+      if (ev.target.hasAttribute('data-backup-current')) {
+        const box = wrap.querySelector('#exportIncludeNotes');
+        exportCurrentBackup(!!(box && box.checked));
+        return;
+      }
       if (ev.target.hasAttribute('data-import-file')) { wrap.remove(); importBackup(); return; }
       if (ev.target.hasAttribute('data-new')) {
         if (hasRecordContent(R)) {
@@ -4118,6 +4294,13 @@ const APP = (() => {
         if (!deleted) toast('删除失败，请查看页面顶部提示');
         wrap.remove();
         openList();
+        return;
+      }
+      const copyId = ev.target.dataset.copy;
+      if (copyId) {
+        if (!confirm('复制为新病历？将保留科室和病种相关结构，清空身份信息、生命体征数值、日期和号码，且不复制原始笔记。')) return;
+        await copyRecordFromList(copyId);
+        wrap.remove();
         return;
       }
       const openId = ev.target.closest('[data-open]') && ev.target.closest('[data-open]').dataset.open;
@@ -4188,28 +4371,34 @@ const APP = (() => {
 
   /* ========================= 备份导出 / 导入 ========================= */
 
-  function exportBackup() {
+  function exportBackup(includeNotes = false) {
     // 当前草稿可能比列表里的版本更新，导出前必须让用户明确选择
     const includeDraft = !!R && window.confirm(
       '备份默认包含已保存到「病历列表」的记录。\n\n' +
       '是否同时包含当前正在编辑的最新草稿？\n' +
       '（选「确定」= 包含最新草稿；选「取消」= 只导出病历列表）'
     );
-    const payload = CORE.buildExport(LIST, new Date().toISOString(), { includeDraft, draft: R });
+    const payload = CORE.buildExport(LIST, new Date().toISOString(), {
+      includeDraft,
+      draft: R,
+      includeNotes: includeNotes === true
+    });
     if (!payload.records.length) {
       toast('还没有保存的病历可导出');
       return;
     }
     const name = `大病历备份_${SCHEMA.todayStr()}.json`;
     downloadBlob(JSON.stringify(payload, null, 2), name, 'application/json');
-    toast(`已导出 ${payload.records.length} 份病历${payload.includesDraft ? '（含当前草稿）' : ''}`);
+    toast(`已导出 ${payload.records.length} 份病历${payload.includesDraft ? '（含当前草稿）' : ''}${payload.includesNotes ? '（含原始笔记）' : '（不含原始笔记）'}`);
   }
 
-  function exportCurrentBackup() {
+  function exportCurrentBackup(includeNotes = false) {
     const record = CORE.upsertRecord([], R, new Date().toISOString()).list;
-    const payload = CORE.buildExport(record, new Date().toISOString());
+    const payload = CORE.buildExport(record, new Date().toISOString(), {
+      includeNotes: includeNotes === true
+    });
     downloadBlob(JSON.stringify(payload, null, 2), `当前病历备份_${SCHEMA.todayStr()}.json`, 'application/json');
-    toast('已导出当前病历，请妥善保管未加密的备份');
+    toast(`已导出当前病历${payload.includesNotes ? '（含原始笔记）' : '（不含原始笔记）'}，请妥善保管未加密的备份`);
   }
 
   function downloadBlob(text, filename, mime) {
@@ -4274,7 +4463,7 @@ const APP = (() => {
       id: item.id, updatedAt: item.updatedAt || '', basic: item.basic, data: item
     });
     const res = mode === 'merge' ? CORE.mergeImport(loaded.list, incoming) : null;
-    let next = res ? res.list : CORE.replaceImport(incoming);
+    let next = res ? res.list : CORE.replaceImport(incoming, loaded.list);
     const changed = next.filter(item => item && CORE.findRecord(loaded.list, item.id) !== item);
     const guards = [];
     let preserved = 0;
@@ -4491,6 +4680,9 @@ const APP = (() => {
 
     // 防误关：尝试保存一次
     window.addEventListener('beforeunload', () => { flushPendingSave(); });
+    // ColorOS 等系统在切后台/拍照时可能直接结束 WebView；pagehide 与
+    // visibilitychange 都要立即刷新防抖中的草稿（含 AI 原始笔记）。
+    window.addEventListener('pagehide', () => { flushPendingSave(); });
 
     // 多标签页：只关心「同一份病历」的草稿键；不同病历各写各的槽位。
     window.addEventListener('storage', ev => {
@@ -4519,6 +4711,10 @@ const APP = (() => {
 
     // 回到前台时若之前有存储异常，重新渲染让提示可见
     document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') {
+        flushPendingSave();
+        return;
+      }
       if (document.visibilityState === 'visible' && storageAlert) render();
     });
   }
@@ -4583,6 +4779,8 @@ const APP = (() => {
 
   return {
     init, getRecord: () => R, STEPS,
+    setRawNotes,
+    flushSave: flushPendingSave,
     jumpToPath: path => { closeSettings(); jumpToPath(path); },
     getAiTarget: () => {
       const key = (STEPS[step] || {}).key;
@@ -4660,6 +4858,8 @@ const APP = (() => {
       navRowsHtml: () => navRowsHtml(),
       // 存储写入锁：测试要能直接触发自动保存、普通保存，并读到锁状态
       saveCurrent, saveCurrentAwait, flushPendingSave, saveWithFeedback, saveList,
+      setRawNotes,
+      outputFileName,
       currentSaveBlocked: () => currentSaveBlocked,
       listSaveBlocked: () => listSaveBlocked,
       corruptCurrentRaw: () => corruptCurrentRaw,
