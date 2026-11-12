@@ -48,19 +48,19 @@ test('AI：润色只提供选中段落，检查功能没有可写入字段', () 
 });
 test('AI：有效引用可解析，越界、重复字段与伪造引用整单拒绝', () => {
   const q = request(record()); assert.equal(AI.validate(response(), q).suggestions.length, 1);
-  assert.throws(() => AI.validate(response('张三', '患者诉咳嗽3天', 'basic.name'), q), /越界/);
+  assert.match(AI.validate(response('张三', '患者诉咳嗽3天', 'basic.name'), q).dropped[0].reason, /越界/);
   const duplicate = response(); duplicate.suggestions.push(duplicate.suggestions[0]);
-  assert.throws(() => AI.validate(duplicate, q), /重复/);
-  assert.throws(() => AI.validate(response('无发热', '无发热'), q), /无法核实/);
-  assert.throws(() => AI.validate(response('正常', ''), q), /无法核实/);
+  assert.match(AI.validate(duplicate, q).dropped[0].reason, /重复/);
+  assert.match(AI.validate(response('无发热', '无发热'), q).dropped[0].reason, /无法核实/);
+  assert.match(AI.validate(response('正常', ''), q).dropped[0].reason, /无法核实/);
 });
 test('AI：阻止新增数字、偷换时间单位、丢失不详来源与否定限定', () => {
   const q = request(record(), '患者诉咳嗽3天，药名不详，否认胸痛');
-  assert.throws(() => AI.validate(response('咳嗽5天', '咳嗽3天'), q), /数字/);
-  assert.throws(() => AI.validate(response('咳嗽3年', '咳嗽3天'), q), /单位/);
-  assert.throws(() => AI.validate(response('用药治疗', '药名不详'), q), /限定/);
-  assert.throws(() => AI.validate(response('咳嗽3天', '患者诉咳嗽3天'), q), /限定/);
-  assert.throws(() => AI.validate(response('胸痛', '否认胸痛'), q), /否定/);
+  assert.match(AI.validate(response('咳嗽5天', '咳嗽3天'), q).dropped[0].reason, /数字/);
+  assert.match(AI.validate(response('咳嗽3年', '咳嗽3天'), q).dropped[0].reason, /单位/);
+  assert.match(AI.validate(response('用药治疗', '药名不详'), q).dropped[0].reason, /限定/);
+  assert.match(AI.validate(response('咳嗽3天', '患者诉咳嗽3天'), q).dropped[0].reason, /限定/);
+  assert.match(AI.validate(response('胸痛', '否认胸痛'), q).dropped[0].reason, /否定/);
 });
 test('AI：空白、截断和结构异常拒绝，不静默修补 JSON', () => {
   const q = request(record());

@@ -22,6 +22,9 @@ import {
   AndroidBridgeTransport,
   WebFetchTransport,
   confirmAiField,
+  createAiAdoptionUndo,
+  undoAiAdoption,
+  type AiAdoptionUndo,
   getAndroidAiBridge,
   type AiTransport,
   type AiTransportFactory,
@@ -274,6 +277,7 @@ function EditorApp({
   const saveTimer = useRef<number | null>(null);
   const saveFlushRef = useRef(false);
   const recordRef = useRef(record);
+  const [aiUndo, setAiUndo] = useState<AiAdoptionUndo | null>(null);
   const dirtyRef = useRef(dirty);
   recordRef.current = record;
   dirtyRef.current = dirty;
@@ -352,6 +356,7 @@ function EditorApp({
       return false;
     }
     const persisted = saved.record ?? nextRecord;
+    recordRef.current = persisted;
     setRecord(persisted);
     setDirty(false);
     const loaded = await repo.loadList();
@@ -363,8 +368,20 @@ function EditorApp({
     return true;
   }
 
-  async function adoptAiRecord(nextRecord: DabingliRecord): Promise<boolean> {
-    return saveAiMutation(nextRecord, 'AI 建议已采纳，仍需逐项核对');
+  async function adoptAiRecord(nextRecord: DabingliRecord, paths: readonly string[]): Promise<boolean> {
+    const undo = createAiAdoptionUndo(recordRef.current, nextRecord, paths);
+    const saved = await saveAiMutation(nextRecord, 'AI 建议已采纳，仍需逐项核对');
+    if (saved) setAiUndo(undo);
+    return saved;
+  }
+
+  async function undoAiRecord(): Promise<boolean> {
+    if (!aiUndo || aiUndo.recordId !== recordRef.current.id) return false;
+    const undone = undoAiAdoption(recordRef.current, aiUndo);
+    const message = `已撤销 ${undone.restored} 项${undone.kept ? `，保留 ${undone.kept} 项后来修改的内容` : ''}`;
+    const saved = await saveAiMutation(undone.record, message);
+    if (saved) setAiUndo(null);
+    return saved;
   }
 
   async function confirmAiContent(path: string): Promise<boolean> {
@@ -833,6 +850,8 @@ function EditorApp({
               initialTarget={step.key === 'hpi' ? 'hpi.symptoms' : Object.keys(AI_FIELDS).find((path) => path.startsWith(`${step.key}.`)) ?? 'hpi.symptoms'}
               createTransport={createAiTransport}
               onAdoptRecord={adoptAiRecord}
+              canUndoAdoption={aiUndo?.recordId === record.id}
+              onUndoAdoption={undoAiRecord}
               onConfirmField={confirmAiContent}
               onJumpToPath={jumpToPath}
             />

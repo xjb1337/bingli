@@ -134,3 +134,37 @@ test('整理进度、建议采纳、未核对提醒、核对、撤销和返回�
   a.run('AI_ASSIST.close(true)');
   assert.ok(!a.d.body.classList.contains('ai-view'));
 });
+
+test('整理填表同屏确认文字、数值和选择项，撤销保留之后的手改', async t => {
+  const a = await boot(t); a.$('btnAi').click(); prepare(a, 'organize');
+  const note = '患者诉咳嗽3天，否认发热。体温37.8℃，脉搏96次/分，否认吸烟。';
+  a.$('aiNotes').value = note;
+  a.$('aiNotes').dispatchEvent(new a.w.Event('input'));
+  a.$('aiPrepare').click(); send(a);
+  const content = {ok:true, model:'deepseek-flash', content:{suggestions:[
+    {path:'hpi.symptoms', text:'患者诉咳嗽3天。', evidence:[{source:'note', quote:'患者诉咳嗽3天'}]},
+    {path:'pe.vitals.temperature', text:'37.8', evidence:[{source:'note', quote:'体温37.8℃'}]},
+    {path:'personal.smoking', text:'无', evidence:[{source:'note', quote:'否认吸烟'}]},
+    {path:'pe.vitals.pulse', text:'69', evidence:[{source:'note', quote:'脉搏96次/分'}]},
+  ], issues:[], questions:[]}};
+  a.run(`AI_ASSIST.receive(${JSON.stringify(a.wire.sent.at(-1).id)}, ${JSON.stringify(content)})`);
+  assert.match(a.$('aiResult').textContent, /数值项/);
+  assert.match(a.$('aiResult').textContent, /选择项/);
+  assert.match(a.$('aiResult').textContent, /未通过核对/);
+  const inputs = [...a.d.querySelectorAll('[data-ai-choice]')];
+  assert.equal(inputs.length, 3); assert.ok(inputs.every(input => !input.checked));
+  inputs.forEach(input => { input.checked = true; }); a.$('aiApply').click();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(a.run('APP.getRecord().pe.vitals.temperature'), '37.8');
+  assert.equal(a.run('APP.getRecord().personal.smoking'), '无');
+  assert.equal(a.run('APP.getRecord().pe.vitals.pulse') ?? '', '');
+  a.d.querySelector('[data-ai-edit="hpi.symptoms"]').click();
+  const symptoms = a.d.querySelector('[data-path="hpi.symptoms"]');
+  symptoms.value = '手改后的症状'; symptoms.dispatchEvent(new a.w.Event('input', {bubbles:true}));
+  a.run('APP._test.gotoStep("personal")');
+  a.d.querySelector('[data-seg="personal.smoking"][data-val="无"]').click();
+  a.$('btnAi').click(); a.$('aiUndo').click();
+  assert.equal(a.run('APP.getRecord().hpi.symptoms'), '手改后的症状');
+  assert.equal(a.run('APP.getRecord().pe.vitals.temperature') ?? '', '');
+  assert.equal(a.run('APP.getRecord().personal.smoking'), '无');
+});

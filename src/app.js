@@ -54,6 +54,7 @@ const APP = (() => {
   const SESSION_ID = 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   /** 撤销栈：只在本机内存里，刷新即失效 */
   const HISTORY = CORE.createHistory(20);
+  let lastAiUndo = null;
   /** 界面层临时展示的生命体征示例值（绝不写入病历） */
   let vitalsExample = null;
 
@@ -3022,7 +3023,7 @@ const APP = (() => {
         // 查体项：只刷新这一个条目的「已填 / 系统默认 / 需填」标记，
         // 不整页重绘（否则输入框会失焦、光标跳到开头）。
         if (t.dataset.path.startsWith('pe.')) refreshPeBadge(t);
-        if (t.dataset.path.startsWith('pe.')) CORE.markFieldManual(R, t.dataset.path);
+        if (t.dataset.path.startsWith('pe.') || CORE.fieldState(R, t.dataset.path).source === 'ai') CORE.markFieldManual(R, t.dataset.path);
         // 生命体征的可信范围：边输边标，不等生成时才说
         if (t.dataset.path.startsWith('pe.vitals.')) markVital(t);
         // 过敏史/性别切换需要重绘
@@ -3203,6 +3204,7 @@ const APP = (() => {
       if (ds.seg !== undefined && ds.act === undefined) {
         const prevGender = R.basic.gender;
         setPath(R, ds.seg, ds.val);
+        if (CORE.fieldState(R, ds.seg).source === 'ai') CORE.markFieldManual(R, ds.seg);
         saveCurrent();
         const needsRerender =
           ds.seg === 'basic.department' || ds.seg === 'pmh.allergy' ||
@@ -3261,6 +3263,8 @@ const APP = (() => {
           item.status = 'asked_negative';
           item.factState = 'asked_negative';
         }
+        const rosPath = 'ros.' + ds.ros + '.' + ds.sym + '.status';
+        if (CORE.fieldState(R, rosPath).source === 'ai') CORE.markFieldManual(R, rosPath);
         saveCurrent();
         // 更新按钮外观与详情区
         const label = SCHEMA.ROS.find(s => s.key === ds.ros).symptoms.find(s => s.key === ds.sym).label;
@@ -3351,6 +3355,8 @@ const APP = (() => {
       if (ds.pequick !== undefined) {
         const group = R.pe[ds.pequick] || (R.pe[ds.pequick] = {});
         group[ds.pekey] = ds.val;
+        const quickPath = 'pe.' + ds.pequick + '.' + ds.pekey;
+        if (CORE.fieldState(R, quickPath).source === 'ai') CORE.markFieldManual(R, quickPath);
         // 选了一个具体描述 = 这次查过了，自动勾上（专科技巧：不然点了描述却仍标「未查」）
         if (SCHEMA.setPeChecked) SCHEMA.setPeChecked(R, ds.pequick, ds.pekey, true);
         saveCurrent();
@@ -4595,7 +4601,7 @@ const APP = (() => {
     async applyAI(request, result, selected, allowReplace, model) {
       if (currentSaveBlocked || listSaveBlocked || remoteConflict) throw Error('请先处理页面上的保存异常或修订冲突');
       const next = AI_CORE.apply(R, request, result, selected, allowReplace, model);
-      snapshot('采纳 AI 建议');
+      lastAiUndo = AI_CORE.createAdoptionUndo(R, next, selected.map(i => result.suggestions[i].path));
       R = next;
       const saved = await saveCurrentAwait();
       render();
@@ -4607,7 +4613,17 @@ const APP = (() => {
       if (path === 'summary') CORE.markDocumentReviewed(R, 'summary');
       saveCurrent(); render(); return true;
     },
-    undoAI: undoLast,
+    undoAI() {
+      if (!lastAiUndo || !R || lastAiUndo.recordId !== R.id) { toast('没有本次 AI 采纳记录'); return false; }
+      if (currentSaveBlocked || listSaveBlocked || remoteConflict) { toast('请先处理保存异常或修订冲突'); return false; }
+      const undone = AI_CORE.undoAdoption(R, lastAiUndo);
+      R = undone.record;
+      lastAiUndo = null;
+      const saved = saveCurrent();
+      render();
+      toast(`已撤销 ${undone.restored} 项${undone.kept ? `，保留 ${undone.kept} 项后来修改的内容` : ''}${saved ? '' : '（尚未写入本机）'}`);
+      return true;
+    },
     // 供测试使用
     _test: {
       saveToLibrary,

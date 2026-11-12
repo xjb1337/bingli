@@ -454,7 +454,7 @@ describe('DeepSeek web security boundary', () => {
     await user.click(screen.getByRole('button', { name: '生成建议' }));
     await screen.findByRole('heading', { name: '建议对照 · 尚未写入' });
 
-    expect(screen.getByText('1 条建议因格式问题未采用')).toBeInTheDocument();
+    expect(screen.getByText('1 条建议未通过核对，未采用')).toBeInTheDocument();
     expect(screen.getByText(/生命体征 · 脉搏/)).toBeInTheDocument();
     expect(screen.getByText(/缺少有效原文依据/)).toBeInTheDocument();
   });
@@ -692,7 +692,7 @@ describe('DeepSeek web security boundary', () => {
           {
             path: 'ros.resp.cough.status',
             text: 'asked_negative',
-            evidence: [{ source: 'note', quote: '患者诉咳嗽3天' }],
+            evidence: [{ source: 'note', quote: '否认咳嗽' }],
           },
         ],
         issues: [],
@@ -718,7 +718,7 @@ describe('DeepSeek web security boundary', () => {
     );
 
     await user.selectOptions(screen.getByLabelText('AI 操作'), 'recognize');
-    await user.type(screen.getByLabelText(/粘贴病历文字/), '患者诉咳嗽3天');
+    await user.type(screen.getByLabelText(/粘贴病历文字/), '否认咳嗽');
     await user.click(screen.getByRole('button', { name: '预览发送内容' }));
     await user.click(screen.getByLabelText(/我已核对下方实际发送内容/));
     await user.click(screen.getByRole('button', { name: '生成建议' }));
@@ -873,5 +873,50 @@ describe('AI 中低优 UX', () => {
     await user.click(within(empty).getByRole('button', { name: '粘贴笔记开始' }));
     expect(screen.getByLabelText('AI 操作')).toHaveValue('organize');
     expect(screen.getByLabelText(/问诊笔记/)).toHaveFocus();
+  });
+});
+
+describe('organize structured suggestions', () => {
+  it('presents mixed fields, rejects unsupported values and undoes only unedited adoption', async () => {
+    const content = { suggestions: [
+      { path: 'hpi.symptoms', text: '患者诉咳嗽3天。', evidence: [{ source: 'note', quote: '患者诉咳嗽3天' }] },
+      { path: 'pe.vitals.temperature', text: '37.8', evidence: [{ source: 'note', quote: '体温37.8℃' }] },
+      { path: 'personal.smoking', text: '无', evidence: [{ source: 'note', quote: '否认吸烟' }] },
+      { path: 'pe.vitals.pulse', text: '69', evidence: [{ source: 'note', quote: '脉搏96次/分' }] },
+    ], issues: [], questions: [] };
+    const transport = fakeTransportFactory(vi.fn(async () => ({ content, model: 'deepseek-flash' })));
+    const user = userEvent.setup();
+    await renderApp(transport.factory);
+    await enterKey(user, 'sk-mixed-case');
+    await goToAi(user);
+    await user.type(screen.getByLabelText(/问诊笔记/), '患者诉咳嗽3天，否认发热。体温37.8℃，脉搏96次/分，否认吸烟。');
+    await user.click(screen.getByRole('button', { name: '预览发送内容' }));
+    await user.click(screen.getByLabelText(/我已核对下方实际发送内容/));
+    await user.click(screen.getByRole('button', { name: '生成建议' }));
+    await screen.findByRole('heading', { name: '建议对照 · 尚未写入' });
+    expect(screen.getByText('1 条建议未通过核对，未采用')).toBeInTheDocument();
+    for (const label of ['选择症状特点', '选择生命体征 · 体温', '选择吸烟史']) {
+      const choice = screen.getByLabelText(label);
+      expect(choice).not.toBeChecked();
+      await user.click(choice);
+    }
+    await user.click(screen.getByRole('button', { name: '采纳勾选项' }));
+    await screen.findByRole('heading', { name: '已采纳的 AI 内容' });
+    const symptomRow = screen.getByText('症状特点', {selector: 'strong'}).closest('li');
+    expect(symptomRow).not.toBeNull();
+    await user.click(within(symptomRow!).getByRole('button', { name: '去改该字段' }));
+    const symptoms = document.querySelector<HTMLInputElement>('[data-field-path="hpi.symptoms"]');
+    expect(symptoms).not.toBeNull();
+    await user.clear(symptoms!);
+    await user.type(symptoms!, '手改后的症状');
+    await goToAi(user);
+    await user.click(screen.getByRole('button', { name: '撤销本次 AI 采纳' }));
+    await screen.findByText('已撤销 2 项，保留 1 项后来修改的内容');
+    await user.click(screen.getByRole('button', { name: '返回编辑' }));
+    expect(document.querySelector<HTMLInputElement>('[data-field-path="hpi.symptoms"]')?.value).toBe('手改后的症状');
+    await user.click(within(screen.getByRole('complementary', { name: '步骤目录' })).getByRole('button', { name: /体格检查/ }));
+    expect(document.querySelector<HTMLInputElement>('[data-field-path="pe.vitals.temperature"]')?.value).toBe('');
+    await user.click(within(screen.getByRole('complementary', { name: '步骤目录' })).getByRole('button', { name: /个人史/ }));
+    expect(within(screen.getByRole('radiogroup', { name: '吸烟' })).getByText('未问')).toHaveAttribute('aria-checked', 'true');
   });
 });

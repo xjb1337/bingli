@@ -94,7 +94,9 @@ export interface AiAssistantPanelProps {
   loadingAndroidStatus?: boolean;
   createTransport: () => AiTransport;
   initialTarget?: string;
-  onAdoptRecord: (record: DabingliRecord) => Promise<boolean>;
+  onAdoptRecord: (record: DabingliRecord, paths: readonly string[]) => Promise<boolean>;
+  canUndoAdoption?: boolean;
+  onUndoAdoption?: () => Promise<boolean>;
   onConfirmField: (path: string) => Promise<boolean>;
   onJumpToPath: (path: string) => void;
   onOpenApiSettings?: () => void;
@@ -118,6 +120,8 @@ export function AiAssistantPanel({
   createTransport,
   initialTarget = 'hpi.symptoms',
   onAdoptRecord,
+  canUndoAdoption = false,
+  onUndoAdoption,
   onConfirmField,
   onJumpToPath,
   onOpenApiSettings,
@@ -342,7 +346,8 @@ export function AiAssistantPanel({
         Array.from(selected),
         allowReplace,
       );
-      const saved = await onAdoptRecord(next);
+      const paths = Array.from(selected).map((index) => result.suggestions[index]?.path).filter((path): path is string => Boolean(path));
+      const saved = await onAdoptRecord(next, paths);
       if (!saved) return;
       setStatus('已采纳并保存到草稿，内容仍为「未核对」；请逐项确认。');
       setResultAdopted(true);
@@ -696,7 +701,7 @@ export function AiAssistantPanel({
           )}
           {result.dropped.length ? (
             <details className="ai-dropped">
-              <summary>{result.dropped.length} 条建议因格式问题未采用</summary>
+              <summary>{result.dropped.length} 条建议未通过核对，未采用</summary>
               <ul>
                 {result.dropped.map((entry, index) => (
                   <li key={`${entry.path}-${index}`}>
@@ -740,6 +745,13 @@ export function AiAssistantPanel({
             </div>
           ) : null}
         </section>
+      ) : null}
+
+      {canUndoAdoption && onUndoAdoption ? (
+        <div className="button-row">
+          <button type="button" className="button ghost" disabled={busy} onClick={() => void onUndoAdoption()}>撤销本次 AI 采纳</button>
+          <span className="field-hint">只撤销本次采纳，保留后来修改的字段；刷新后失效。</span>
+        </div>
       ) : null}
 
       {operation !== 'organize' || organizeStep === 4 ? (

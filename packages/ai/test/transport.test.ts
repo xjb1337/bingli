@@ -175,6 +175,16 @@ describe('WebFetchTransport', () => {
     expect((JSON.parse(String(otherInit.body)) as { max_tokens: number }).max_tokens).toBe(4096);
   });
 
+  it('uses the structured completion budget for organize requests from current and older callers', async () => {
+    const fetchImpl = vi.fn(async () => response(200, successBody())) as unknown as typeof fetch;
+    const transport = new WebFetchTransport({ apiKey: 'sk-test-tokens', fetchImpl });
+    await transport.request({ ...request, operation: 'organize' });
+    await transport.request({ ...request, user: JSON.stringify({ operation: '整理填表', sources: [] }) });
+    for (const call of (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls) {
+      expect((JSON.parse(String((call[1] as RequestInit).body)) as { max_tokens: number }).max_tokens).toBe(8192);
+    }
+  });
+
   it('maps finish_reason length, content_filter and other failures to stable codes', async () => {
     const cases = [
       ['length', 'truncated_response'],
