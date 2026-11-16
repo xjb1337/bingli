@@ -122,7 +122,7 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x android/gradlew
-          BASE_VERSION_CODE=300000
+          BASE_VERSION_CODE=320000
           if [ -n "${VERSION_CODE_INPUT}" ]; then
             VERSION_CODE="${VERSION_CODE_INPUT}"
           else
@@ -135,7 +135,7 @@ jobs:
           if [ -n "${VERSION_NAME_INPUT}" ]; then
             VERSION_NAME="${VERSION_NAME_INPUT}"
           else
-            VERSION_NAME="3.0.0.${GITHUB_RUN_NUMBER}"
+            VERSION_NAME="3.2.0.${GITHUB_RUN_NUMBER}"
           fi
           ./android/gradlew -p android assembleRelease -PversionCode="$VERSION_CODE" -PversionName="$VERSION_NAME" --stacktrace
           printf 'VERSION_CODE=%s\n' "$VERSION_CODE" >> "$GITHUB_ENV"

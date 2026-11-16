@@ -17,8 +17,8 @@ import java.util.concurrent.*;
 final class UpdateManager {
     private final Activity activity;
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
-    private boolean busy;
-    private File ready;
+    private volatile boolean busy;
+    private volatile File ready;
     private ProgressDialog progress;
     UpdateManager(Activity activity) { this.activity=activity; }
     void close() { worker.shutdownNow(); if (progress != null) progress.dismiss(); }
@@ -129,7 +129,7 @@ final class UpdateManager {
         for(int i=0;i<6;i++) {
             URL url=new URL(address); if(!"https".equals(url.getProtocol())) throw new IOException("更新必须使用 HTTPS");
             HttpURLConnection c=(HttpURLConnection)url.openConnection(); c.setConnectTimeout(15000);c.setReadTimeout(30000);c.setInstanceFollowRedirects(false);c.setRequestProperty("User-Agent","Bingli-Android");
-            int code=c.getResponseCode(); if(code>=300 && code<400) { String location=c.getHeaderField("Location"); c.disconnect(); address=new URL(url,location).toString(); continue; }
+            int code=c.getResponseCode(); if(code>=300 && code<400) { String location=c.getHeaderField("Location"); c.disconnect(); if(location==null) throw new IOException("更新重定向缺少目标地址"); address=new URL(url,location).toString(); continue; }
             if(code!=200) {c.disconnect();throw new IOException("HTTP "+code); } return c;
         }
         throw new IOException("更新重定向过多");

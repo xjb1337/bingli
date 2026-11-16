@@ -155,10 +155,25 @@ test('AI：姓名未填写时仍隐去患者称呼后的姓名和详细地址', 
 });
 
 test('AI：脱敏不改变药物、剂量、日期、时间、化验和生命体征', () => {
-  const text = '阿司匹林 100mg qd；2026-10-01，3天前；WBC 12.3×10^9/L，血压 150/90mmHg，脉搏96次/分。患者3天前咳嗽，患者于2026-10-01就诊，患者无明显诱因，患者诉胸闷，患者陈述：无发热。患者高血压，患者曾于2026-10-01就诊，患者经常咳嗽，患者张口呼吸。';
+  const text = '阿司匹林 100mg qd；2026-10-01，3天前；WBC 12.3×10^9/L，血压 150/90mmHg，脉搏96次/分。患者3天前咳嗽，患者于2026-10-01就诊，患者无明显诱因，患者诉胸闷，患者陈述：无发热。患者高血压，患者曾于2026-10-01就诊，患者经常咳嗽，患者张口呼吸。患者左上肢无力3小时，患者干咳3天，患者高热39℃，患者查体：神清，患者巩膜无黄染，患者解黑便3次，患者房颤10年，患者关节痛2周，患者平素有高血压，患者双肺无啰音。';
   const r = record();
-  Object.assign(r.basic, { bedNo: '12', recordNo: '3', phone: '96' });
+  Object.assign(r.basic, { bedNo: '12', recordNo: '3', phone: '96', workUnit: '无' });
   assert.deepEqual(AI.redactionDiff(text, r), { text, categories: [] });
   assert.ok(request(r, text).user.includes(text));
   assert.equal(AI.redact('床号12，病历号3，咳嗽3天', r), '床号：[已隐去]，病历号：[已隐去]，咳嗽3天');
+});
+
+test('AI：含逗号或分号的选择项在原文逐字包含时正常通过校验', () => {
+  const r = record();
+  const q = request(r, '病史陈述可靠程度：供史者代述，部分可靠。颈部查体：颈软，无抵抗。');
+  const res = AI.validate({
+    suggestions: [
+      { path: 'basic.reliability', text: '供史者代述，部分可靠', evidence: [{ source: 'note', quote: '供史者代述，部分可靠' }] },
+      { path: 'pe.neck.neckResist', text: '颈软，无抵抗', evidence: [{ source: 'note', quote: '颈软，无抵抗' }] }
+    ],
+    issues: [],
+    questions: []
+  }, q);
+  assert.equal(res.dropped.length, 0);
+  assert.equal(res.suggestions.length, 2);
 });

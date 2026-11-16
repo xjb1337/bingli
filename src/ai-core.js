@@ -30,7 +30,7 @@ const AI_CORE = (() => {
   function schema() { return typeof SCHEMA !== 'undefined' ? SCHEMA : require('./schema.js'); }
   function baseline(record) {
     const copy = JSON.parse(JSON.stringify(record));
-    delete copy.meta; delete copy.documentMeta; delete copy.updatedAt;
+    delete copy.meta; delete copy.documentMeta; delete copy.updatedAt; delete copy.id;
     return core().fingerprint(copy);
   }
   function redactionDiff(text, record) {
@@ -42,8 +42,9 @@ const AI_CORE = (() => {
     };
     Object.entries(labels)
       .map(([key, label]) => ({ key, value: String((record.basic || {})[key] ?? '').trim(), label }))
-      // 跳过纯数字床号、病历号及不完整电话的全文替换，避免误改化验值和时间。
+      // 跳过纯数字床号、病历号、不完整电话及通用状态词的全文替换，避免误改化验值、时间和临床描述。
       .filter(({ key, value }) => value.length >= 2
+          && !/^(?:无|不详|未问|未填|无业|退休)$/.test(value)
           && !((key === 'bedNo' || key === 'recordNo') && /^\d+$/.test(value))
           && !(key === 'phone' && /^\d{1,6}$/.test(value)))
       .sort((left, right) => right.value.length - left.value.length)
@@ -74,8 +75,8 @@ const AI_CORE = (() => {
         categories.add(label === '出生地' || label === '籍贯' ? label : '地址');
         return `${label}：[已隐去]`;
       })
-      // 姓名未填入基本信息时，只匹配姓氏加名字且以标点或常见叙述词结束的形式。
-      .replace(/(患者)((?!(?:陈述|张口|周围|高血压|高血糖|高血脂|低血压|低血糖|低血钾|曾于|曾有|曾患|曾服|曾因|曾在|经常))(?:(?:欧阳|司马|上官|诸葛|夏侯|东方|皇甫|尉迟|公孙|慕容)|[赵钱孙李周吴郑王冯陈褚卫蒋沈韩杨朱秦尤许何吕施张孔曹严华金魏陶姜戚谢邹喻柏水窦章云苏潘葛奚范彭郎鲁韦昌马苗凤花方俞任袁柳唐罗薛雷贺倪汤滕殷罗毕郝邬安常乐于时傅皮卞齐康伍余元卜顾孟平黄和穆萧尹姚邵湛汪祁毛禹狄米贝明臧计伏成戴宋茅庞熊纪舒屈项祝董梁杜阮蓝闵席季麻强贾路娄危江童颜郭梅盛林刁钟徐邱骆高夏蔡田樊胡凌霍虞万支柯管卢莫经房裘缪干解应宗丁宣邓郁单洪包左石崔吉龚程邢裴陆荣翁荀羊惠甄曲封芮羿储靳汲邴糜松井段富巫乌焦巴弓牧隗山谷车侯宓蓬全郗班仰秋仲伊宫宁仇栾暴甘钭厉戎祖武符刘景詹束龙叶幸司韶郜黎蓟薄印宿白怀蒲邰从鄂索赖卓屠池乔阴胥能苍双闻莘党翟谭贡劳逄姬申扶堵冉宰郦雍郤璩桑桂濮牛寿通边扈燕冀浦尚农温别庄晏柴瞿阎充慕连茹习宦艾鱼容向古易慎戈廖庾终暨居衡步都耿满弘匡国文寇广禄阙东殴殳沃利蔚越夔隆师巩厍聂晁勾敖融冷辛阚那简饶空曾毋沙乜养鞠须丰巢关蒯相查后荆红游竺权逯盖益桓公])[\u4e00-\u9fff·]{1,2})(?=$|[\s，。；：,;:、\d]|(?:于|因|诉|无|有|男|女|出现|入院|就诊|患病|发病|既往))/g, (_match, prefix) => {
+      // 姓名未填入基本信息时，只匹配姓氏加名字且以标点或明确身份/就诊叙述词结束的形式，排除常见临床词头。
+      .replace(/(患者)((?!(?:陈述|张口|周围|高血压|高血糖|高血脂|低血压|低血糖|低血钾|曾于|曾有|曾患|曾服|曾因|曾在|经常|平素|平卧|平静|双侧|双肺|双眼|双耳|双手|双足|双下肢|双上肢|左侧|左上|左下|左肺|左胸|左腹|左眼|左耳|左肾|全身|全腹|高热|高龄|高处|干咳|干呕|黄疸|黄染|水肿|冷汗|常有|常伴|查体|巩膜|解黑便|房颤|房扑|关节|皮肤|皮疹|皮下|步态|步入|麻木|强迫|强直|安静|焦虑|易醒|易怒|充血|连续|单侧|包块|通畅|后背|空腹|白带|白细胞))(?:(?:欧阳|司马|上官|诸葛|夏侯|东方|皇甫|尉迟|公孙|慕容)|[赵钱孙李周吴郑王冯陈褚卫蒋沈韩杨朱秦尤许何吕施张孔曹严华金魏陶姜戚谢邹喻柏水窦章云苏潘葛奚范彭郎鲁韦昌马苗凤花方俞任袁柳唐罗薛雷贺倪汤滕殷罗毕郝邬安常乐于时傅皮卞齐康伍余元卜顾孟平黄和穆萧尹姚邵湛汪祁毛禹狄米贝明臧计伏成戴宋茅庞熊纪舒屈项祝董梁杜阮蓝闵席季麻强贾路娄危江童颜郭梅盛林刁钟徐邱骆高夏蔡田樊胡凌霍虞万支柯管卢莫经房裘缪干解应宗丁宣邓郁单洪包左石崔吉龚程邢裴陆荣翁荀羊惠甄曲封芮羿储靳汲邴糜松井段富巫乌焦巴弓牧隗山谷车侯宓蓬全郗班仰秋仲伊宫宁仇栾暴甘钭厉戎祖武符刘景詹束龙叶幸司韶郜黎蓟薄印宿白怀蒲邰从鄂索赖卓屠池乔阴胥能苍双闻莘党翟谭贡劳逄姬申扶堵冉宰郦雍郤璩桑桂濮牛寿通边扈燕冀浦尚农温别庄晏柴瞿阎充慕连茹习宦艾鱼容向古易慎戈廖庾终暨居衡步都耿满弘匡国文寇广禄阙东殴殳沃利蔚越夔隆师巩厍聂晁勾敖融冷辛阚那简饶空曾毋沙乜养鞠须丰巢关蒯相查后荆红游竺权逯盖益桓公])[\u4e00-\u9fff·]{1,2})(?=$|[\s，。；,;、]|\d{1,3}\s*岁|(?:于|因|诉|男|女|出现|入院|就诊|患病|发病|既往))/g, (_match, prefix) => {
         categories.add('姓名');
         return `${prefix}[已隐去]`;
       })
@@ -365,6 +366,7 @@ const AI_CORE = (() => {
     const label = (labels[path] ?? '').split(' · ').at(-1)?.replace(/（状态）$/, '') ?? '';
     const subjects = CHOICE_SUBJECTS[path] ?? (label ? [label] : []);
     const clauses = quotes.flatMap((quote) => quote.split(/[，,；;。\n]/)).map((part) => part.trim());
+    const sentences = quotes.flatMap((quote) => quote.split(/[。\n]/)).map((part) => part.trim());
     const binary = ['有', '无', '已戒', 'asked_positive', 'asked_negative', 'not_asked'].includes(value);
     const negativePattern = /否认|未见|不伴|没有|从不|从未|未曾|未吸|未饮|不吸|不抽|不饮|不喝|没吸|没饮|无|(?:^|[:：\s])否(?:$|\s)/;
     const uncertainPattern = /不详|未知|未问|未询|不清|待核实|待询|待查|可能|疑似|未提及|未记录|未提供|无记录|无资料|未评估|未明确|是否|有无|[?？]/;
@@ -374,7 +376,8 @@ const AI_CORE = (() => {
       subjects.some(subject => part.includes(subject)) && (negativePattern.test(part) || uncertainPattern.test(part)))) {
       throw Error('选择项与原文依据或否定信息不一致，请核对');
     }
-    const supported = clauses.some((part) => {
+    const units = !binary && /[，,；;]/.test(value) ? sentences : clauses;
+    const supported = units.some((part) => {
       if (!part) return false;
       if (!binary) {
         if (!part.includes(value)) return false;
@@ -390,17 +393,18 @@ const AI_CORE = (() => {
     });
     if (!supported) throw Error('选择项与原文依据或否定信息不一致，请核对');
   }
-  // Expand exact quotes to their original clauses, retaining negation and paired BP context.
+  // Expand exact quotes to their original clauses (or sentences if quote contains commas), retaining negation and paired BP context.
   function evidenceContexts(evidence, request) {
     const contexts = [];
     evidence.filter(entry => entry.source !== 'image').forEach(entry => {
       const source = request.sources.find(item => item.source === entry.source);
       if (!source) return;
+      const stopPattern = /[，,；;]/.test(entry.quote) ? /[。\n]/ : /[，,；;。\n]/;
       let position = source.text.indexOf(entry.quote);
       while (position !== -1) {
         let start = position, end = position + entry.quote.length;
-        while (start > 0 && !/[，,；;。\n]/.test(source.text[start - 1])) start--;
-        while (end < source.text.length && !/[，,；;。\n]/.test(source.text[end])) end++;
+        while (start > 0 && !stopPattern.test(source.text[start - 1])) start--;
+        while (end < source.text.length && !stopPattern.test(source.text[end])) end++;
         contexts.push(source.text.slice(start, end));
         position = source.text.indexOf(entry.quote, Math.max(position + 1, end));
       }
@@ -525,9 +529,19 @@ const AI_CORE = (() => {
         entry.checked = s.text === 'asked_positive'; entry.negative = s.text === 'asked_negative';
         next.ros[ros[1]] = next.ros[ros[1]] || {}; next.ros[ros[1]][ros[2]] = entry;
       }
+      const adoptedAt = new Date().toISOString();
+      const evidencePaths = Array.from(new Set(s.evidence.map(e => e.source)));
       core().setFieldState(next, s.path, {
         source: 'ai', reviewed: false, reviewedValueHash: '',
-        sourceRef: JSON.stringify({provider: 'DeepSeek', model: String(model || '').slice(0, 60), at: new Date().toISOString(), evidence: s.evidence})
+        sourceRef: JSON.stringify({
+          provider: 'DeepSeek',
+          model: String(model || '').slice(0, 60),
+          at: adoptedAt,
+          adoptedAt,
+          baseline: { recordId: request.caseId, revision: Number((record.meta || {}).revision) || 0, contentHash: request.baseline },
+          evidence: s.evidence,
+          evidencePaths
+        })
       });
       if (s.path === 'summary') core().markDocumentGenerated(next, 'summary');
     });

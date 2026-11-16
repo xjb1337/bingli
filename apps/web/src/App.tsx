@@ -353,8 +353,16 @@ function EditorApp({
     refreshExportPreview(recordRef.current, list, value);
   }
 
+  function cancelSaveTimer() {
+    if (saveTimer.current !== null) {
+      window.clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+  }
+
   async function saveAiMutation(nextRecord: DabingliRecord, message: string): Promise<boolean> {
-    const revision = Number(record.meta.revision) || 0;
+    cancelSaveTimer();
+    const revision = Number(recordRef.current.meta.revision) || 0;
     const saved = await repo.saveToLibrary(nextRecord, revision);
     if (!saved.ok) {
       setStorageAlert(saved.reason ?? 'AI 内容保存失败，请先导出备份。');
@@ -365,6 +373,7 @@ function EditorApp({
     recordRef.current = persisted;
     setRecord(persisted);
     setDirty(false);
+    dirtyRef.current = false;
     const loaded = await repo.loadList();
     if (loaded.ok) {
       setList(loaded.list);
@@ -391,7 +400,7 @@ function EditorApp({
   }
 
   async function confirmAiContent(path: string): Promise<boolean> {
-    const next = confirmAiField(record, path);
+    const next = confirmAiField(recordRef.current, path);
     return saveAiMutation(next, '已标记为已核对');
   }
 
@@ -507,6 +516,8 @@ function EditorApp({
   }
 
   async function createNewRecord() {
+    cancelSaveTimer();
+    if (dirtyRef.current) await persistRecord(false);
     const next = repo.newRecord();
     const saved = await repo.saveToLibrary(next, 0);
     if (!saved.ok) {
@@ -514,10 +525,12 @@ function EditorApp({
       return;
     }
     const persisted = saved.record ?? next;
+    recordRef.current = persisted;
     setRecord(persisted);
     setView('editor');
     setStepIndex(0);
     setDirty(false);
+    dirtyRef.current = false;
     resetValidationState();
     const loaded = await repo.loadList();
     if (loaded.ok) setList(loaded.list);
@@ -526,22 +539,29 @@ function EditorApp({
   }
 
   async function openRecord(item: RecordListItem) {
+    cancelSaveTimer();
+    if (dirtyRef.current) await persistRecord(false);
     const stored = await repo.loadCurrent(item.id);
     const next = RECORD_CORE.cloneValue(stored.ok && stored.record ? stored.record : item.data);
+    recordRef.current = next;
     setRecord(next);
     setView('editor');
     setStepIndex(0);
     setDirty(false);
+    dirtyRef.current = false;
     resetValidationState();
     const saved = await repo.saveToLibrary(next, Number(next.meta.revision) || 0);
     if (saved.ok) {
-      setRecord(saved.record ?? next);
-      refreshExportPreview(saved.record ?? next, list);
+      const persisted = saved.record ?? next;
+      recordRef.current = persisted;
+      setRecord(persisted);
+      refreshExportPreview(persisted, list);
     }
     notify(`已打开 ${item.basic?.name || RECORD_CORE.summarize(item).name}`);
   }
 
   async function copyRecord(item: RecordListItem) {
+    cancelSaveTimer();
     if (dirtyRef.current) await persistRecord(false);
     const stored = await repo.loadCurrent(item.id);
     const source = stored.ok && stored.record ? stored.record : item.data;
@@ -552,10 +572,12 @@ function EditorApp({
       return;
     }
     const persisted = saved.record ?? copy;
+    recordRef.current = persisted;
     setRecord(persisted);
     setView('editor');
     setStepIndex(0);
     setDirty(false);
+    dirtyRef.current = false;
     resetValidationState();
     const loaded = await repo.loadList();
     const nextList = loaded.ok ? loaded.list : list;
@@ -565,6 +587,7 @@ function EditorApp({
   }
 
   async function deleteRecord(item: RecordListItem) {
+    if (record.id === item.id) cancelSaveTimer();
     const nextList = RECORD_CORE.removeRecord(list, item.id);
     const result = await repo.deleteRecord(item.id);
     if (!result.ok) {
@@ -574,8 +597,10 @@ function EditorApp({
     setList(nextList);
     if (record.id === item.id) {
       const next = repo.newRecord();
+      recordRef.current = next;
       setRecord(next);
       setDirty(false);
+      dirtyRef.current = false;
       resetValidationState();
       refreshExportPreview(next, nextList);
     }
@@ -584,6 +609,7 @@ function EditorApp({
 
   async function importJson(raw: string, mode: 'merge' | 'replace') {
     try {
+      cancelSaveTimer();
       const summary = await repo.importBackup(raw, mode);
       const loaded = await repo.loadList();
       const nextList = loaded.ok ? loaded.list : [];
@@ -593,7 +619,10 @@ function EditorApp({
         ? await repo.loadCurrent(summary.firstRecordId)
         : await repo.loadCurrent();
       if (preferred.ok && preferred.record) {
+        recordRef.current = preferred.record;
         setRecord(preferred.record);
+        setDirty(false);
+        dirtyRef.current = false;
         refreshExportPreview(preferred.record, nextList);
       }
       const recoveries = await repo.listRecoveryCopies().catch(() => []);
@@ -710,7 +739,7 @@ function EditorApp({
     return () => {
       if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
     };
-  });
+  }, [dirty, record]);
 
   useEffect(() => {
     function handlePageHide() {

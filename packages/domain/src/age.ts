@@ -164,7 +164,11 @@ const AGE = (() => {
     const months = Number(p.months);
     const years = Number(p.years);
     if (Number.isFinite(days) && days >= 0 && days < 30) return `${Math.round(days)}日龄`;
-    if (Number.isFinite(months) && months >= 0 && months < 12) return `${Math.round(months)}月龄`;
+    if (Number.isFinite(months) && months >= 0 && months < 12) {
+      const roundedMonths = Math.round(months);
+      if (roundedMonths === 0 && Number.isFinite(days) && days >= 30) return '1月龄';
+      return `${roundedMonths}月龄`;
+    }
     if (Number.isFinite(years) && years >= 0) {
       const totalMonths = (Number.isFinite(months) && months >= 0) ? months : years * 12;
       let wholeYears = Math.floor(totalMonths / 12 + 1e-9);
