@@ -1249,6 +1249,22 @@ test('SOAP update buttons replace persisted nested fields and final output, with
   assert.equal(app.run('APP.getRecord().soap.o.aux'), '旧检查');
 });
 
+test('SOAP draft button populates nested s/o/a fields without leaking root properties', () => {
+  const app = boot();
+  app.run(`const r = APP.getRecord(); r.basic.name = '张三'; r.basic.gender = '男'; r.basic.age = '45';
+    r.basic.chiefComplaint = '咳嗽'; r.basic.chiefComplaintDuration = '3'; r.basic.chiefComplaintDurationUnit = '天';
+    r.hpi.symptoms = '咳嗽咳痰'; r.pe.vitals.temperature = '38.2';
+    r.auxiliary.items = [{name:'血常规', result:'WBC 11.5'}];
+    r.diagnosis.confirmed = ['急性支气管炎'];
+    APP._test.gotoStep('summary');`);
+  clickAct(app, 'draftSoap');
+  assert.match(app.run('APP.getRecord().soap.s.summary'), /咳嗽/);
+  assert.match(app.run('APP.getRecord().soap.o.pe'), /38\.2/);
+  assert.match(app.run('APP.getRecord().soap.o.aux'), /WBC 11\.5/);
+  assert.match(app.run('APP.getRecord().soap.a.basis'), /急性支气管炎/);
+  assert.equal(app.run('APP.getRecord().soap.summary'), undefined);
+});
+
 test('SOAP basis refresh uses current facts instead of saved basis details', () => {
   const app = boot();
   app.run(`const r = APP.getRecord(); r.diagnosis.confirmed = ['新诊断'];

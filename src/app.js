@@ -25,7 +25,7 @@ const APP = (() => {
 
   /** 浏览器构建的回退版本；Android 运行时优先读取原生 BuildConfig.VERSION_NAME。 */
   // 与当前 Android 发布线保持一致；原生桥接存在时以 BuildConfig.VERSION_NAME 为准。
-  const APP_VERSION = '3.2.0';
+  const APP_VERSION = '3.2.1';
 
   function appVersion() {
     try {
@@ -2639,14 +2639,28 @@ const APP = (() => {
   function undoTemplateFill() {
     const last = R.meta && R.meta.lastTemplateFill;
     if (!last) { toast('没有本次带入记录'); return; }
-    const paths = Object.keys(last.values || {});
-    if (!paths.length) { toast('本次带入没有可撤销的文字字段'); return; }
+    const values = last.values || {};
+    const allPaths = Array.from(new Set([...(last.filled || []), ...Object.keys(values)]));
+    if (!allPaths.length) { toast('本次带入没有可撤销的文字字段'); return; }
     snapshot('撤销模板带入：' + (last.name || last.key));
+    const blank = SCHEMA.emptyRecord();
     let cleared = 0, kept = 0;
-    paths.forEach(p => {
+    allPaths.forEach(p => {
       const cur = CORE.getPath(R, p);
-      if (String(cur == null ? '' : cur) === String(last.values[p])) {
-        CORE.setPath(R, p, '');
+      const hasSavedString = Object.prototype.hasOwnProperty.call(values, p);
+      const st = CORE.fieldState(R, p);
+      if (hasSavedString) {
+        if (String(cur == null ? '' : cur) === String(values[p])) {
+          const fallback = CORE.getPath(blank, p);
+          CORE.setPath(R, p, typeof fallback === 'string' ? fallback : '');
+          CORE.setFieldState(R, p, { source: 'manual', reviewed: false, reviewedValueHash: '', sourceRef: '' });
+          cleared++;
+        } else {
+          kept++;
+        }
+      } else if (st.source === 'template' && !CORE.fieldReviewValid(R, p)) {
+        const fallback = CORE.getPath(blank, p);
+        CORE.setPath(R, p, fallback !== undefined ? CORE.cloneValue(fallback) : '');
         CORE.setFieldState(R, p, { source: 'manual', reviewed: false, reviewedValueHash: '', sourceRef: '' });
         cleared++;
       } else {
@@ -2654,6 +2668,7 @@ const APP = (() => {
       }
     });
     R.meta.lastTemplateFill = null;
+    if (!kept) delete R.__templateKey;
     saveCurrent();
     render();
     toast(`已撤销 ${cleared} 项${kept ? `，保留 ${kept} 项你后来改过的内容` : ''}`);
@@ -4025,7 +4040,7 @@ const APP = (() => {
   function hasRecordContent(record) {
     const blank = SCHEMA.emptyRecord();
     function differs(value, base, path) {
-      if (path === 'meta' || path === 'id' || path === 'updatedAt' || path.startsWith('__')) return false;
+      if (path === 'meta' || path === 'documentMeta' || path === 'id' || path === 'updatedAt' || path.startsWith('__')) return false;
       if (value && typeof value === 'object') {
         return Object.keys(value).some(k => differs(value[k], base && base[k], path ? path + '.' + k : k));
       }

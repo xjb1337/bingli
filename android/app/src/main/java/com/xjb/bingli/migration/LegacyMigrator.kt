@@ -7,6 +7,8 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.nio.charset.StandardCharsets
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.time.Clock
 import java.time.Instant
@@ -208,9 +210,15 @@ class LegacyMigrator(
         target.parentFile?.mkdirs()
         val tmp = File(target.parentFile, target.name + ".tmp")
         FileOutputStream(tmp).use { out -> out.write(bytes); out.flush(); out.fd.sync() }
-        if (!tmp.renameTo(target)) {
+        try {
+            try {
+                Files.move(tmp.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+            } catch (_: Exception) {
+                Files.move(tmp.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            }
+        } catch (e: Exception) {
             tmp.delete()
-            throw IllegalStateException("无法原子替换 ${target.name}")
+            throw IllegalStateException("无法原子替换 ${target.name}", e)
         }
     }
 

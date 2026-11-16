@@ -26,6 +26,7 @@ const ACTION_HANDLERS = (() => {
       const R = getRecord();
       switch (act) {
         case 'draftHpi':
+          snapshot('生成现病史初稿');
           R.hpi = generator.draftHPI(R);
           saveCurrent();
           render();
@@ -58,17 +59,18 @@ const ACTION_HANDLERS = (() => {
         case 'draftSoap': {
           snapshot('生成首次病程录');
           const soap = ensureSoap();
-          const fillSeg = (seg, key, text) => {
-            if (String(soap[key] || '').trim() || !text) return;
-            soap[key] = text;
+          const fillSeg = (seg, path, cur, text) => {
+            if (String(cur || '').trim() || !text) return;
+            setPath(R, path, text);
             markDocumentGenerated(R, 'firstCourse', seg);
           };
-          fillSeg('s', 'summary', generator.draftCaseSummary(R) || '');
-          fillSeg('oPe', 'pe', generator.draftObjectivePE(R) || '');
-          fillSeg('oAux', 'aux', generator.draftObjectiveAux(R) || '');
-          fillSeg('basis', 'basis', generator.buildBasisSection(R) || '');
+          fillSeg('s', 'soap.s.summary', soap.s && soap.s.summary, generator.draftCaseSummary(R) || '');
+          fillSeg('oPe', 'soap.o.pe', soap.o && soap.o.pe, generator.draftObjectivePE(R) || '');
+          fillSeg('oAux', 'soap.o.aux', soap.o && soap.o.aux, generator.draftObjectiveAux(R) || '');
+          fillSeg('basis', 'soap.a.basis', soap.a && soap.a.basis, generator.buildBasisSection(R) || '');
           if (!soap.a.basisDetail.length && typeof generator.draftBasisDetail === 'function') {
             soap.a.basisDetail = generator.draftBasisDetail(R) || [];
+            markDocumentGenerated(R, 'firstCourse', 'basis');
           }
           saveCurrent();
           render();

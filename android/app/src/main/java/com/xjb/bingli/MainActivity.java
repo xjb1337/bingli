@@ -290,13 +290,15 @@ public class MainActivity extends Activity {
             runOnUiThread(() -> ((ClipboardManager)getSystemService(CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("病历", text)));
         }
         @JavascriptInterface public void export(String text, String filename, String mime) {
-            if (text.length() > 8 * 1024 * 1024) return;
+            if (text == null || text.length() > 8 * 1024 * 1024) return;
+            final String safeName = filename == null || filename.trim().isEmpty() ? "病历.txt" : new File(filename).getName();
+            final String safeMime = "application/json".equals(mime) ? mime : "text/plain";
             runOnUiThread(() -> {
                 if (exportText != null) { Toast.makeText(MainActivity.this,"请先完成当前导出",Toast.LENGTH_SHORT).show(); return; }
                 exportText = text;
                 Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
-                    .setType(mime.equals("application/json") ? mime : "text/plain")
-                    .putExtra(Intent.EXTRA_TITLE, new File(filename).getName());
+                    .setType(safeMime)
+                    .putExtra(Intent.EXTRA_TITLE, safeName);
                 try { startActivityForResult(intent, 42); } catch (ActivityNotFoundException e) { exportText=null; }
             });
         }
@@ -348,7 +350,19 @@ public class MainActivity extends Activity {
                         try {
                             PrintManager manager = (PrintManager) getSystemService(PRINT_SERVICE);
                             if (manager == null) throw new IllegalStateException("系统打印服务不可用");
-                            PrintDocumentAdapter adapter = loaded.createPrintDocumentAdapter(documentTitle);
+                            PrintDocumentAdapter rawAdapter = loaded.createPrintDocumentAdapter(documentTitle);
+                            PrintDocumentAdapter adapter = new PrintDocumentAdapter() {
+                                @Override public void onStart() { rawAdapter.onStart(); }
+                                @Override public void onLayout(PrintAttributes oldAttributes, PrintAttributes newAttributes, CancellationSignal cancellationSignal, LayoutResultCallback callback, Bundle extras) {
+                                    rawAdapter.onLayout(oldAttributes, newAttributes, cancellationSignal, callback, extras);
+                                }
+                                @Override public void onWrite(PageRange[] pages, ParcelFileDescriptor destination, CancellationSignal cancellationSignal, WriteResultCallback callback) {
+                                    rawAdapter.onWrite(pages, destination, cancellationSignal, callback);
+                                }
+                                @Override public void onFinish() {
+                                    try { rawAdapter.onFinish(); } finally { if (printWeb == loaded) destroyPrintWeb(); }
+                                }
+                            };
                             manager.print(documentTitle, adapter, new PrintAttributes.Builder().build());
                         } catch (Exception e) {
                             Toast.makeText(MainActivity.this, "打印失败：" + (e.getMessage() == null ? "无法打开打印服务" : e.getMessage()), Toast.LENGTH_LONG).show();

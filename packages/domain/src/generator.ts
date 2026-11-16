@@ -2919,17 +2919,17 @@ const GENERATOR = (() => {
    *
    * @param {object} r record
    */
-  /** 病史类字段的固定遍历顺序：先出现的保留，后出现的跨字段重复去掉 */
+  /** 病史类字段的固定遍历顺序：先出现的保留，后出现的跨字段重复去掉（不含短枚举/勾选状态字段） */
   const HISTORY_FIELD_PATHS = [
     'hpi.onset', 'hpi.cause', 'hpi.symptoms', 'hpi.aggravating', 'hpi.relief', 'hpi.evolution',
     'hpi.accompanying', 'hpi.negativeDiscriminating', 'hpi.negativePertinent', 'hpi.treatment',
     'hpi.generalCondition', 'hpi.extra',
-    'pmh.health', 'pmh.diseaseDetail', 'pmh.longTermMeds', 'pmh.infection',
+    'pmh.diseaseDetail', 'pmh.longTermMeds', 'pmh.infection',
     'pmh.surgery', 'pmh.trauma', 'pmh.transfusion', 'pmh.poisoning',
-    'pmh.vaccine', 'pmh.allergy', 'pmh.allergenOther', 'pmh.allergyReaction',
+    'pmh.vaccine', 'pmh.allergenOther', 'pmh.allergyReaction',
     'pmh.relatedHistory', 'pmh.otherTreatDiseases', 'pmh.special',
     'personal.maternal', 'personal.birth', 'personal.feeding', 'personal.growth',
-    'personal.residence', 'personal.travel', 'personal.smoking', 'personal.drinking',
+    'personal.residence', 'personal.travel',
     'personal.drugs', 'personal.environment', 'personal.habits', 'personal.sexualHistory',
     'personal.occupationEnv', 'personal.premorbidPersonality', 'personal.stressEvent'
   ];
@@ -2938,15 +2938,17 @@ const GENERATOR = (() => {
    * 跨字段去重：同一句完整的话填进多个病史字段时，只保留第一次出现。
    * - 只处理「整句完全相同」，不做近似合并；
    * - 同一字段内的重复原样保留（由 validate 提示，用户自己决定）；
+   * - 短状态词（如“无”“否认”“正常”“不详”）属于各字段独立结论，不跨字段去重；
    * - 返回克隆后的病历，绝不修改传入的 record（生成器保持纯函数）。
    */
   function dedupeRecordFields(record) {
-    const out = (RECORD_CORE && RECORD_CORE.cloneValue)
-      ? RECORD_CORE.cloneValue(record)
+    const coreRef = typeof RECORD_CORE !== 'undefined' ? RECORD_CORE : null;
+    const out = (coreRef && coreRef.cloneValue)
+      ? coreRef.cloneValue(record)
       : JSON.parse(JSON.stringify(record || {}));
     const owner = new Map();
     HISTORY_FIELD_PATHS.forEach(path => {
-      const v = (RECORD_CORE && RECORD_CORE.getPath) ? RECORD_CORE.getPath(out, path) : undefined;
+      const v = (coreRef && coreRef.getPath) ? coreRef.getPath(out, path) : getPath(out, path);
       if (typeof v !== 'string' || !v.trim()) return;
       const kept = [];
       v.split('\n').forEach(line => {
@@ -2955,7 +2957,10 @@ const GENERATOR = (() => {
         const parts = [];
         sentences.forEach(s => {
           const k = sentenceKey(s);
-          if (!k) { parts.push(s); return; }
+          if (!k || k.length <= 2 || /^(?:无|否认|正常|不详|未问|未查|阴性|阳性|有|已戒)$/.test(k)) {
+            parts.push(s);
+            return;
+          }
           const prev = owner.get(k);
           if (prev && prev !== path) return; // 跨字段重复：去掉
           if (!prev) owner.set(k, path);
@@ -2964,7 +2969,9 @@ const GENERATOR = (() => {
         if (parts.length) kept.push(parts.join(''));
       });
       const next = kept.join('\n');
-      if (next !== v && RECORD_CORE && RECORD_CORE.setPath) RECORD_CORE.setPath(out, path, next);
+      if (next !== v) {
+        if (coreRef && coreRef.setPath) coreRef.setPath(out, path, next);
+      }
     });
     return out;
   }

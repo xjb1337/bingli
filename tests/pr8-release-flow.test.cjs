@@ -31,7 +31,7 @@ const UPDATE_MANAGER = path.join(
 const CHECK_RELEASE = path.join(ROOT, 'scripts', 'release', 'check-release.py');
 
 function read(fileName) {
-  return fs.readFileSync(fileName, 'utf8');
+  return fs.readFileSync(fileName, 'utf8').replace(/\r\n/g, '\n');
 }
 
 function sectionByHeader(text, header, indent = 0) {

@@ -579,23 +579,37 @@ export class IndexedDbRecordRepository implements RecordRepository {
           const existingDrafts = await this.db.drafts.toArray();
           const replacedItems = RECORD_CORE.replaceImport(importedItems, existingList);
           const storedSettings = await this.db.settings.get(SETTINGS_KEY);
-          const recoveryId = `recovery-${now.replace(/[^0-9A-Za-z]/g, '')}-${RECORD_CORE.uid()}`;
-          const recovery: RecoveryCopy = {
-            id: recoveryId,
-            createdAt: now,
-            reason: 'replace-import',
-            records: clone(existingList),
-            drafts: clone(existingDrafts),
-            currentId: pointer?.id ?? null,
-            settings: storedSettings ? clone(storedSettings.data) : null,
-            bundle: createBackupBundle(existingList, currentDraft, now, { includeNotes: true }),
-          };
+          const hasExistingData = existingList.length > 0 || existingDrafts.length > 0;
+          let recoveryId: string | undefined;
 
-          await this.db.meta.put({
-            key: `${RECOVERY_PREFIX}${recoveryId}`,
-            value: recovery,
-            updatedAt: now,
-          });
+          if (hasExistingData) {
+            recoveryId = `recovery-${now.replace(/[^0-9A-Za-z]/g, '')}-${RECORD_CORE.uid()}`;
+            const recovery: RecoveryCopy = {
+              id: recoveryId,
+              createdAt: now,
+              reason: 'replace-import',
+              records: clone(existingList),
+              drafts: clone(existingDrafts),
+              currentId: pointer?.id ?? null,
+              settings: storedSettings ? clone(storedSettings.data) : null,
+              bundle: createBackupBundle(existingList, currentDraft, now, { includeNotes: true }),
+            };
+
+            await this.db.meta.put({
+              key: `${RECOVERY_PREFIX}${recoveryId}`,
+              value: recovery,
+              updatedAt: now,
+            });
+
+            const allRecoveries = await this.db.meta.where('key').startsWith(RECOVERY_PREFIX).toArray();
+            if (allRecoveries.length > 10) {
+              const staleKeys = allRecoveries
+                .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))
+                .slice(10)
+                .map((entry) => entry.key);
+              if (staleKeys.length) await this.db.meta.bulkDelete(staleKeys);
+            }
+          }
 
           await this.db.records.clear();
           await this.db.drafts.clear();
@@ -614,7 +628,7 @@ export class IndexedDbRecordRepository implements RecordRepository {
           return {
             mode,
             recordCount: parsed.records.length,
-            recoveryId,
+            ...(recoveryId ? { recoveryId } : {}),
             ...(firstRecordId ? { firstRecordId } : {}),
           };
         }
