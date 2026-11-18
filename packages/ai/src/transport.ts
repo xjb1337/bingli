@@ -1,4 +1,4 @@
-import { AiError, AI_ERROR_MESSAGES, aiError, isKnownErrorCode, mapHttpStatus } from './errors';
+import { AiError, AI_ERROR_MESSAGES, aiError, isKnownErrorCode, mapHttpStatus, parseRetryAfterSeconds } from './errors';
 import { normalizeAiImage, AI_OPERATIONS } from './core';
 import type {
   AiErrorCode,
@@ -227,7 +227,12 @@ export class WebFetchTransport implements AiTransport {
         referrerPolicy: 'no-referrer',
         signal: controller.signal,
       });
-      if (!response.ok) throw mapHttpStatus(response.status);
+      if (!response.ok) {
+        const retryAfter = response.status === 429
+          ? parseRetryAfterSeconds(response.headers?.get?.('retry-after'))
+          : undefined;
+        throw mapHttpStatus(response.status, retryAfter);
+      }
       const text = await readResponseText(response, MAX_RESPONSE_BYTES);
       return parseDeepSeekResponse(text, requestModel);
     } catch (error) {
@@ -255,10 +260,35 @@ interface NativeAiResponse {
   model?: unknown;
   error?: unknown;
   code?: unknown;
+  retryAfter?: unknown;
+}
+
+type NativeAiCallback = (response: NativeAiResponse) => void;
+
+interface NativeDispatcher {
+  (id: string, response: NativeAiResponse): void;
+  callbacks: Map<string, NativeAiCallback>;
 }
 
 interface TransportWindow extends Window {
-  [ANDROID_AI_RECEIVE]?: (id: string, response: NativeAiResponse) => void;
+  [ANDROID_AI_RECEIVE]?: NativeDispatcher | ((id: string, response: NativeAiResponse) => void);
+}
+
+function getOrCreateDispatcher(target: TransportWindow): NativeDispatcher {
+  const existing = target[ANDROID_AI_RECEIVE] as NativeDispatcher | undefined;
+  if (existing && typeof existing === 'function' && existing.callbacks instanceof Map) {
+    return existing;
+  }
+  const callbacks = new Map<string, NativeAiCallback>();
+  const dispatcher: NativeDispatcher = Object.assign(
+    (receivedId: string, response: NativeAiResponse): void => {
+      const handler = callbacks.get(receivedId);
+      if (handler) handler(response);
+    },
+    { callbacks },
+  );
+  target[ANDROID_AI_RECEIVE] = dispatcher;
+  return dispatcher;
 }
 
 export function getAndroidAiBridge(): AndroidAiBridge | null {
@@ -281,10 +311,13 @@ function nativeCode(value: unknown, fallback: AiErrorCode): AiErrorCode {
 
 function nativeError(response: NativeAiResponse): AiError {
   const code = nativeCode(response.code, 'request_failed');
+  const retryAfter = typeof response.retryAfter === 'number' && Number.isFinite(response.retryAfter) && response.retryAfter > 0
+    ? Math.floor(response.retryAfter)
+    : undefined;
   const message = typeof response.error === 'string' && response.error.trim()
     ? response.error.trim()
     : AI_ERROR_MESSAGES[code];
-  return new AiError(code, message);
+  return new AiError(code, message, undefined, retryAfter);
 }
 
 export interface AndroidBridgeTransportOptions {
@@ -341,11 +374,21 @@ export class AndroidBridgeTransport implements AiTransport {
       let timedOut = false;
       let timeout: ReturnType<typeof setTimeout> | undefined;
       const target = window as TransportWindow;
+      const dispatcher = getOrCreateDispatcher(target);
+      if (dispatcher.callbacks.has(id)) {
+        reject(aiError('busy'));
+        return;
+      }
 
       const cleanup = (): void => {
         if (timeout !== undefined) clearTimeout(timeout);
         options.signal?.removeEventListener('abort', cancel);
-        if (target[ANDROID_AI_RECEIVE] === receive) delete target[ANDROID_AI_RECEIVE];
+        if (dispatcher.callbacks.get(id) === receive) {
+          dispatcher.callbacks.delete(id);
+        }
+        if (dispatcher.callbacks.size === 0 && target[ANDROID_AI_RECEIVE] === dispatcher) {
+          delete target[ANDROID_AI_RECEIVE];
+        }
       };
       const settle = (error: AiError | null, response?: AiTransportResponse): void => {
         if (settled) return;
@@ -359,8 +402,7 @@ export class AndroidBridgeTransport implements AiTransport {
         this.bridge.aiCancel(id);
         settle(aiError('cancelled'));
       };
-      const receive = (receivedId: string, response: NativeAiResponse): void => {
-        if (receivedId !== id) return;
+      const receive: NativeAiCallback = (response: NativeAiResponse): void => {
         if (response.ok !== true) {
           settle(nativeError(response));
           return;
@@ -377,7 +419,7 @@ export class AndroidBridgeTransport implements AiTransport {
         });
       };
 
-      target[ANDROID_AI_RECEIVE] = receive;
+      dispatcher.callbacks.set(id, receive);
       options.signal?.addEventListener('abort', cancel, { once: true });
       timeout = setTimeout(() => {
         if (settled) return;
@@ -390,6 +432,10 @@ export class AndroidBridgeTransport implements AiTransport {
         this.bridge.aiRequest(id, JSON.stringify({
           system: request.system,
           user: request.user,
+          ...(request.operation ? {
+            operation: request.operation,
+            recognize: request.operation === 'recognize' || request.operation === 'organize',
+          } : {}),
           ...(image ? { image } : {}),
         }));
       } catch {

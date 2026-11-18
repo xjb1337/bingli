@@ -6,7 +6,8 @@ import {
 } from '@dabingli/domain';
 import { readLegacyLocalStorage } from './browser-migration.js';
 import { createBackupBundle, serializeBackup } from './backup-format.js';
-import type { RecordRepository } from './repository.js';
+import type { CorruptLegacyEntry, RecordRepository } from './repository.js';
+import type { StagedImportCommitInput } from './indexeddb-repository.js';
 
 export interface StagedLegacyPayload {
   keys: Record<string, string | null>;
@@ -22,7 +23,17 @@ export interface LegacyComparison {
 export interface StagedImportResult {
   recordCount: number;
   ids: string[];
+  corruptCount: number;
+  corruptEntries: CorruptLegacyEntry[];
   comparison: LegacyComparison;
+}
+
+interface AtomicStagedRepo extends RecordRepository {
+  importStagedSnapshot(input: StagedImportCommitInput): Promise<void>;
+}
+
+function supportsAtomicStagedImport(repo: RecordRepository): repo is AtomicStagedRepo {
+  return typeof (repo as Partial<AtomicStagedRepo>).importStagedSnapshot === 'function';
 }
 
 function asPayload(payload: StagedLegacyPayload | string): StagedLegacyPayload {
@@ -67,35 +78,40 @@ function comparable(record: DabingliRecord | null | undefined): Record<string, u
 }
 
 /**
- * Import Kotlin's raw localStorage envelope through the same read/normalize path
- * used by browser migration. Validation completes before the repository is touched.
+ * Import Kotlin's raw localStorage envelope through the same fault-tolerant read/normalize
+ * path used by browser migration, committing records, current pointer, settings and any
+ * quarantined corrupt entries in a single IndexedDB transaction.
  */
 export async function importStagedLegacy(
   payload: StagedLegacyPayload | string,
   repo: RecordRepository,
 ): Promise<StagedImportResult> {
   const parsed = asPayload(payload);
-  const snapshot = readLegacyLocalStorage(storageFrom(parsed));
+  const now = new Date().toISOString();
+  const snapshot = readLegacyLocalStorage(storageFrom(parsed), () => now);
   const existing = await repo.loadList();
   if (!existing.ok) throw new Error(existing.reason || '无法读取现有病历');
   const current = await repo.loadCurrent();
   const settings = await repo.loadSettings();
   if (existing.list.length || current.record || settings.raw) throw new Error('IndexedDB 已有数据，未覆盖');
 
-  const now = new Date().toISOString();
   const byId = new Map<string, DabingliRecord>();
   for (const item of snapshot.records) byId.set(item.id, RECORD_CORE.cloneValue(item.data));
   for (const record of snapshot.drafts) if (record.id && !byId.has(record.id)) byId.set(record.id, RECORD_CORE.cloneValue(record));
   const records = [...byId.values()];
   const list = records.map((record) => itemFor(record, now));
   const bundle = createBackupBundle(list, null, now, { includeNotes: true });
-  // importBackup is transactional for IndexedDbRecordRepository and keeps its recovery semantics.
-  await repo.importBackup(serializeBackup(bundle), 'replace');
-  if (snapshot.currentId) {
-    const selected = byId.get(snapshot.currentId);
-    if (selected) await repo.saveCurrent(selected);
+
+  if (supportsAtomicStagedImport(repo)) {
+    await repo.importStagedSnapshot({ snapshot, records, list, now });
+  } else {
+    await repo.importBackup(serializeBackup(bundle), 'replace');
+    if (snapshot.currentId) {
+      const selected = byId.get(snapshot.currentId);
+      if (selected) await repo.saveCurrent(selected);
+    }
+    if (snapshot.settings) await repo.saveSettings(snapshot.settings);
   }
-  if (snapshot.settings) await repo.saveSettings(snapshot.settings);
 
   const imported = await repo.loadList();
   if (!imported.ok) throw new Error(imported.reason || '读取迁移结果失败');
@@ -132,6 +148,8 @@ export async function importStagedLegacy(
   return {
     recordCount: records.length,
     ids: records.map((record) => String(record.id)),
+    corruptCount: snapshot.corruptEntries.length,
+    corruptEntries: snapshot.corruptEntries,
     comparison: {
       records: perRecord.every((item) => item.idMatch && item.name && item.chiefComplaint && item.diagnosis),
       exportJson: expected === actual,

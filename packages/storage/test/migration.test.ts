@@ -193,4 +193,67 @@ describe('browser legacy localStorage migration', () => {
     expect((await repository.loadCurrent()).record?.basic.name).toBe('损坏迁移前患者');
     expect(storage.snapshot()).toEqual(beforeLegacy);
   });
+
+  it('quarantines single corrupt records/drafts into meta.corruptLegacyEntries while migrating intact ones', async () => {
+    const storage = memoryStorage();
+    const keys = RECORD_CORE.STORAGE_KEYS;
+    const fixtures = records();
+    const validList: RecordListItem[] = [
+      { id: fixtures[0]!.id!, updatedAt: fixtures[0]!.updatedAt!, schemaVersion: fixtures[0]!.schemaVersion, data: fixtures[0]! },
+      { id: 'broken-only-in-list', updatedAt: FIXED_NOW, data: {} as unknown as DabingliRecord },
+      { id: fixtures[2]!.id!, updatedAt: fixtures[2]!.updatedAt!, schemaVersion: fixtures[2]!.schemaVersion, data: fixtures[2]! },
+    ];
+    storage.setItem(keys.list, JSON.stringify(validList));
+    storage.setItem(RECORD_CORE.draftKey(fixtures[0]!.id!), JSON.stringify(fixtures[0]));
+    storage.setItem(RECORD_CORE.draftKey('orphan-corrupt'), '{broken-draft-json');
+    storage.setItem(keys.settings, '{broken-settings');
+
+    const repository = makeRepository(nextDatabaseName('quarantine-single'), storage);
+    const initialized = await repository.initialize();
+    expect(initialized.ok).toBe(true);
+    expect(initialized.migration?.status).toBe('migrated');
+    expect(initialized.migration?.recordCount).toBe(2);
+    expect(initialized.migration?.corruptCount).toBe(3);
+
+    const list = await repository.loadList();
+    expect(list.list.map((item) => item.id).sort()).toEqual(['legacy-v1-respiratory', 'legacy-v3-obstetrics']);
+
+    const quarantined = await repository.exportCorruptLegacyEntries();
+    expect(quarantined).toHaveLength(3);
+    expect(quarantined.map((entry) => entry.key)).toEqual(
+      expect.arrayContaining([keys.list, RECORD_CORE.draftKey('orphan-corrupt'), keys.settings]),
+    );
+    expect(quarantined.find((entry) => entry.key === RECORD_CORE.draftKey('orphan-corrupt'))?.raw).toBe('{broken-draft-json');
+  });
+
+  it('does not permanently lock migration as skipped on non-empty DB and supports mergeLegacyLocalStorage', async () => {
+    const name = nextDatabaseName('merge-non-empty');
+    const seeded = makeRepository(name, memoryStorage(), false);
+    await seeded.initialize();
+    const existing = seeded.newRecord();
+    existing.basic.name = 'IndexedDB 已有空白新病历';
+    expect((await seeded.saveToLibrary(existing, 0)).ok).toBe(true);
+    await seeded.close();
+
+    const storage = memoryStorage();
+    seedLegacy(storage);
+    const repository = makeRepository(name, storage);
+    const initialized = await repository.initialize();
+    expect(initialized.ok).toBe(true);
+    expect(initialized.migration?.status).toBe('skipped');
+    expect(await repository.readMeta('browserLegacyMigration')).toBeNull();
+
+    const merged = await repository.mergeLegacyLocalStorage();
+    expect(merged.ok).toBe(true);
+    expect(merged.status).toBe('migrated');
+    expect(merged.added).toBe(3);
+
+    const allIds = (await repository.loadList()).list.map((item) => item.id);
+    expect(allIds).toContain(existing.id);
+    expect(allIds).toContain('legacy-v1-respiratory');
+    expect(allIds).toContain('legacy-v2-digestive');
+    expect(allIds).toContain('legacy-v3-obstetrics');
+    // Existing current pointer is preserved.
+    expect((await repository.loadCurrent()).record?.id).toBe(existing.id);
+  });
 });

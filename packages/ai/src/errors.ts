@@ -2,6 +2,7 @@ import type { AiErrorCode } from './types';
 
 export const AI_ERROR_MESSAGES: Readonly<Record<AiErrorCode, string>> = Object.freeze({
   missing_key: '请在 AI 助手顶部「API 设置」中输入 DeepSeek API Key',
+  busy: '上一次请求还在进行，请稍后重试',
   unauthorized: 'API Key 无效，请检查 AI 设置后重试',
   forbidden: 'API Key 无权限，请检查 AI 设置后重试',
   insufficient_balance: 'DeepSeek 余额不足，请充值后重试',
@@ -25,24 +26,57 @@ export const AI_ERROR_MESSAGES: Readonly<Record<AiErrorCode, string>> = Object.f
 export class AiError extends Error {
   readonly code: AiErrorCode;
   readonly status?: number;
+  readonly retryAfterSeconds?: number;
 
-  constructor(code: AiErrorCode, message = AI_ERROR_MESSAGES[code], status?: number) {
+  constructor(
+    code: AiErrorCode,
+    message = AI_ERROR_MESSAGES[code],
+    status?: number,
+    retryAfterSeconds?: number,
+  ) {
     super(message);
     this.name = 'AiError';
     this.code = code;
     if (status !== undefined) this.status = status;
+    if (retryAfterSeconds !== undefined) this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 
-export function aiError(code: AiErrorCode, message?: string, status?: number): AiError {
-  return new AiError(code, message, status);
+export function aiError(
+  code: AiErrorCode,
+  message?: string,
+  status?: number,
+  retryAfterSeconds?: number,
+): AiError {
+  return new AiError(code, message, status, retryAfterSeconds);
 }
 
-export function mapHttpStatus(status: number): AiError {
+export function parseRetryAfterSeconds(header: string | null | undefined, nowMs = Date.now()): number | undefined {
+  if (typeof header !== 'string') return undefined;
+  const trimmed = header.trim();
+  if (!trimmed) return undefined;
+  if (/^\d+$/.test(trimmed)) {
+    const seconds = Number(trimmed);
+    return Number.isFinite(seconds) && seconds >= 0 ? Math.min(seconds, 3600) : undefined;
+  }
+  const timestamp = Date.parse(trimmed);
+  if (Number.isFinite(timestamp)) {
+    const delta = Math.ceil((timestamp - nowMs) / 1000);
+    return delta > 0 ? Math.min(delta, 3600) : 0;
+  }
+  return undefined;
+}
+
+export function mapHttpStatus(status: number, retryAfterSeconds?: number): AiError {
   if (status === 401) return new AiError('unauthorized', AI_ERROR_MESSAGES.unauthorized, status);
   if (status === 403) return new AiError('forbidden', AI_ERROR_MESSAGES.forbidden, status);
   if (status === 402) return new AiError('insufficient_balance', AI_ERROR_MESSAGES.insufficient_balance, status);
-  if (status === 429) return new AiError('rate_limited', AI_ERROR_MESSAGES.rate_limited, status);
+  if (status === 429) {
+    const message = retryAfterSeconds !== undefined && retryAfterSeconds > 0
+      ? `请求过于频繁，请在 ${retryAfterSeconds} 秒后重试`
+      : AI_ERROR_MESSAGES.rate_limited;
+    return new AiError('rate_limited', message, status, retryAfterSeconds);
+  }
   if (status >= 500) return new AiError('server_unavailable', AI_ERROR_MESSAGES.server_unavailable, status);
   return new AiError('http_error', `DeepSeek 请求失败（HTTP ${status}），请检查模型设置后重试`, status);
 }

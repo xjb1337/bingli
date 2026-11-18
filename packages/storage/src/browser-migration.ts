@@ -7,6 +7,7 @@ import {
   type RecordListItem,
   type StorageLike,
 } from '@dabingli/domain';
+import type { CorruptLegacyEntry } from './repository.js';
 
 type EnumerableStorage = StorageLike & {
   readonly length?: number;
@@ -21,10 +22,23 @@ export interface LegacyBrowserSnapshot {
   currentId: string | null;
   settings: AppSettings | null;
   legacyKeys: string[];
+  corruptEntries: CorruptLegacyEntry[];
 }
 
 function clone<T>(value: T): T {
   return RECORD_CORE.cloneValue(value);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function safeStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }
 
 function asRecord(value: unknown, label: string): DabingliRecord {
@@ -35,8 +49,7 @@ function asRecord(value: unknown, label: string): DabingliRecord {
       SCHEMA.DEPARTMENTS.map((item) => item.key),
     );
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`${label}无法迁移：${message}`);
+    throw new Error(`${label}无法迁移：${errorMessage(error)}`);
   }
 }
 
@@ -92,8 +105,10 @@ function legacyList(storage: StorageLike): RecordListItem[] {
 }
 
 /**
- * Read and normalize every legacy localStorage key without mutating it.
- * Any corrupt record throws before an IndexedDB transaction is opened.
+ * Read and normalize legacy localStorage keys without mutating them.
+ * Top-level list JSON corruption throws before touching IndexedDB, while
+ * individual corrupt record/draft/pointer/settings entries are quarantined
+ * into `corruptEntries` so valid records still migrate cleanly.
  */
 export function readLegacyLocalStorage(
   storage: StorageLike,
@@ -110,17 +125,61 @@ export function readLegacyLocalStorage(
   const listItems = legacyList(storage);
   const records: RecordListItem[] = [];
   const drafts = new Map<string, DabingliRecord>();
+  const corruptEntries: CorruptLegacyEntry[] = [];
 
   for (const item of listItems) {
     if (!item || typeof item.id !== 'string' || !item.id) {
-      throw new Error('旧病历列表包含缺少 ID 的记录，未执行迁移');
+      corruptEntries.push({
+        key: keys.list,
+        reason: '旧病历列表条目缺少有效 ID',
+        raw: safeStringify(item),
+      });
+      continue;
     }
     const id = item.id;
-    const draftRaw = readText(storage, RECORD_CORE.draftKey(id));
-    const draft =
-      draftRaw === null
-        ? asRecord(item.data, `旧病历 ${id} `)
-        : asRecord(parseJson(draftRaw, `旧草稿 ${id} `), `旧草稿 ${id} `);
+    const draftStorageKey = RECORD_CORE.draftKey(id);
+    let draftRaw: string | null = null;
+    try {
+      draftRaw = readText(storage, draftStorageKey);
+    } catch (error) {
+      corruptEntries.push({
+        key: draftStorageKey,
+        id,
+        reason: errorMessage(error),
+        raw: '',
+      });
+    }
+
+    let draft: DabingliRecord | null = null;
+    if (draftRaw !== null) {
+      try {
+        draft = asRecord(parseJson(draftRaw, `旧草稿 ${id} `), `旧草稿 ${id} `);
+      } catch (error) {
+        corruptEntries.push({
+          key: draftStorageKey,
+          id,
+          reason: errorMessage(error),
+          raw: draftRaw,
+        });
+      }
+    }
+
+    if (!draft) {
+      try {
+        draft = asRecord(item.data, `旧病历 ${id} `);
+      } catch (error) {
+        if (draftRaw === null) {
+          corruptEntries.push({
+            key: keys.list,
+            id,
+            reason: errorMessage(error),
+            raw: safeStringify(item),
+          });
+        }
+        continue;
+      }
+    }
+
     draft.id = id;
     drafts.set(id, draft);
     records.push({
@@ -136,39 +195,67 @@ export function readLegacyLocalStorage(
     if (!key.startsWith(keys.draftPrefix)) continue;
     const id = key.slice(keys.draftPrefix.length);
     if (!id || drafts.has(id)) continue;
-    const raw = readText(storage, key);
+    let raw: string | null = null;
+    try {
+      raw = readText(storage, key);
+    } catch (error) {
+      corruptEntries.push({ key, id, reason: errorMessage(error), raw: '' });
+      continue;
+    }
     if (raw === null) continue;
-    const draft = asRecord(parseJson(raw, `旧草稿 ${id} `), `旧草稿 ${id} `);
-    draft.id = id;
-    drafts.set(id, draft);
+    try {
+      const draft = asRecord(parseJson(raw, `旧草稿 ${id} `), `旧草稿 ${id} `);
+      draft.id = id;
+      drafts.set(id, draft);
+    } catch (error) {
+      corruptEntries.push({ key, id, reason: errorMessage(error), raw });
+    }
   }
 
   let currentId: string | null = null;
-  const currentRaw = readText(storage, keys.current);
+  let currentRaw: string | null = null;
+  try {
+    currentRaw = readText(storage, keys.current);
+  } catch (error) {
+    corruptEntries.push({ key: keys.current, reason: errorMessage(error), raw: '' });
+  }
   if (currentRaw !== null) {
-    const parsed = parseJson(currentRaw, '旧当前病历指针');
-    if (RECORD_CORE.lookLikeRecord(parsed)) {
-      const migrated = asRecord(parsed, '旧当前病历 ');
-      const id = String(migrated.id || RECORD_CORE.uid());
-      migrated.id = id;
-      drafts.set(id, migrated);
-      currentId = id;
-    } else if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      const id = String((parsed as { id?: unknown }).id || '').trim();
-      if (id) currentId = drafts.has(id) || records.some((item) => item.id === id) ? id : null;
-    } else {
-      throw new Error('旧当前病历指针格式错误，未执行迁移');
+    try {
+      const parsed = parseJson(currentRaw, '旧当前病历指针');
+      if (RECORD_CORE.lookLikeRecord(parsed)) {
+        const migrated = asRecord(parsed, '旧当前病历 ');
+        const id = String(migrated.id || RECORD_CORE.uid());
+        migrated.id = id;
+        drafts.set(id, migrated);
+        currentId = id;
+      } else if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        const id = String((parsed as { id?: unknown }).id || '').trim();
+        if (id) currentId = drafts.has(id) || records.some((item) => item.id === id) ? id : null;
+      } else {
+        throw new Error('旧当前病历指针格式错误');
+      }
+    } catch (error) {
+      corruptEntries.push({ key: keys.current, reason: errorMessage(error), raw: currentRaw });
     }
   }
 
   let settings: AppSettings | null = null;
-  const settingsRaw = readText(storage, keys.settings);
+  let settingsRaw: string | null = null;
+  try {
+    settingsRaw = readText(storage, keys.settings);
+  } catch (error) {
+    corruptEntries.push({ key: keys.settings, reason: errorMessage(error), raw: '' });
+  }
   if (settingsRaw !== null) {
-    const parsed = parseJson(settingsRaw, '旧设置');
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      throw new Error('旧设置格式错误，未执行迁移');
+    try {
+      const parsed = parseJson(settingsRaw, '旧设置');
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('旧设置格式错误');
+      }
+      settings = RECORD_CORE.normalizeSettings(parsed);
+    } catch (error) {
+      corruptEntries.push({ key: keys.settings, reason: errorMessage(error), raw: settingsRaw });
     }
-    settings = RECORD_CORE.normalizeSettings(parsed);
   }
 
   return {
@@ -178,5 +265,6 @@ export function readLegacyLocalStorage(
     currentId,
     settings,
     legacyKeys: presentKeys,
+    corruptEntries,
   };
 }

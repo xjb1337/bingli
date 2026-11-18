@@ -16,20 +16,27 @@ import { createBackupBundle, parseBackup } from './backup-format.js';
 import { readLegacyLocalStorage, type LegacyBrowserSnapshot } from './browser-migration.js';
 import type {
   BackupScope,
+  CorruptLegacyEntry,
   ImportMode,
   ImportSummary,
   LegacyMigrationResult,
   RecordRepository,
   RecoveryCopySummary,
+  RepositoryChangeEvent,
   RepositoryInitResult,
   RestoreSummary,
+  StorageQuotaInfo,
 } from './repository.js';
 
 export const DEFAULT_DATABASE_NAME = 'dabingli.indexeddb.v1';
 export const LEGACY_MIGRATION_META_KEY = 'browserLegacyMigration';
+export const CORRUPT_LEGACY_META_KEY = 'corruptLegacyEntries';
+export const MAX_RECOVERY_COPIES = 5;
 const CURRENT_KEY = 'current';
 const SETTINGS_KEY = 'settings';
 const RECOVERY_PREFIX = 'recovery:';
+const SYNC_CHANNEL_PREFIX = 'dabingli.sync:';
+const QUOTA_LOW_SPACE_RATIO = 0.85;
 
 interface StoredCurrent {
   key: typeof CURRENT_KEY;
@@ -57,7 +64,13 @@ interface RecoveryCopy {
   drafts: DabingliRecord[];
   currentId: string | null;
   settings: AppSettings | null;
-  bundle: ExportBundle;
+}
+
+export interface StagedImportCommitInput {
+  snapshot: LegacyBrowserSnapshot;
+  records: DabingliRecord[];
+  list: RecordListItem[];
+  now: string;
 }
 
 export class DabingliDatabase extends Dexie {
@@ -86,6 +99,7 @@ export interface IndexedDbRepositoryOptions {
   /** Alias used by callers that already have a StorageLike instance. */
   storage?: StorageLike | null | false;
   autoMigrate?: boolean;
+  broadcast?: boolean;
   now?: () => string;
 }
 
@@ -109,6 +123,18 @@ function canonicalRecord(record: DabingliRecord): DabingliRecord {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+export function isQuotaExceededError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return /QuotaExceededError/i.test(String(error ?? ''));
+  const candidate = error as { name?: unknown; code?: unknown; message?: unknown; inner?: unknown };
+  if (candidate.name === 'QuotaExceededError' || candidate.code === 22) return true;
+  if (typeof candidate.message === 'string' && /QuotaExceededError|quota/i.test(candidate.message)) return true;
+  return candidate.inner ? isQuotaExceededError(candidate.inner) : false;
+}
+
+function quotaFailureMessage(prefix: string): string {
+  return `${prefix}：本地存储空间不足（QuotaExceededError），请先导出备份并清理历史记录或恢复副本`;
 }
 
 function defaultLegacyStorage(): StorageLike | null {
@@ -138,13 +164,20 @@ function emptyMigration(
     settingsMigrated: false,
     currentId: null,
     legacyKeys: [],
+    corruptCount: 0,
   };
 }
 
 function storedMigration(value: unknown): LegacyMigrationResult | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const migration = value as Partial<LegacyMigrationResult>;
-  if (typeof migration.status !== 'string') return null;
+  if (
+    migration.status !== 'migrated'
+    && migration.status !== 'no-legacy-data'
+    && migration.status !== 'already-complete'
+  ) {
+    return null;
+  }
   return {
     ok: true,
     status: 'already-complete',
@@ -155,6 +188,7 @@ function storedMigration(value: unknown): LegacyMigrationResult | null {
     legacyKeys: Array.isArray(migration.legacyKeys)
       ? migration.legacyKeys.filter((key): key is string => typeof key === 'string')
       : [],
+    corruptCount: Number(migration.corruptCount) || 0,
   };
 }
 
@@ -173,6 +207,33 @@ function asRecovery(value: unknown): RecoveryCopy | null {
   return recovery as RecoveryCopy;
 }
 
+function mergeCorruptEntries(
+  existing: readonly CorruptLegacyEntry[],
+  incoming: readonly CorruptLegacyEntry[],
+): CorruptLegacyEntry[] {
+  const seen = new Set<string>();
+  const out: CorruptLegacyEntry[] = [];
+  for (const entry of [...existing, ...incoming]) {
+    if (!entry || typeof entry.key !== 'string') continue;
+    const signature = `${entry.key}\0${entry.id ?? ''}\0${entry.raw}`;
+    if (seen.has(signature)) continue;
+    seen.add(signature);
+    out.push({ ...entry });
+  }
+  return out;
+}
+
+function buildListItem(record: DabingliRecord, now: string): RecordListItem {
+  const id = String(record.id || RECORD_CORE.uid());
+  return {
+    id,
+    updatedAt: now,
+    schemaVersion: RECORD_CORE.SCHEMA_VERSION,
+    basic: clone(record.basic),
+    data: clone({ ...record, id, updatedAt: now }),
+  };
+}
+
 export class IndexedDbRecordRepository implements RecordRepository {
   readonly kind = 'indexeddb' as const;
   readonly keys = RECORD_CORE.STORAGE_KEYS;
@@ -181,6 +242,9 @@ export class IndexedDbRecordRepository implements RecordRepository {
   private readonly legacyStorage: StorageLike | null;
   private readonly autoMigrate: boolean;
   private readonly now: () => string;
+  private readonly tabId: string;
+  private readonly changeListeners = new Set<(event: RepositoryChangeEvent) => void>();
+  private channel: BroadcastChannel | null = null;
   private initPromise: Promise<RepositoryInitResult> | null = null;
 
   constructor(options: IndexedDbRepositoryOptions = {}) {
@@ -193,6 +257,80 @@ export class IndexedDbRecordRepository implements RecordRepository {
         : configuredStorage ?? defaultLegacyStorage();
     this.autoMigrate = options.autoMigrate !== false;
     this.now = options.now ?? (() => new Date().toISOString());
+    this.tabId = `tab_${RECORD_CORE.uid()}_${Math.random().toString(36).slice(2, 8)}`;
+    if (options.broadcast !== false) {
+      this.openSyncChannel();
+    }
+  }
+
+  private openSyncChannel(): void {
+    try {
+      const Ctor = (globalThis as { BroadcastChannel?: typeof BroadcastChannel }).BroadcastChannel;
+      if (typeof Ctor !== 'function') return;
+      this.channel = new Ctor(`${SYNC_CHANNEL_PREFIX}${this.databaseName}`);
+      this.channel.onmessage = (message: MessageEvent<unknown>) => {
+        const data = message?.data as Partial<RepositoryChangeEvent> | undefined;
+        if (!data || typeof data.type !== 'string' || data.tabId === this.tabId) return;
+        for (const listener of this.changeListeners) {
+          try {
+            listener(data as RepositoryChangeEvent);
+          } catch {
+            // Isolate listener failures from repository operations.
+          }
+        }
+      };
+    } catch {
+      this.channel = null;
+    }
+  }
+
+  private notifyChange(
+    type: RepositoryChangeEvent['type'],
+    details: { recordId?: string; revision?: number } = {},
+  ): void {
+    if (!this.channel) return;
+    const event: RepositoryChangeEvent = {
+      type,
+      databaseName: this.databaseName,
+      at: this.now(),
+      tabId: this.tabId,
+      ...(details.recordId ? { recordId: details.recordId } : {}),
+      ...(details.revision !== undefined ? { revision: details.revision } : {}),
+    };
+    try {
+      this.channel.postMessage(event);
+    } catch {
+      // Ignore closed channel or serialization errors.
+    }
+  }
+
+  onChange(listener: (event: RepositoryChangeEvent) => void): () => void {
+    this.changeListeners.add(listener);
+    return () => {
+      this.changeListeners.delete(listener);
+    };
+  }
+
+  async estimateStorageQuota(): Promise<StorageQuotaInfo> {
+    try {
+      const estimateFn = (globalThis.navigator as { storage?: { estimate?: () => Promise<{ usage?: number; quota?: number }> } } | undefined)?.storage?.estimate;
+      if (typeof estimateFn !== 'function') {
+        return { supported: false, usage: 0, quota: 0, ratio: 0, lowSpace: false };
+      }
+      const result = await estimateFn.call(globalThis.navigator.storage);
+      const usage = Number(result?.usage) || 0;
+      const quota = Number(result?.quota) || 0;
+      const ratio = quota > 0 ? usage / quota : 0;
+      return {
+        supported: true,
+        usage,
+        quota,
+        ratio,
+        lowSpace: quota > 0 && ratio >= QUOTA_LOW_SPACE_RATIO,
+      };
+    } catch {
+      return { supported: false, usage: 0, quota: 0, ratio: 0, lowSpace: false };
+    }
   }
 
   initialize(): Promise<RepositoryInitResult> {
@@ -208,14 +346,20 @@ export class IndexedDbRecordRepository implements RecordRepository {
   private async initializeOnce(): Promise<RepositoryInitResult> {
     try {
       await this.db.open();
+      const storageQuota = await this.estimateStorageQuota();
       if (!this.autoMigrate) {
-        return { ok: true, migration: emptyMigration('not-applicable', '自动迁移已关闭') };
+        return {
+          ok: true,
+          migration: emptyMigration('not-applicable', '自动迁移已关闭'),
+          ...(storageQuota.supported ? { storageQuota } : {}),
+        };
       }
       const migration = await this.migrateLegacyLocalStorage();
       return {
         ok: migration.ok,
         ...(migration.reason ? { reason: migration.reason } : {}),
         migration,
+        ...(storageQuota.supported ? { storageQuota } : {}),
       };
     } catch (error) {
       return { ok: false, reason: `IndexedDB 初始化失败：${errorMessage(error)}` };
@@ -239,7 +383,7 @@ export class IndexedDbRecordRepository implements RecordRepository {
     }
 
     try {
-      return await this.db.transaction(
+      const result = await this.db.transaction(
         'rw',
         this.db.records,
         this.db.drafts,
@@ -249,7 +393,8 @@ export class IndexedDbRecordRepository implements RecordRepository {
         async () => {
           const raced = await this.db.meta.get(LEGACY_MIGRATION_META_KEY);
           if (raced) {
-            return storedMigration(raced.value) ?? emptyMigration('already-complete');
+            const done = storedMigration(raced.value);
+            if (done) return done;
           }
 
           const [recordCount, draftCount, currentCount, settingsCount] = await Promise.all([
@@ -259,14 +404,9 @@ export class IndexedDbRecordRepository implements RecordRepository {
             this.db.settings.count(),
           ]);
 
+          // Do not lock out future explicit mergeLegacyLocalStorage() when DB already has rows.
           if (recordCount + draftCount + currentCount + settingsCount > 0) {
-            const skipped = emptyMigration('skipped', 'IndexedDB 已有数据，未覆盖');
-            await this.db.meta.put({
-              key: LEGACY_MIGRATION_META_KEY,
-              value: skipped,
-              updatedAt: this.now(),
-            });
-            return skipped;
+            return emptyMigration('skipped', 'IndexedDB 已有数据，未自动覆盖；可手动合并导入旧本地数据');
           }
 
           if (!snapshot.hasLegacyData) {
@@ -295,6 +435,18 @@ export class IndexedDbRecordRepository implements RecordRepository {
               updatedAt: this.now(),
             });
           }
+          if (snapshot.corruptEntries.length) {
+            const existingCorrupt = await this.db.meta.get(CORRUPT_LEGACY_META_KEY);
+            const mergedCorrupt = mergeCorruptEntries(
+              Array.isArray(existingCorrupt?.value) ? (existingCorrupt.value as CorruptLegacyEntry[]) : [],
+              snapshot.corruptEntries,
+            );
+            await this.db.meta.put({
+              key: CORRUPT_LEGACY_META_KEY,
+              value: mergedCorrupt,
+              updatedAt: this.now(),
+            });
+          }
 
           const migrated: LegacyMigrationResult = {
             ok: true,
@@ -304,6 +456,8 @@ export class IndexedDbRecordRepository implements RecordRepository {
             settingsMigrated: snapshot.settings !== null,
             currentId: snapshot.currentId,
             legacyKeys: snapshot.legacyKeys,
+            corruptCount: snapshot.corruptEntries.length,
+            ...(snapshot.corruptEntries.length ? { corruptEntries: snapshot.corruptEntries } : {}),
           };
           await this.db.meta.put({
             key: LEGACY_MIGRATION_META_KEY,
@@ -313,9 +467,197 @@ export class IndexedDbRecordRepository implements RecordRepository {
           return migrated;
         },
       );
+      if (result.status === 'migrated') this.notifyChange('legacy-merged');
+      return result;
     } catch (error) {
       return emptyMigration('failed', `迁移事务失败：${errorMessage(error)}`);
     }
+  }
+
+  /** Explicitly merge legacy localStorage data into an existing (possibly non-empty) IndexedDB. */
+  async mergeLegacyLocalStorage(storageOverride?: StorageLike): Promise<LegacyMigrationResult> {
+    const sourceStorage = storageOverride ?? this.legacyStorage;
+    if (!sourceStorage) return emptyMigration('not-applicable');
+
+    let snapshot: LegacyBrowserSnapshot;
+    try {
+      snapshot = readLegacyLocalStorage(sourceStorage, this.now);
+    } catch (error) {
+      return emptyMigration('failed', errorMessage(error));
+    }
+
+    if (!snapshot.hasLegacyData && snapshot.corruptEntries.length === 0) {
+      return emptyMigration('no-legacy-data');
+    }
+
+    try {
+      const result = await this.db.transaction(
+        'rw',
+        this.db.records,
+        this.db.drafts,
+        this.db.current,
+        this.db.settings,
+        this.db.meta,
+        async () => {
+          const existingList = await this.db.records.toArray();
+          const existingById = new Map(existingList.map((item) => [item.id, item]));
+          const now = this.now();
+
+          const byId = new Map<string, RecordListItem>();
+          for (const item of snapshot.records) byId.set(item.id, clone(item));
+          for (const draft of snapshot.drafts) {
+            if (draft.id && !byId.has(draft.id)) {
+              byId.set(draft.id, buildListItem(draft, String(draft.updatedAt || now)));
+            }
+          }
+          const incomingItems = [...byId.values()];
+          const merged = RECORD_CORE.mergeImport(existingList, incomingItems);
+          const changed = merged.list.filter((item) => existingById.get(item.id) !== item);
+
+          if (changed.length) {
+            await this.db.records.bulkPut(changed.map((item) => clone(item)));
+            await this.db.drafts.bulkPut(changed.map((item) => clone(item.data)));
+          }
+
+          const existingPointer = await this.db.current.get(CURRENT_KEY);
+          if (!existingPointer && snapshot.currentId) {
+            await this.db.current.put({ key: CURRENT_KEY, id: snapshot.currentId, at: now });
+          }
+
+          let settingsMigrated = false;
+          const existingSettings = await this.db.settings.get(SETTINGS_KEY);
+          if (!existingSettings && snapshot.settings) {
+            await this.db.settings.put({ key: SETTINGS_KEY, data: snapshot.settings, updatedAt: now });
+            settingsMigrated = true;
+          }
+
+          if (snapshot.corruptEntries.length) {
+            const existingCorrupt = await this.db.meta.get(CORRUPT_LEGACY_META_KEY);
+            const mergedCorrupt = mergeCorruptEntries(
+              Array.isArray(existingCorrupt?.value) ? (existingCorrupt.value as CorruptLegacyEntry[]) : [],
+              snapshot.corruptEntries,
+            );
+            await this.db.meta.put({
+              key: CORRUPT_LEGACY_META_KEY,
+              value: mergedCorrupt,
+              updatedAt: now,
+            });
+          }
+
+          const resultValue: LegacyMigrationResult = {
+            ok: true,
+            status: 'migrated',
+            recordCount: incomingItems.length,
+            draftCount: snapshot.drafts.length,
+            settingsMigrated,
+            currentId: existingPointer?.id ?? snapshot.currentId,
+            legacyKeys: snapshot.legacyKeys,
+            corruptCount: snapshot.corruptEntries.length,
+            ...(snapshot.corruptEntries.length ? { corruptEntries: snapshot.corruptEntries } : {}),
+            added: merged.added,
+            updated: merged.updated,
+            skipped: merged.skipped,
+          };
+          await this.db.meta.put({
+            key: LEGACY_MIGRATION_META_KEY,
+            value: resultValue,
+            updatedAt: now,
+          });
+          return resultValue;
+        },
+      );
+      this.notifyChange('legacy-merged');
+      return result;
+    } catch (error) {
+      return emptyMigration(
+        'failed',
+        isQuotaExceededError(error) ? quotaFailureMessage('合并导入失败') : `合并迁移失败：${errorMessage(error)}`,
+      );
+    }
+  }
+
+  /** Atomically commit an Android-staged legacy payload in one IndexedDB transaction. */
+  async importStagedSnapshot(input: StagedImportCommitInput): Promise<void> {
+    await this.db.transaction(
+      'rw',
+      this.db.records,
+      this.db.drafts,
+      this.db.current,
+      this.db.settings,
+      this.db.meta,
+      async () => {
+        const [recordCount, draftCount, currentCount, settingsCount] = await Promise.all([
+          this.db.records.count(),
+          this.db.drafts.count(),
+          this.db.current.count(),
+          this.db.settings.count(),
+        ]);
+        if (recordCount + draftCount + currentCount + settingsCount > 0) {
+          throw new Error('IndexedDB 已有数据，未覆盖');
+        }
+
+        const listItems = input.list.map((item) => ({
+          ...clone(item),
+          updatedAt: item.updatedAt || input.now,
+          schemaVersion: RECORD_CORE.SCHEMA_VERSION,
+        }));
+        const draftItems = input.records.map((record) => canonicalRecord(record));
+
+        if (listItems.length) await this.db.records.bulkPut(listItems);
+        if (draftItems.length) await this.db.drafts.bulkPut(draftItems);
+        if (input.snapshot.currentId) {
+          const hasTarget = draftItems.some((item) => item.id === input.snapshot.currentId);
+          if (hasTarget) {
+            await this.db.current.put({
+              key: CURRENT_KEY,
+              id: input.snapshot.currentId,
+              at: input.now,
+            });
+          }
+        } else if (listItems[0]?.id) {
+          await this.db.current.put({
+            key: CURRENT_KEY,
+            id: listItems[0].id,
+            at: input.now,
+          });
+        }
+        if (input.snapshot.settings) {
+          await this.db.settings.put({
+            key: SETTINGS_KEY,
+            data: RECORD_CORE.normalizeSettings(input.snapshot.settings),
+            updatedAt: input.now,
+          });
+        }
+        if (input.snapshot.corruptEntries.length) {
+          await this.db.meta.put({
+            key: CORRUPT_LEGACY_META_KEY,
+            value: input.snapshot.corruptEntries,
+            updatedAt: input.now,
+          });
+        }
+        const migrationMeta: LegacyMigrationResult = {
+          ok: true,
+          status: 'migrated',
+          recordCount: listItems.length,
+          draftCount: draftItems.length,
+          settingsMigrated: input.snapshot.settings !== null,
+          currentId: input.snapshot.currentId,
+          legacyKeys: input.snapshot.legacyKeys,
+          corruptCount: input.snapshot.corruptEntries.length,
+        };
+        await this.db.meta.put({
+          key: LEGACY_MIGRATION_META_KEY,
+          value: migrationMeta,
+          updatedAt: input.now,
+        });
+      },
+    );
+    this.notifyChange('backup-imported');
+  }
+
+  async exportCorruptLegacyEntries(): Promise<CorruptLegacyEntry[]> {
+    const entries = await this.readMeta<CorruptLegacyEntry[]>(CORRUPT_LEGACY_META_KEY);
+    return Array.isArray(entries) ? entries : [];
   }
 
   newRecord(): DabingliRecord {
@@ -374,7 +716,7 @@ export class IndexedDbRecordRepository implements RecordRepository {
     }
 
     try {
-      return await this.db.transaction(
+      const result = await this.db.transaction(
         'rw',
         this.db.drafts,
         this.db.current,
@@ -415,8 +757,16 @@ export class IndexedDbRecordRepository implements RecordRepository {
           return { ok: true, record: canonical, revision: canonical.meta.revision };
         },
       );
+      if (result.ok && result.record?.id) {
+        this.notifyChange('record-saved', { recordId: result.record.id, revision: result.revision });
+      }
+      return result;
     } catch (error) {
-      return { ok: false, error: true, reason: `保存草稿失败：${errorMessage(error)}` };
+      return {
+        ok: false,
+        error: true,
+        reason: isQuotaExceededError(error) ? quotaFailureMessage('保存草稿失败') : `保存草稿失败：${errorMessage(error)}`,
+      };
     }
   }
 
@@ -426,7 +776,7 @@ export class IndexedDbRecordRepository implements RecordRepository {
     }
 
     try {
-      return await this.db.transaction(
+      const result = await this.db.transaction(
         'rw',
         this.db.records,
         this.db.drafts,
@@ -461,39 +811,52 @@ export class IndexedDbRecordRepository implements RecordRepository {
           next.meta.updatedAt = now;
           next.updatedAt = now;
           const canonical = canonicalRecord(next);
+          canonical.id = id;
+          canonical.updatedAt = now;
+          canonical.schemaVersion = RECORD_CORE.SCHEMA_VERSION;
 
           await this.db.drafts.put(canonical);
           await this.db.current.put({ key: CURRENT_KEY, id, at: now });
-
-          const currentItems = await this.db.records.toArray();
-          const merged = RECORD_CORE.upsertRecord(currentItems, canonical, now);
-          const item = merged.list.find((candidate) => candidate.id === id);
-          if (item) await this.db.records.put(clone(item));
+          await this.db.records.put(buildListItem(canonical, now));
 
           return { ok: true, record: canonical, revision: canonical.meta.revision };
         },
       );
+      if (result.ok && result.record?.id) {
+        this.notifyChange('record-saved', { recordId: result.record.id, revision: result.revision });
+      }
+      return result;
     } catch (error) {
-      return { ok: false, error: true, reason: `保存病历失败：${errorMessage(error)}` };
+      return {
+        ok: false,
+        error: true,
+        reason: isQuotaExceededError(error) ? quotaFailureMessage('保存病历失败') : `保存病历失败：${errorMessage(error)}`,
+      };
     }
   }
 
   async saveList(list: RecordListItem[]): Promise<SaveResult> {
     if (!Array.isArray(list)) return { ok: false, error: true, reason: '病历列表无效' };
     try {
-      return await this.db.transaction('rw', this.db.records, async () => {
+      const result = await this.db.transaction('rw', this.db.records, async () => {
         await this.db.records.clear();
         if (list.length) await this.db.records.bulkPut(clone(list));
         return { ok: true };
       });
+      this.notifyChange('list-saved');
+      return result;
     } catch (error) {
-      return { ok: false, error: true, reason: `保存病历列表失败：${errorMessage(error)}` };
+      return {
+        ok: false,
+        error: true,
+        reason: isQuotaExceededError(error) ? quotaFailureMessage('保存病历列表失败') : `保存病历列表失败：${errorMessage(error)}`,
+      };
     }
   }
 
   async deleteRecord(id: string): Promise<SaveResult> {
     try {
-      return await this.db.transaction(
+      const result = await this.db.transaction(
         'rw',
         this.db.records,
         this.db.drafts,
@@ -506,6 +869,8 @@ export class IndexedDbRecordRepository implements RecordRepository {
           return { ok: true };
         },
       );
+      this.notifyChange('record-deleted', { recordId: id });
+      return result;
     } catch (error) {
       return { ok: false, error: true, reason: `删除病历失败：${errorMessage(error)}` };
     }
@@ -540,9 +905,14 @@ export class IndexedDbRecordRepository implements RecordRepository {
         data: normalized,
         updatedAt: this.now(),
       });
+      this.notifyChange('settings-saved');
       return { ok: true };
     } catch (error) {
-      return { ok: false, error: true, reason: `保存设置失败：${errorMessage(error)}` };
+      return {
+        ok: false,
+        error: true,
+        reason: isQuotaExceededError(error) ? quotaFailureMessage('保存设置失败') : `保存设置失败：${errorMessage(error)}`,
+      };
     }
   }
 
@@ -562,100 +932,106 @@ export class IndexedDbRecordRepository implements RecordRepository {
       };
     });
 
-    return this.db.transaction(
-      'rw',
-      this.db.records,
-      this.db.drafts,
-      this.db.current,
-      this.db.settings,
-      this.db.meta,
-      async () => {
-        const existingList = await this.db.records.toArray();
-        const now = this.now();
+    try {
+      const summary = await this.db.transaction(
+        'rw',
+        this.db.records,
+        this.db.drafts,
+        this.db.current,
+        this.db.settings,
+        this.db.meta,
+        async () => {
+          const existingList = await this.db.records.toArray();
+          const now = this.now();
 
-        if (mode === 'replace') {
-          const pointer = await this.db.current.get(CURRENT_KEY);
-          const currentDraft = pointer ? await this.db.drafts.get(pointer.id) : undefined;
-          const existingDrafts = await this.db.drafts.toArray();
-          const replacedItems = RECORD_CORE.replaceImport(importedItems, existingList);
-          const storedSettings = await this.db.settings.get(SETTINGS_KEY);
-          const hasExistingData = existingList.length > 0 || existingDrafts.length > 0;
-          let recoveryId: string | undefined;
+          if (mode === 'replace') {
+            const pointer = await this.db.current.get(CURRENT_KEY);
+            const existingDrafts = await this.db.drafts.toArray();
+            const replacedItems = RECORD_CORE.replaceImport(importedItems, existingList);
+            const storedSettings = await this.db.settings.get(SETTINGS_KEY);
+            const hasExistingData = existingList.length > 0 || existingDrafts.length > 0;
+            let recoveryId: string | undefined;
 
-          if (hasExistingData) {
-            recoveryId = `recovery-${now.replace(/[^0-9A-Za-z]/g, '')}-${RECORD_CORE.uid()}`;
-            const recovery: RecoveryCopy = {
-              id: recoveryId,
-              createdAt: now,
-              reason: 'replace-import',
-              records: clone(existingList),
-              drafts: clone(existingDrafts),
-              currentId: pointer?.id ?? null,
-              settings: storedSettings ? clone(storedSettings.data) : null,
-              bundle: createBackupBundle(existingList, currentDraft, now, { includeNotes: true }),
-            };
+            if (hasExistingData) {
+              recoveryId = `recovery-${now.replace(/[^0-9A-Za-z]/g, '')}-${RECORD_CORE.uid()}`;
+              const recovery: RecoveryCopy = {
+                id: recoveryId,
+                createdAt: now,
+                reason: 'replace-import',
+                records: clone(existingList),
+                drafts: clone(existingDrafts),
+                currentId: pointer?.id ?? null,
+                settings: storedSettings ? clone(storedSettings.data) : null,
+              };
 
-            await this.db.meta.put({
-              key: `${RECOVERY_PREFIX}${recoveryId}`,
-              value: recovery,
-              updatedAt: now,
-            });
+              await this.db.meta.put({
+                key: `${RECOVERY_PREFIX}${recoveryId}`,
+                value: recovery,
+                updatedAt: now,
+              });
 
-            const allRecoveries = await this.db.meta.where('key').startsWith(RECOVERY_PREFIX).toArray();
-            if (allRecoveries.length > 10) {
-              const staleKeys = allRecoveries
-                .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))
-                .slice(10)
-                .map((entry) => entry.key);
-              if (staleKeys.length) await this.db.meta.bulkDelete(staleKeys);
+              const allRecoveries = await this.db.meta.where('key').startsWith(RECOVERY_PREFIX).toArray();
+              if (allRecoveries.length > MAX_RECOVERY_COPIES) {
+                const staleKeys = allRecoveries
+                  .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))
+                  .slice(MAX_RECOVERY_COPIES)
+                  .map((entry) => entry.key);
+                if (staleKeys.length) await this.db.meta.bulkDelete(staleKeys);
+              }
             }
+
+            await this.db.records.clear();
+            await this.db.drafts.clear();
+            await this.db.current.clear();
+
+            if (replacedItems.length) await this.db.records.bulkPut(replacedItems);
+            if (replacedItems.length) {
+              await this.db.drafts.bulkPut(replacedItems.map((item) => clone(item.data)));
+            }
+
+            const firstRecordId = replacedItems[0]?.id;
+            if (firstRecordId) {
+              await this.db.current.put({ key: CURRENT_KEY, id: firstRecordId, at: now });
+            }
+
+            return {
+              mode,
+              recordCount: parsed.records.length,
+              ...(recoveryId ? { recoveryId } : {}),
+              ...(firstRecordId ? { firstRecordId } : {}),
+            };
           }
 
-          await this.db.records.clear();
-          await this.db.drafts.clear();
-          await this.db.current.clear();
-
-          if (replacedItems.length) await this.db.records.bulkPut(replacedItems);
-          if (replacedItems.length) {
-            await this.db.drafts.bulkPut(replacedItems.map((item) => clone(item.data)));
+          const existingById = new Map(existingList.map((item) => [item.id, item]));
+          const merged = RECORD_CORE.mergeImport(existingList, importedItems);
+          const changed = merged.list.filter((item) => existingById.get(item.id) !== item);
+          if (changed.length) {
+            await this.db.records.bulkPut(changed.map((item) => clone(item)));
+            await this.db.drafts.bulkPut(changed.map((item) => clone(item.data)));
           }
 
-          const firstRecordId = replacedItems[0]?.id;
-          if (firstRecordId) {
-            await this.db.current.put({ key: CURRENT_KEY, id: firstRecordId, at: now });
+          const pointer = await this.db.current.get(CURRENT_KEY);
+          const firstChanged = changed[0]?.id;
+          if (!pointer && firstChanged) {
+            await this.db.current.put({ key: CURRENT_KEY, id: firstChanged, at: now });
           }
 
           return {
             mode,
             recordCount: parsed.records.length,
-            ...(recoveryId ? { recoveryId } : {}),
-            ...(firstRecordId ? { firstRecordId } : {}),
+            added: merged.added,
+            updated: merged.updated,
+            skipped: merged.skipped,
+            ...(firstChanged ? { firstRecordId: firstChanged } : {}),
           };
-        }
-
-        const merged = RECORD_CORE.mergeImport(existingList, importedItems);
-        const changed = merged.list.filter((item) => !existingList.includes(item));
-        if (changed.length) {
-          await this.db.records.bulkPut(changed.map((item) => clone(item)));
-          await this.db.drafts.bulkPut(changed.map((item) => clone(item.data)));
-        }
-
-        const pointer = await this.db.current.get(CURRENT_KEY);
-        const firstChanged = changed[0]?.id;
-        if (!pointer && firstChanged) {
-          await this.db.current.put({ key: CURRENT_KEY, id: firstChanged, at: now });
-        }
-
-        return {
-          mode,
-          recordCount: parsed.records.length,
-          added: merged.added,
-          updated: merged.updated,
-          skipped: merged.skipped,
-          ...(firstChanged ? { firstRecordId: firstChanged } : {}),
-        };
-      },
-    );
+        },
+      );
+      this.notifyChange('backup-imported');
+      return summary;
+    } catch (error) {
+      if (isQuotaExceededError(error)) throw new Error(quotaFailureMessage('导入备份失败'));
+      throw error;
+    }
   }
 
   async exportBackup(
@@ -685,7 +1061,7 @@ export class IndexedDbRecordRepository implements RecordRepository {
   }
 
   async restoreRecovery(id: string): Promise<RestoreSummary> {
-    return this.db.transaction(
+    const summary = await this.db.transaction(
       'rw',
       this.db.records,
       this.db.drafts,
@@ -726,6 +1102,8 @@ export class IndexedDbRecordRepository implements RecordRepository {
         };
       },
     );
+    this.notifyChange('recovery-restored');
+    return summary;
   }
 
   async readMeta<T = unknown>(key: string): Promise<T | null> {
@@ -734,6 +1112,15 @@ export class IndexedDbRecordRepository implements RecordRepository {
   }
 
   async close(): Promise<void> {
+    this.changeListeners.clear();
+    if (this.channel) {
+      try {
+        this.channel.close();
+      } catch {
+        // Ignore close errors.
+      }
+      this.channel = null;
+    }
     this.db.close();
   }
 }
@@ -751,5 +1138,3 @@ export async function deleteIndexedDbDatabase(
 ): Promise<void> {
   await Dexie.delete(name);
 }
-
-

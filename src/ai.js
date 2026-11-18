@@ -322,7 +322,12 @@ const AI_ASSIST = (() => {
     setBusy(true); status('正在生成建议…可以取消，期间不会写入病历');
     timer = setTimeout(() => { if (!pending) return; bridge().aiCancel(pending); pending = null; setBusy(false); status('等待超过两分钟，已取消；原内容保留，可重试'); }, 120000);
     try {
-      const payload = {system: request.system, user: request.user};
+      const payload = {
+        system: request.system,
+        user: request.user,
+        operation: request.operation,
+        recognize: request.operation === 'recognize' || request.operation === 'organize',
+      };
       if (request.image) payload.image = request.image;
       bridge().aiRequest(pending, JSON.stringify(payload));
     }
