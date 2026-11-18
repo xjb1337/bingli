@@ -1,6 +1,12 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RECORD_CORE } from '@dabingli/domain';
-import { createIndexedDbRepository, serializeBackup, type IndexedDbRecordRepository } from '../src/index.js';
+import {
+  createIndexedDbRepository,
+  MAX_RECOVERY_COPIES,
+  serializeBackup,
+  type IndexedDbRecordRepository,
+  type RepositoryChangeEvent,
+} from '../src/index.js';
 import { databaseName, removeDatabase } from './helpers.js';
 import v1Backup from '../../../tests/fixtures/legacy/v1-backup.json';
 import v2Backup from '../../../tests/fixtures/legacy/v2-backup.json';
@@ -268,5 +274,113 @@ describe('IndexedDB repository', () => {
     const restored = (await repository.loadList()).list.find((item) => item.id === saved.record?.id);
     expect(restored?.data.basic.name).toBe('虚构笔记还原患者（导入）');
     expect(restored?.data.rawNotes).toBe('虚构备份新笔记');
+  });
+
+  it('detects concurrent save revision conflicts without overwriting newer changes', async () => {
+    const repository = await openRepository('concurrent-conflict');
+    const initial = newNamedRecord(repository, '并发患者');
+    const saved = await repository.saveToLibrary(initial, 0);
+    expect(saved.ok).toBe(true);
+    expect(saved.revision).toBe(1);
+
+    const staleCopy = RECORD_CORE.cloneValue(saved.record!);
+    staleCopy.basic.name = '旧副本写入';
+    const freshCopy = RECORD_CORE.cloneValue(saved.record!);
+    freshCopy.basic.name = '新副本写入';
+
+    const first = await repository.saveToLibrary(freshCopy, 1);
+    expect(first.ok).toBe(true);
+    expect(first.revision).toBe(2);
+
+    const second = await repository.saveToLibrary(staleCopy, 1);
+    expect(second.ok).toBe(false);
+    expect(second.conflict).toBe(true);
+    expect(second.remoteRevision).toBe(2);
+    expect((await repository.loadCurrent(initial.id)).record?.basic.name).toBe('新副本写入');
+  });
+
+  it('caps recovery copies at 5 without storing redundant bundle snapshots', async () => {
+    const repository = await openRepository('recovery-cap');
+    for (let index = 0; index < 7; index += 1) {
+      await repository.saveToLibrary(newNamedRecord(repository, `备份前${index}`), index);
+      await repository.importBackup(JSON.stringify(v2Backup), 'replace');
+      // Re-create a record so the next replace-import has existing data to snapshot.
+    }
+    const recoveries = await repository.listRecoveryCopies();
+    expect(recoveries).toHaveLength(MAX_RECOVERY_COPIES);
+    const rawMeta = await repository.readMeta<Record<string, unknown>>(`recovery:${recoveries[0]!.id}`);
+    expect(rawMeta).not.toBeNull();
+    expect('bundle' in rawMeta!).toBe(false);
+  });
+
+  it('reports storage quota estimates and handles QuotaExceededError cleanly', async () => {
+    const originalStorage = navigator.storage;
+    Object.defineProperty(navigator, 'storage', {
+      configurable: true,
+      value: { estimate: vi.fn(async () => ({ usage: 900, quota: 1000 })) },
+    });
+    try {
+      const repository = await openRepository('quota-check');
+      const quota = await repository.estimateStorageQuota();
+      expect(quota).toMatchObject({ supported: true, usage: 900, quota: 1000, lowSpace: true });
+
+      const internalDb = (repository as unknown as { db: { drafts: { put: (...args: unknown[]) => Promise<unknown> } } }).db;
+      const quotaErr = Object.assign(new Error('QuotaExceededError: storage full'), { name: 'QuotaExceededError' });
+      vi.spyOn(internalDb.drafts, 'put').mockRejectedValueOnce(quotaErr);
+
+      const failed = await repository.saveToLibrary(newNamedRecord(repository, '配额测试患者'), 0);
+      expect(failed.ok).toBe(false);
+      expect(failed.error).toBe(true);
+      expect(failed.reason).toMatch(/QuotaExceededError|存储空间不足/);
+    } finally {
+      Object.defineProperty(navigator, 'storage', { configurable: true, value: originalStorage });
+    }
+  });
+
+  it('notifies same-origin tabs via BroadcastChannel on mutations', async () => {
+    const originalBc = (globalThis as { BroadcastChannel?: unknown }).BroadcastChannel;
+    const channels = new Map<string, Set<MockChannel>>();
+    class MockChannel {
+      name: string;
+      onmessage: ((event: MessageEvent<unknown>) => void) | null = null;
+      constructor(name: string) {
+        this.name = name;
+        const set = channels.get(name) ?? new Set<MockChannel>();
+        set.add(this);
+        channels.set(name, set);
+      }
+      postMessage(data: unknown) {
+        for (const peer of channels.get(this.name) ?? []) {
+          if (peer !== this && peer.onmessage) {
+            peer.onmessage({ data } as MessageEvent<unknown>);
+          }
+        }
+      }
+      close() {
+        channels.get(this.name)?.delete(this);
+      }
+    }
+    (globalThis as { BroadcastChannel?: unknown }).BroadcastChannel = MockChannel;
+    try {
+      const name = databaseName('broadcast-sync');
+      databaseNames.push(name);
+      const tabA = createIndexedDbRepository({ databaseName: name, legacyStorage: false, now: () => FIXED_NOW });
+      const tabB = createIndexedDbRepository({ databaseName: name, legacyStorage: false, now: () => FIXED_NOW });
+      repositories.push(tabA, tabB);
+      await tabA.initialize();
+      await tabB.initialize();
+
+      const events: RepositoryChangeEvent[] = [];
+      const unsubscribe = tabB.onChange((event) => events.push(event));
+      const rec = newNamedRecord(tabA, '跨标签页同步患者');
+      const saved = await tabA.saveToLibrary(rec, 0);
+      expect(saved.ok).toBe(true);
+
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({ type: 'record-saved', recordId: rec.id, revision: 1 });
+      unsubscribe();
+    } finally {
+      (globalThis as { BroadcastChannel?: unknown }).BroadcastChannel = originalBc;
+    }
   });
 });

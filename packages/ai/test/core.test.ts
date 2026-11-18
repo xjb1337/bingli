@@ -564,4 +564,72 @@ describe('structured note evidence and undo regression', () => {
     expect(RECORD_CORE.fieldState(rolledBack, 'hpi.symptoms')).toEqual(oldState);
     expect(() => undoAiAdoption({ ...applied, id: 'other' }, undo)).toThrow(/另一份/);
   });
+
+  it('enforces left/right consistency, allows equivalent unit conversions, and enforces 15/15/10 limits', () => {
+    const record = makeRecord();
+    const orgReq = prepareAiRequest('organize', record, '左肺可闻及湿啰音，口服阿莫西林 0.5g，病程约3天左右。');
+    expect(validateAiResponse({
+      suggestions: [
+        { path: 'hpi.symptoms', text: '左肺可闻及湿啰音，约3天左右。', evidence: [{ source: 'note', quote: '左肺可闻及湿啰音' }, { source: 'note', quote: '病程约3天左右' }] },
+        { path: 'hpi.treatment', text: '口服阿莫西林 500mg。', evidence: [{ source: 'note', quote: '口服阿莫西林 0.5g' }] },
+      ],
+      issues: [],
+      questions: [],
+    }, orgReq).suggestions).toHaveLength(2);
+
+    const swappedSide = validateAiResponse({
+      suggestions: [{ path: 'hpi.symptoms', text: '右肺可闻及湿啰音。', evidence: [{ source: 'note', quote: '左肺可闻及湿啰音' }] }],
+      issues: [],
+      questions: [],
+    }, orgReq);
+    expect(swappedSide.suggestions).toHaveLength(0);
+    expect(swappedSide.dropped[0]?.reason).toMatch(/左右侧/);
+
+    const badUnitConversion = validateAiResponse({
+      suggestions: [{ path: 'hpi.treatment', text: '口服阿莫西林 50mg。', evidence: [{ source: 'note', quote: '口服阿莫西林 0.5g' }] }],
+      issues: [],
+      questions: [],
+    }, orgReq);
+    expect(badUnitConversion.suggestions).toHaveLength(0);
+    expect(badUnitConversion.dropped[0]?.reason).toMatch(/单位/);
+
+    record.hpi.symptoms = '咳嗽3天';
+    const checkReq = prepareAiRequest('check', record);
+    expect(() => validateAiResponse({
+      suggestions: [],
+      issues: Array.from({ length: 16 }, () => ({ path: 'hpi.symptoms', message: '待核实' })),
+      questions: [],
+    }, checkReq)).toThrow(/超出限制/);
+    expect(() => validateAiResponse({
+      suggestions: [],
+      issues: [{ path: 'hpi.symptoms', message: '   ' }],
+      questions: [],
+    }, checkReq)).toThrow(/问题格式/);
+    expect(() => validateAiResponse({
+      suggestions: [],
+      issues: [],
+      questions: ['   '],
+    }, checkReq)).toThrow(/补问格式/);
+  });
+
+  it('redacts insurance/social/health cards, emails, wechat, extended name contexts, spaced phones and short addresses', () => {
+    const raw = [
+      '医保卡号：YB12345678，社保号 3301001990，就诊卡号：JZ888，健康卡号：JK999，',
+      '邮箱：doc.test@example.com，微信号：wx_patient_01，',
+      '病人李四，家属王五陪同，联系人赵六，医师陈七查房，张某，李某某于昨日就诊，',
+      '电话 +86 138 0013 8000，备用 139-1234-5678，住阳光小区3栋，朝阳区建国路。',
+      '社区获得性肺炎，病区查房正常。',
+    ].join('');
+    const diff = redactionDiff(raw, makeRecord());
+    for (const secret of [
+      'YB12345678', '3301001990', 'JZ888', 'JK999', 'doc.test@example.com', 'wx_patient_01',
+      '李四', '王五', '赵六', '陈七', '张某', '李某某', '138 0013 8000', '139-1234-5678',
+      '阳光小区3栋', '朝阳区建国路',
+    ]) {
+      expect(diff.text).not.toContain(secret);
+    }
+    expect(diff.text).toContain('社区获得性肺炎');
+    expect(diff.text).toContain('病区查房正常');
+    expect(diff.categories).toEqual(expect.arrayContaining(['医保卡号', '社保号', '就诊卡号', '健康卡号', '邮箱', '微信', '姓名', '电话', '地址']));
+  });
 });

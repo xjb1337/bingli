@@ -63,4 +63,15 @@ describe('Android staged legacy import', () => {
     expect(exported.records.find((item) => item.id === result.ids[2])?.data.rawNotes)
       .toBe('虚构迁移原始笔记');
   });
+
+  it('commits atomically and quarantines single corrupt staged drafts for export', async () => {
+    const r = repo('android-quarantine'); await r.initialize();
+    const staged = JSON.parse(payload()) as { keys: Record<string, string> };
+    staged.keys[RECORD_CORE.draftKey('corrupt-orphan')] = '{not-valid-json';
+    const result = await importStagedLegacy(JSON.stringify(staged), r);
+    expect(result.recordCount).toBe(3);
+    expect(result.corruptCount).toBe(1);
+    expect(result.corruptEntries[0]?.raw).toBe('{not-valid-json');
+    expect(await r.exportCorruptLegacyEntries()).toHaveLength(1);
+  });
 });

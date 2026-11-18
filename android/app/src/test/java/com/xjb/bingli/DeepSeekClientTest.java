@@ -6,10 +6,16 @@ import org.json.JSONObject;
 import static org.junit.Assert.*;
 import java.io.*;
 import java.net.HttpURLConnection;
+import java.net.InetAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class DeepSeekClientTest {
     @Test public void restrictModels() {
@@ -148,6 +154,191 @@ public class DeepSeekClientTest {
         assertEquals("invalid_input", BridgeErrorMapper.codeFor(new IllegalArgumentException("bad payload")));
         assertEquals("missing_key", BridgeErrorMapper.codeFor(new IOException("vault failure")));
         assertTrue(BridgeErrorMapper.messageFor(new JSONException("bad payload")).contains("参数无效"));
+    }
+
+    // ---- Real ServerSocket HTTP loopback tests (concurrency/cancel, 429 Retry-After, SSE streaming) ----
+
+    @Test public void loopbackCancelDoesNotBlockSubsequentRequestWhenOldSocketStalls() throws Exception {
+        CountDownLatch stalledEntered = new CountDownLatch(1);
+        CountDownLatch releaseStalled = new CountDownLatch(1);
+        AtomicInteger callCount = new AtomicInteger(0);
+        try (LoopbackServer server = new LoopbackServer((path, out) -> {
+            int n = callCount.incrementAndGet();
+            if (n == 1) {
+                stalledEntered.countDown();
+                try { releaseStalled.await(15, TimeUnit.SECONDS); } catch (InterruptedException ignored) { }
+            }
+            writeHttpResponse(out, 200, "application/json; charset=utf-8", null, successResponse());
+        })) {
+            URL endpoint = server.url("/chat/completions");
+            DeepSeekClient client = new DeepSeekClient(() -> (HttpURLConnection) endpoint.openConnection());
+            try {
+                boolean[] firstCalled = {false};
+                assertTrue(client.request("stalled_req", "sk-loopback", "deepseek-flash", "sys", "usr",
+                    (id, r) -> firstCalled[0] = true));
+                assertTrue(stalledEntered.await(5, TimeUnit.SECONDS));
+
+                client.cancel("stalled_req");
+                assertFalse(client.busy());
+
+                CountDownLatch secondDone = new CountDownLatch(1);
+                JSONObject[] secondResult = {null};
+                assertTrue(client.request("next_req", "sk-loopback", "deepseek-flash", "sys", "usr",
+                    (id, r) -> { secondResult[0] = r; secondDone.countDown(); }));
+                assertTrue("Second request must not block on stalled cancelled socket", secondDone.await(5, TimeUnit.SECONDS));
+                assertNotNull(secondResult[0]);
+                assertTrue(secondResult[0].getBoolean("ok"));
+                assertFalse(firstCalled[0]);
+            } finally {
+                releaseStalled.countDown();
+                client.close();
+            }
+        }
+    }
+
+    @Test public void loopback429RetryAfterPerformsControlledBackoffAndReturnsStructuredHintWhenLong() throws Exception {
+        AtomicInteger attempts = new AtomicInteger(0);
+        try (LoopbackServer server = new LoopbackServer((path, out) -> {
+            if ("/retry-short".equals(path)) {
+                if (attempts.incrementAndGet() == 1) {
+                    writeHttpResponse(out, 429, "text/plain", "Retry-After: 1\r\n", "rate limited");
+                    return;
+                }
+                writeHttpResponse(out, 200, "application/json; charset=utf-8", null, successResponse());
+                return;
+            }
+            writeHttpResponse(out, 429, "text/plain", "Retry-After: 30\r\n", "rate limited");
+        })) {
+            DeepSeekClient retryingClient = new DeepSeekClient(
+                () -> (HttpURLConnection) server.url("/retry-short").openConnection(),
+                2000L
+            );
+            DeepSeekClient fastFailClient = new DeepSeekClient(
+                () -> (HttpURLConnection) server.url("/retry-long").openConnection(),
+                2000L
+            );
+            try {
+                JSONObject okResult = run(retryingClient, "deepseek-flash", "sys", "usr", null, null);
+                assertTrue(okResult.getBoolean("ok"));
+                assertEquals(2, attempts.get());
+
+                JSONObject hintResult = run(fastFailClient, "deepseek-flash", "sys", "usr", null, null);
+                assertFalse(hintResult.getBoolean("ok"));
+                assertEquals("rate_limited", hintResult.getString("code"));
+                assertEquals(30L, hintResult.getLong("retryAfter"));
+                assertTrue(hintResult.getString("error").contains("30"));
+            } finally {
+                retryingClient.close();
+                fastFailClient.close();
+            }
+        }
+    }
+
+    @Test public void loopbackSseStreamingDeliversIncrementalDeltasAndFinalJson() throws Exception {
+        String sse = ""
+            + "data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"ok\\\":\"},\"finish_reason\":null}]}\n\n"
+            + "data: {\"choices\":[{\"delta\":{\"content\":\"true}\"},\"finish_reason\":\"stop\"}]}\n\n"
+            + "data: [DONE]\n\n";
+        try (LoopbackServer server = new LoopbackServer((path, out) ->
+            writeHttpResponse(out, 200, "text/event-stream; charset=utf-8", null, sse))) {
+            URL endpoint = server.url("/sse");
+            DeepSeekClient client = new DeepSeekClient(() -> (HttpURLConnection) endpoint.openConnection());
+            try {
+                List<String> deltas = new ArrayList<>();
+                CountDownLatch latch = new CountDownLatch(1);
+                JSONObject[] result = {null};
+                assertTrue(client.request("sse_req", "sk-loopback", "deepseek-flash", "sys", "usr", null, null,
+                    false, true, (id, delta) -> deltas.add(delta),
+                    (id, res) -> { result[0] = res; latch.countDown(); }));
+                assertTrue(latch.await(10, TimeUnit.SECONDS));
+                assertEquals(2, deltas.size());
+                assertTrue(result[0].getBoolean("ok"));
+                assertTrue(result[0].getJSONObject("content").getBoolean("ok"));
+            } finally {
+                client.close();
+            }
+        }
+    }
+
+    private interface LoopbackHandler { void handle(String path, OutputStream out) throws Exception; }
+
+    private static void writeHttpResponse(OutputStream out, int status, String contentType, String extraHeaders, String body) throws IOException {
+        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        String headers = "HTTP/1.1 " + status + " OK\r\n"
+            + "Content-Type: " + contentType + "\r\n"
+            + "Content-Length: " + bytes.length + "\r\n"
+            + "Connection: close\r\n"
+            + (extraHeaders == null ? "" : extraHeaders)
+            + "\r\n";
+        out.write(headers.getBytes(StandardCharsets.US_ASCII));
+        out.write(bytes);
+        out.flush();
+    }
+
+    private static final class LoopbackServer implements Closeable {
+        private final ServerSocket socket;
+        private volatile boolean closed;
+
+        LoopbackServer(LoopbackHandler handler) throws IOException {
+            this.socket = new ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"));
+            Thread acceptThread = new Thread(() -> {
+                while (!closed) {
+                    try {
+                        final Socket conn = socket.accept();
+                        Thread worker = new Thread(() -> handleConnection(conn, handler), "loopback-worker");
+                        worker.setDaemon(true);
+                        worker.start();
+                    } catch (IOException ignored) {
+                        break;
+                    }
+                }
+            }, "loopback-accept");
+            acceptThread.setDaemon(true);
+            acceptThread.start();
+        }
+
+        private void handleConnection(Socket conn, LoopbackHandler handler) {
+            try (Socket s = conn) {
+                InputStream in = s.getInputStream();
+                BufferedInputStream buf = new BufferedInputStream(in);
+                StringBuilder headerText = new StringBuilder();
+                int prev = -1, b;
+                while ((b = buf.read()) != -1) {
+                    headerText.append((char) b);
+                    int len = headerText.length();
+                    if (len >= 4 && headerText.substring(len - 4).equals("\r\n\r\n")) break;
+                }
+                String[] lines = headerText.toString().split("\r\n");
+                String path = "/";
+                if (lines.length > 0) {
+                    String[] parts = lines[0].split(" ");
+                    if (parts.length >= 2) path = parts[1];
+                }
+                int contentLength = 0;
+                for (String line : lines) {
+                    if (line.toLowerCase().startsWith("content-length:")) {
+                        contentLength = Integer.parseInt(line.substring("content-length:".length()).trim());
+                    }
+                }
+                byte[] skip = new byte[Math.min(contentLength, 4096)];
+                int remaining = contentLength;
+                while (remaining > 0) {
+                    int n = buf.read(skip, 0, Math.min(remaining, skip.length));
+                    if (n < 0) break;
+                    remaining -= n;
+                }
+                handler.handle(path, s.getOutputStream());
+            } catch (Exception ignored) { }
+        }
+
+        URL url(String path) throws IOException {
+            return new URL("http://127.0.0.1:" + socket.getLocalPort() + path);
+        }
+
+        @Override public void close() throws IOException {
+            closed = true;
+            socket.close();
+        }
     }
 
     private static JSONObject failureForFinishReason(String finishReason) throws Exception {

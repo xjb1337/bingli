@@ -250,10 +250,23 @@ export function redactionDiff(text: unknown, record: DabingliRecord): { text: st
     });
   output = output
     // 标签与值之间既可能是冒号，也可能只有空格；不要重复处理已隐去的值。
-    .replace(/(患者姓名|姓名|病案号|病历号|住院号|门诊号|床号|ID号|身份证号?)(?:[ \t]*[:：][ \t]*|[ \t]+|(?=\d))(?!\[)([^\s，。；,;]+)/gi, (match, label: string, value: string) => {
+    .replace(/(患者姓名|姓名|紧急联系人|联系人|病案号|病历号|住院号|门诊号|床号|ID号|身份证号?|医保卡号?|医保号|社保卡号?|社保号|就诊卡号?|健康卡号?|电子邮箱|邮箱|微信号|微信(?=[ \t]*[:：]))(?:[ \t]*[:：][ \t]*|[ \t]+|(?=\d))(?!\[)([^\s，。；,;]+)/gi, (match, label: string, value: string) => {
       if (value.startsWith('[')) return match;
-      categories.add(label === '患者姓名' ? '姓名' : label);
+      const category = label === '患者姓名'
+        ? '姓名'
+        : label === '电子邮箱'
+          ? '邮箱'
+          : label === '微信号'
+            ? '微信'
+            : label === '紧急联系人'
+              ? '联系人'
+              : label;
+      categories.add(category);
       return `${label}：[已隐去]`;
+    })
+    .replace(/(?<![\w.])([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})(?!\w)/g, () => {
+      categories.add('邮箱');
+      return '[邮箱已隐去]';
     })
     // 省、市、县和门牌之间也可能有空格，按完整地址一起处理。
     .replace(/(出生地|籍贯)(?:[ \t]*[:：][ \t]*|[ \t]+)((?:[\u4e00-\u9fff]{2,4}省[ \t]*)?(?:[\u4e00-\u9fff]{1,8}市[ \t]*)?[\u4e00-\u9fff]{1,8}[区县])/g, (_match, label: string) => {
@@ -269,8 +282,13 @@ export function redactionDiff(text: unknown, record: DabingliRecord): { text: st
       categories.add(label === '出生地' || label === '籍贯' ? label : '地址');
       return `${label}：[已隐去]`;
     })
-    // 姓名未填入基本信息时，只匹配姓氏加名字且以标点或明确身份/就诊叙述词结束的形式，排除常见临床词头。
-    .replace(/(患者)((?!(?:陈述|张口|周围|高血压|高血糖|高血脂|低血压|低血糖|低血钾|曾于|曾有|曾患|曾服|曾因|曾在|经常|平素|平卧|平静|双侧|双肺|双眼|双耳|双手|双足|双下肢|双上肢|左侧|左上|左下|左肺|左胸|左腹|左眼|左耳|左肾|全身|全腹|高热|高龄|高处|干咳|干呕|黄疸|黄染|水肿|冷汗|常有|常伴|查体|巩膜|解黑便|房颤|房扑|关节|皮肤|皮疹|皮下|步态|步入|麻木|强迫|强直|安静|焦虑|易醒|易怒|充血|连续|单侧|包块|通畅|后背|空腹|白带|白细胞))(?:(?:欧阳|司马|上官|诸葛|夏侯|东方|皇甫|尉迟|公孙|慕容)|[赵钱孙李周吴郑王冯陈褚卫蒋沈韩杨朱秦尤许何吕施张孔曹严华金魏陶姜戚谢邹喻柏水窦章云苏潘葛奚范彭郎鲁韦昌马苗凤花方俞任袁柳唐罗薛雷贺倪汤滕殷罗毕郝邬安常乐于时傅皮卞齐康伍余元卜顾孟平黄和穆萧尹姚邵湛汪祁毛禹狄米贝明臧计伏成戴宋茅庞熊纪舒屈项祝董梁杜阮蓝闵席季麻强贾路娄危江童颜郭梅盛林刁钟徐邱骆高夏蔡田樊胡凌霍虞万支柯管卢莫经房裘缪干解应宗丁宣邓郁单洪包左石崔吉龚程邢裴陆荣翁荀羊惠甄曲封芮羿储靳汲邴糜松井段富巫乌焦巴弓牧隗山谷车侯宓蓬全郗班仰秋仲伊宫宁仇栾暴甘钭厉戎祖武符刘景詹束龙叶幸司韶郜黎蓟薄印宿白怀蒲邰从鄂索赖卓屠池乔阴胥能苍双闻莘党翟谭贡劳逄姬申扶堵冉宰郦雍郤璩桑桂濮牛寿通边扈燕冀浦尚农温别庄晏柴瞿阎充慕连茹习宦艾鱼容向古易慎戈廖庾终暨居衡步都耿满弘匡国文寇广禄阙东殴殳沃利蔚越夔隆师巩厍聂晁勾敖融冷辛阚那简饶空曾毋沙乜养鞠须丰巢关蒯相查后荆红游竺权逯盖益桓公])[\u4e00-\u9fff·]{1,2})(?=$|[\s，。；,;、]|\d{1,3}\s*岁|(?:于|因|诉|男|女|出现|入院|就诊|患病|发病|既往))/g, (_match, prefix: string) => {
+    // 姓名未填入基本信息时，匹配患者/病人/家属/联系人/医师等上下文后的姓氏加名字，排除常见临床词头。
+    .replace(/(患者|病人|家属|联系人|医师|医生)((?!(?:陈述|张口|周围|高血压|高血糖|高血脂|高危|高发|低血压|低血糖|低血钾|曾于|曾有|曾患|曾服|曾因|曾在|经常|常规|常见|平素|平卧|平静|平和|平稳|双侧|双肺|双眼|双耳|双手|双足|双下肢|双上肢|双方|左侧|左上|左下|左肺|左胸|左腹|左眼|左耳|左肾|全身|全腹|全面|高热|高龄|高处|干咳|干呕|黄疸|黄染|黄痰|水肿|冷汗|冷敷|常有|常伴|查体|查房|巩膜|解黑便|解热|解除|解释|解答|房颤|房扑|关节|关联|皮肤|皮疹|皮下|步态|步入|麻木|强迫|强直|安静|安抚|安慰|安全|焦虑|易醒|易怒|充血|连续|连日|单侧|单用|单纯|包块|通畅|通气|通知|后背|后来|后续|后期|空腹|空虚|空间|白带|白细胞|白班|白痰|红肿|红色|周身|周期|代诉|陪同|情况|建议|告知|交代|签字|同意|方向|方案|正常|明确|明显|严重|边缘|边界|缓解|余地|余热|其余|严格|严谨|严密|重大|重复|重新|居住|能力|能够|古老|简易|简单|简述|相应|相关|相当|相似|相同|相反|相对|相伴|相符|相距|相隔|相间))(?:(?:欧阳|司马|上官|诸葛|夏侯|东方|皇甫|尉迟|公孙|慕容)|[赵钱孙李周吴郑王冯陈褚卫蒋沈韩杨朱秦尤许何吕施张孔曹严华金魏陶姜戚谢邹喻柏水窦章云苏潘葛奚范彭郎鲁韦昌马苗凤花方俞任袁柳唐罗薛雷贺倪汤滕殷罗毕郝邬安常乐于时傅皮卞齐康伍余元卜顾孟平黄和穆萧尹姚邵湛汪祁毛禹狄米贝明臧计伏成戴宋茅庞熊纪舒屈项祝董梁杜阮蓝闵席季麻强贾路娄危江童颜郭梅盛林刁钟徐邱骆高夏蔡田樊胡凌霍虞万支柯管卢莫经房裘缪干解应宗丁宣邓郁单洪包左石崔吉龚程邢裴陆荣翁荀羊惠甄曲封芮羿储靳汲邴糜松井段富巫乌焦巴弓牧隗山谷车侯宓蓬全郗班仰秋仲伊宫宁仇栾暴甘钭厉戎祖武符刘景詹束龙叶幸司韶郜黎蓟薄印宿白怀蒲邰从鄂索赖卓屠池乔阴胥能苍双闻莘党翟谭贡劳逄姬申扶堵冉宰郦雍郤璩桑桂濮牛寿通边扈燕冀浦尚农温别庄晏柴瞿阎充慕连茹习宦艾鱼容向古易慎戈廖庾终暨居衡步都耿满弘匡国文寇广禄阙东殴殳沃利蔚越夔隆师巩厍聂晁勾敖融冷辛阚那简饶空曾毋沙乜养鞠须丰巢关蒯相查后荆红游竺权逯盖益桓公])[\u4e00-\u9fff·]{1,2})(?=$|[\s，。；,;、]|\d{1,3}\s*岁|(?:于|因|诉|男|女|出现|入院|就诊|患病|发病|既往|陪同|代诉|称|查房|接诊|签字))/g, (_match, prefix: string) => {
+      categories.add('姓名');
+      return `${prefix}[已隐去]`;
+    })
+    // 隐去“X某 / X某某”半匿名姓名。
+    .replace(/(^|[^\u4e00-\u9fff]|患者|病人|家属|联系人|医师|医生)((?:(?:欧阳|司马|上官|诸葛|夏侯|东方|皇甫|尉迟|公孙|慕容)|[赵钱孙李周吴郑王冯陈褚卫蒋沈韩杨朱秦尤许何吕施张孔曹严华金魏陶姜戚谢邹喻柏水窦章云苏潘葛奚范彭郎鲁韦昌马苗凤花方俞任袁柳唐罗薛雷贺倪汤滕殷罗毕郝邬安常乐于时傅皮卞齐康伍余元卜顾孟平黄和穆萧尹姚邵湛汪祁毛禹狄米贝明臧计伏成戴宋茅庞熊纪舒屈项祝董梁杜阮蓝闵席季麻强贾路娄危江童颜郭梅盛林刁钟徐邱骆高夏蔡田樊胡凌霍虞万支柯管卢莫经房裘缪干解应宗丁宣邓郁单洪包左石崔吉龚程邢裴陆荣翁荀羊惠甄曲封芮羿储靳汲邴糜松井段富巫乌焦巴弓牧隗山谷车侯宓蓬全郗班仰秋仲伊宫宁仇栾暴甘钭厉戎祖武符刘景詹束龙叶幸司韶郜黎蓟薄印宿白怀蒲邰从鄂索赖卓屠池乔阴胥能苍双闻莘党翟谭贡劳逄姬申扶堵冉宰郦雍郤璩桑桂濮牛寿通边扈燕冀浦尚农温别庄晏柴瞿阎充慕连茹习宦艾鱼容向古易慎戈廖庾终暨居衡步都耿满弘匡国文寇广禄阙东殴殳沃利蔚越夔隆师巩厍聂晁勾敖融冷辛阚那简饶空曾毋沙乜养鞠须丰巢关蒯相查后荆红游竺权逯盖益桓公])某{1,2})(?=$|[\s，。；,;、男女\d]|岁|于|因|诉|陪同|代诉|称|查房|接诊|签字|出现|入院|就诊|患病|发病|既往)/g, (_match, prefix: string) => {
       categories.add('姓名');
       return `${prefix}[已隐去]`;
     })
@@ -280,7 +298,16 @@ export function redactionDiff(text: unknown, record: DabingliRecord): { text: st
       return `${prefix}[已隐去]`;
     })
     // 无地址标签的完整省市区县与道路、村庄等详细地址。
-    .replace(/(居住在|住在|出生于|来自|住|^|[^\u4e00-\u9fff])((?!(?:患者|居住|出生|来自|住|他|她))(?:(?:[\u4e00-\u9fff]{2,4}省)|北京市|天津市|上海市|重庆市)(?:[\u4e00-\u9fff]{1,8}市)?[\u4e00-\u9fff]{1,8}[区县](?:[\u4e00-\u9fff0-9]{1,12}?(?:路|街|巷|村|镇|乡))(?:[0-9一二三四五六七八九十]+(?:号|弄|栋|幢|单元|室|楼|座))*)/g, (_match, prefix: string) => {
+    .replace(/(居住在|住在|家住|出生于|来自|住|^|[^\u4e00-\u9fff])((?!(?:患者|病人|居住|出生|来自|住|他|她))(?:(?:[\u4e00-\u9fff]{2,4}省)|北京市|天津市|上海市|重庆市)(?:[\u4e00-\u9fff]{1,8}市)?[\u4e00-\u9fff]{1,8}[区县](?:[\u4e00-\u9fff0-9]{1,12}?(?:路|街|巷|村|镇|乡))(?:[0-9一二三四五六七八九十]+(?:号|弄|栋|幢|单元|室|楼|座))*)/g, (_match, prefix: string) => {
+      categories.add('地址');
+      return `${prefix}[地址已隐去]`;
+    })
+    // 简写区县+路名/小区、小区+楼栋、路名+门牌号。
+    .replace(/(居住在|住在|家住|出生于|来自|住|^|[^\u4e00-\u9fff])((?!(?:患者|病人|居住|出生|来自|住|他|她|病区|院区|门诊区|住院区|抢救区|观察区|手术区|无菌区|污染区))(?:[\u4e00-\u9fff]{2,6}[区县])[ \t]*[\u4e00-\u9fff0-9]{2,10}(?:路|街|大道|巷|村|镇|乡|小区|家园|花园|新村)(?:[ \t]*[0-9一二三四五六七八九十]+(?:号楼?|弄|栋|幢|单元|室|楼|座))*)/g, (_match, prefix: string) => {
+      categories.add('地址');
+      return `${prefix}[地址已隐去]`;
+    })
+    .replace(/(居住在|住在|家住|来自|住|^|[^\u4e00-\u9fff])((?!(?:患者|病人|居住|出生|来自|住|他|她))[\u4e00-\u9fff]{2,10}(?:(?:小区|家园|花园|新村|雅苑|公馆|公寓)(?:[ \t]*[0-9一二三四五六七八九十A-Za-z-]+(?:号楼?|弄|栋|幢|单元|室|楼|座))*|(?:路|街|巷|大道|胡同)(?:[ \t]*[0-9一二三四五六七八九十]+(?:号|弄|栋|幢|单元|室|楼|座))+))/g, (_match, prefix: string) => {
       categories.add('地址');
       return `${prefix}[地址已隐去]`;
     })
@@ -288,11 +315,11 @@ export function redactionDiff(text: unknown, record: DabingliRecord): { text: st
       categories.add('身份证');
       return '[身份证已隐去]';
     })
-    .replace(/(?<![\d-])0\d{2,3}[-－]\d{7,8}(?:[-－]\d{1,6})?(?!\d)/g, () => {
+    .replace(/(?<![\d-])0[1-9]\d{1,2}[\s\-－]\d{7,8}(?:[\s\-－]\d{1,6})?(?!\d)/g, () => {
       categories.add('电话');
       return '[电话已隐去]';
     })
-    .replace(/(?<!\d)1[3-9]\d{9}(?!\d)/g, () => {
+    .replace(/(?<![\d+])(?:\+?86[\s\-－]?)?1[3-9]\d(?:[\s\-－]?\d{4}[\s\-－]?\d{4}|\d{8})(?!\d)/g, () => {
       categories.add('电话');
       return '[电话已隐去]';
     });
@@ -676,17 +703,95 @@ function validateSuggestion(
   return { path, text, evidence };
 }
 
-function assertTextEvidenceConsistency(text: string, quotes: string): void {
-  const numbers: string[] = text.match(/\d+(?:\.\d+)?/g) ?? [];
-  const quoteNumbers: string[] = quotes.match(/\d+(?:\.\d+)?/g) ?? [];
-  if (numbers.some((number) => !quoteNumbers.includes(number))) {
-    throw aiError('invalid_response', '建议中出现原文依据没有的数字，请重新生成');
+const CONVERTIBLE_UNITS: Readonly<Record<string, { dim: 'mass' | 'volume' | 'length'; factor: number }>> = Object.freeze({
+  kg: { dim: 'mass', factor: 1e6 },
+  g: { dim: 'mass', factor: 1000 },
+  mg: { dim: 'mass', factor: 1 },
+  ug: { dim: 'mass', factor: 0.001 },
+  μg: { dim: 'mass', factor: 0.001 },
+  mcg: { dim: 'mass', factor: 0.001 },
+  l: { dim: 'volume', factor: 1000 },
+  ml: { dim: 'volume', factor: 1 },
+  m: { dim: 'length', factor: 1000 },
+  cm: { dim: 'length', factor: 10 },
+  mm: { dim: 'length', factor: 1 },
+});
+
+interface ParsedAmount {
+  raw: string;
+  numStart: number;
+  numEnd: number;
+  canonical?: { dim: string; value: number };
+}
+
+function parseAmountTokens(value: string): ParsedAmount[] {
+  const regex = /(\d+(?:\.\d+)?)\s*(mmHg|mmol\/L|mg|ug|μg|mcg|mL|ml|kg|cm|mm|℃|小时|分钟|天|日|年|月|周|岁|g|L|l|m)(?![A-Za-z])/g;
+  const out: ParsedAmount[] = [];
+  for (const match of value.matchAll(regex)) {
+    const numStr = match[1] ?? '';
+    const unit = match[2] ?? '';
+    const start = match.index ?? 0;
+    const conv = CONVERTIBLE_UNITS[unit.toLowerCase()];
+    const numeric = Number(numStr);
+    out.push({
+      raw: `${numStr}${unit}`,
+      numStart: start,
+      numEnd: start + numStr.length,
+      ...(conv && Number.isFinite(numeric) ? { canonical: { dim: conv.dim, value: numeric * conv.factor } } : {}),
+    });
   }
-  const amounts = (value: string): string[] =>
-    (value.match(/\d+(?:\.\d+)?\s*(?:mmHg|mmol\/L|mg|mL|ml|kg|cm|℃|小时|分钟|天|日|年|月|周|岁|g|L)/g) ?? [])
-      .map((amount) => amount.replace(/\s/g, ''));
-  if (amounts(text).some((amount) => !amounts(quotes).includes(amount))) {
-    throw aiError('invalid_response', '建议中的时间或单位与原文不一致，请重新生成');
+  return out;
+}
+
+function amountsMatch(candidate: ParsedAmount, quoteAmounts: readonly ParsedAmount[]): boolean {
+  if (quoteAmounts.some((entry) => entry.raw === candidate.raw)) return true;
+  if (!candidate.canonical) return false;
+  return quoteAmounts.some((entry) =>
+    entry.canonical
+    && entry.canonical.dim === candidate.canonical!.dim
+    && Math.abs(entry.canonical.value - candidate.canonical!.value) <= 1e-6);
+}
+
+function assertTextEvidenceConsistency(text: string, quotes: string): void {
+  const textAmounts = parseAmountTokens(text);
+  const quoteAmounts = parseAmountTokens(quotes);
+  const convertedSpans: Array<[number, number]> = [];
+  for (const amount of textAmounts) {
+    if (amountsMatch(amount, quoteAmounts)) {
+      if (!quoteAmounts.some((entry) => entry.raw === amount.raw)) {
+        convertedSpans.push([amount.numStart, amount.numEnd]);
+      }
+    } else if (
+      amount.canonical
+      && quoteAmounts.some((entry) => entry.canonical?.dim === amount.canonical?.dim)
+    ) {
+      throw aiError('invalid_response', '建议中的时间或单位与原文不一致，请重新生成');
+    }
+  }
+  const quoteNumbers: string[] = quotes.match(/\d+(?:\.\d+)?/g) ?? [];
+  for (const match of text.matchAll(/\d+(?:\.\d+)?/g)) {
+    const start = match.index ?? 0;
+    const end = start + match[0].length;
+    const coveredByConversion = convertedSpans.some(([s, e]) => start >= s && end <= e);
+    if (!coveredByConversion && !quoteNumbers.includes(match[0])) {
+      throw aiError('invalid_response', '建议中出现原文依据没有的数字，请重新生成');
+    }
+  }
+  for (const amount of textAmounts) {
+    if (!amountsMatch(amount, quoteAmounts)) {
+      throw aiError('invalid_response', '建议中的时间或单位与原文不一致，请重新生成');
+    }
+  }
+  const stripApprox = (value: string): string => value.replace(/左右/g, '');
+  const textSides = stripApprox(text);
+  const quoteSides = stripApprox(quotes);
+  if (
+    (/左/.test(textSides) && !/左/.test(quoteSides))
+    || (/右/.test(textSides) && !/右/.test(quoteSides))
+    || (/左/.test(quoteSides) && !/右/.test(quoteSides) && !/左/.test(textSides))
+    || (/右/.test(quoteSides) && !/左/.test(quoteSides) && !/右/.test(textSides))
+  ) {
+    throw aiError('invalid_response', '建议中的左右侧描述与原文依据不一致，请重新生成');
   }
   if (
     ['不详', '未问', '待核实', '疑似', '可疑', '患者诉', '家属诉'].some(
@@ -876,10 +981,18 @@ export function validateAiResponse(raw: unknown, request: AiRequest): AiValidate
   ) {
     throw aiError('invalid_response', 'AI 返回结构不完整，请重试');
   }
-  if (data.suggestions.length > 30 || data.issues.length > 30 || data.questions.length > 20) {
+  const structured = request.operation === 'recognize' || request.operation === 'organize';
+  const maxSuggestions = structured ? 30 : 15;
+  const maxIssues = structured ? 30 : 15;
+  const maxQuestions = structured ? 20 : 10;
+  if (
+    data.suggestions.length > maxSuggestions
+    || data.issues.length > maxIssues
+    || data.questions.length > maxQuestions
+  ) {
     throw aiError('invalid_response', 'AI 返回内容超出限制');
   }
-  if (request.operation === 'recognize' || request.operation === 'organize') {
+  if (structured) {
     const seen = new Set<string>();
     const suggestions: AiSuggestion[] = [];
     const dropped: AiDroppedSuggestion[] = [];
@@ -898,6 +1011,7 @@ export function validateAiResponse(raw: unknown, request: AiRequest): AiValidate
       if (
         !isObject(candidate)
         || typeof candidate.message !== 'string'
+        || !candidate.message.trim()
         || candidate.message.length > 1500
       ) {
         throw aiError('invalid_response', 'AI 问题格式无效');
@@ -905,15 +1019,15 @@ export function validateAiResponse(raw: unknown, request: AiRequest): AiValidate
       const path = typeof candidate.path === 'string' && own(AI_LABELS, candidate.path)
         ? candidate.path
         : '';
-      return { path, message: candidate.message };
+      return { path, message: candidate.message.trim() };
     });
-    if (data.questions.some((question) => typeof question !== 'string' || question.length > 1000)) {
+    if (data.questions.some((question) => typeof question !== 'string' || !question.trim() || question.length > 1000)) {
       throw aiError('invalid_response', 'AI 补问格式无效');
     }
     return {
       suggestions,
       issues,
-      questions: data.questions as string[],
+      questions: (data.questions as string[]).map((question) => question.trim()),
       dropped,
     };
   }
@@ -922,21 +1036,21 @@ export function validateAiResponse(raw: unknown, request: AiRequest): AiValidate
     validateSuggestion(suggestion, request, seen),
   );
   const issues = data.issues.map((candidate) => {
-    if (!isObject(candidate) || typeof candidate.message !== 'string' || candidate.message.length > 1500) {
+    if (!isObject(candidate) || typeof candidate.message !== 'string' || !candidate.message.trim() || candidate.message.length > 1500) {
       throw aiError('invalid_response', 'AI 问题格式无效');
     }
     const path = typeof candidate.path === 'string' && own(AI_FIELDS, candidate.path)
       ? candidate.path
       : '';
-    return { path, message: candidate.message };
+    return { path, message: candidate.message.trim() };
   });
-  if (data.questions.some((question) => typeof question !== 'string' || question.length > 1000)) {
+  if (data.questions.some((question) => typeof question !== 'string' || !question.trim() || question.length > 1000)) {
     throw aiError('invalid_response', 'AI 补问格式无效');
   }
   return {
     suggestions,
     issues,
-    questions: data.questions as string[],
+    questions: (data.questions as string[]).map((question) => question.trim()),
     dropped: [],
   };
 }
@@ -988,20 +1102,6 @@ function parseSourceReference(raw: string): SourceReference {
 
 function hasExistingFieldValue(record: DabingliRecord, path: string): boolean {
   if (textAt(record, path).trim()) return true;
-  const ros = path.match(/^ros\.([^.]+)\.([^.]+)\.status$/);
-  if (ros) {
-    const [, systemKey, symptomKey] = ros;
-    if (!systemKey || !symptomKey) return false;
-    const entry = record.ros[systemKey]?.[symptomKey];
-    return Boolean(
-      entry?.status
-      || entry?.factState
-      || entry?.checked
-      || entry?.negative
-      || entry?.time
-      || entry?.detail,
-    );
-  }
   const pe = path.match(/^pe\.([^.]+)\.([^.]+)$/);
   if (pe) {
     const [, groupKey, itemKey] = pe;
@@ -1015,17 +1115,6 @@ function applyRecognizeSideEffects(record: DabingliRecord, suggestion: AiSuggest
   const pe = suggestion.path.match(/^pe\.([^.]+)\.([^.]+)$/);
   if (pe && pe[1] && pe[2] && pe[1] !== 'vitals') {
     SCHEMA.setPeChecked(record, pe[1], pe[2], suggestion.text !== '未查');
-  }
-  const ros = suggestion.path.match(/^ros\.([^.]+)\.([^.]+)\.status$/);
-  if (ros && ros[1] && ros[2]) {
-    const system = record.ros[ros[1]] ?? {};
-    const entry = system[ros[2]] ?? {};
-    entry.status = suggestion.text;
-    entry.factState = suggestion.text;
-    entry.checked = suggestion.text === 'asked_positive';
-    entry.negative = suggestion.text === 'asked_negative';
-    system[ros[2]] = entry;
-    record.ros[ros[1]] = system;
   }
 }
 
@@ -1126,10 +1215,8 @@ export function undoAiAdoption(record: DabingliRecord, undo: AiAdoptionUndo): { 
     if (oldState === undefined) delete fieldStates[path];
     else fieldStates[path] = RECORD_CORE.cloneValue(oldState);
     const pe = path.match(/^pe\.([^.]+)\.([^.]+)$/);
-    const ros = path.match(/^ros\.([^.]+)\.([^.]+)\.status$/);
     const sidePaths: string[] = [];
     if (pe && pe[1] !== 'vitals') sidePaths.push(`pe.checked.${pe[1]}.${pe[2]}`);
-    if (ros) ['factState', 'checked', 'negative'].forEach((key) => sidePaths.push(`ros.${ros[1]}.${ros[2]}.${key}`));
     if (path === 'summary') sidePaths.push('documentMeta.summary');
     sidePaths.forEach((sidePath) => {
       if (same(RECORD_CORE.getPath(record, sidePath), RECORD_CORE.getPath(undo.after, sidePath))) restorePath(sidePath);

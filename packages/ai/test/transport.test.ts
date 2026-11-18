@@ -372,4 +372,76 @@ describe('AndroidBridgeTransport', () => {
     await expect(transport.request(request)).rejects.toMatchObject({ code: 'timeout' });
     expect(aiCancel).toHaveBeenCalledWith('req_3');
   });
+
+  it('routes concurrent Android bridge responses by requestId without overwriting callbacks', async () => {
+    (globalThis as { window?: unknown }).window = {};
+    const pending: string[] = [];
+    let counter = 0;
+    const bridge: AndroidAiBridge = {
+      aiStatus: () => JSON.stringify({ configured: true, model: 'deepseek-flash' }),
+      aiRequest: (id, payload) => {
+        pending.push(id);
+        expect(JSON.parse(payload)).toMatchObject({ operation: 'organize', recognize: true });
+      },
+      aiCancel: vi.fn(),
+    };
+    const transport = new AndroidBridgeTransport({
+      bridge,
+      requestId: () => `req_${++counter}`,
+    });
+
+    const first = transport.request({ ...request, operation: 'organize' });
+    const second = transport.request({ ...request, operation: 'organize' });
+    await vi.waitFor(() => expect(pending).toEqual(['req_1', 'req_2']));
+
+    const receive = (window as unknown as Record<string, unknown>)[ANDROID_AI_RECEIVE] as (
+      id: string,
+      response: unknown,
+    ) => void;
+    expect(typeof receive).toBe('function');
+
+    receive('req_2', { ok: true, model: 'deepseek-flash', content: { tag: 'second' } });
+    await expect(second).resolves.toEqual({ model: 'deepseek-flash', content: { tag: 'second' } });
+    // Dispatcher remains mounted until req_1 settles too.
+    expect((window as unknown as Record<string, unknown>)[ANDROID_AI_RECEIVE]).toBe(receive);
+
+    receive('req_1', { ok: true, model: 'deepseek-v4-pro', content: { tag: 'first' } });
+    await expect(first).resolves.toEqual({ model: 'deepseek-v4-pro', content: { tag: 'first' } });
+    expect((window as unknown as Record<string, unknown>)[ANDROID_AI_RECEIVE]).toBeUndefined();
+  });
+
+  it('maps native busy code and parses 429 Retry-After headers', async () => {
+    (globalThis as { window?: unknown }).window = {};
+    const bridge: AndroidAiBridge = {
+      aiStatus: () => JSON.stringify({ configured: true, model: 'deepseek-flash' }),
+      aiRequest: (id) => {
+        const receive = (window as unknown as Record<string, unknown>)[ANDROID_AI_RECEIVE] as (
+          id: string,
+          response: unknown,
+        ) => void;
+        receive(id, { ok: false, code: 'busy' });
+      },
+      aiCancel: vi.fn(),
+    };
+    const androidTransport = new AndroidBridgeTransport({ bridge, requestId: () => 'req_busy' });
+    await expect(androidTransport.request(request)).rejects.toMatchObject({
+      code: 'busy',
+      message: AI_ERROR_MESSAGES.busy,
+    });
+
+    const webTransport = new WebFetchTransport({
+      apiKey: 'sk-test-429',
+      fetchImpl: (async () => ({
+        ok: false,
+        status: 429,
+        headers: { get: (name: string) => (name.toLowerCase() === 'retry-after' ? '15' : null) },
+        text: async () => '',
+      }) as unknown as Response) as unknown as typeof fetch,
+    });
+    await expect(webTransport.request(request)).rejects.toMatchObject({
+      code: 'rate_limited',
+      retryAfterSeconds: 15,
+      message: expect.stringContaining('15 秒'),
+    });
+  });
 });

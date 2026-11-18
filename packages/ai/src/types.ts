@@ -6,6 +6,7 @@ export type AiSuggestionKind = 'text' | 'choice' | 'number';
 
 export type AiErrorCode =
   | 'missing_key'
+  | 'busy'
   | 'unauthorized'
   | 'forbidden'
   | 'insufficient_balance'
