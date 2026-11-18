@@ -15,7 +15,7 @@
     "sweep": "node tools/sweep-abnormal.js",
     "cases": "node tools/case-table.js",
     "review-cases": "node tools/verify-review-cases.js",
-    "coverage": "node --experimental-test-coverage --test --test-coverage-include=src/core.js --test-coverage-include=src/generator.js --test-coverage-include=src/hints.js --test-coverage-include=src/depth.js tests/core.test.cjs tests/generator.test.cjs tests/generator.scoring.test.cjs tests/depth.test.cjs tests/review-regression.test.cjs tests/abnormal-pe.test.cjs",
+    "coverage": "npm run build:domain && node --experimental-test-coverage --test --test-coverage-include=\"packages/domain/dist/**/*.js\" packages/domain/test/domain.test.cjs tests/core.test.cjs tests/generator.test.cjs tests/generator.scoring.test.cjs tests/depth.test.cjs tests/review-regression.test.cjs tests/abnormal-pe.test.cjs tests/templates.test.cjs tests/validate.test.cjs tests/pr5-quality.test.cjs tests/compat-freeze.test.cjs",
     "verify": "node build.js && node tools/sweep-abnormal.js && node tools/case-table.js && node tools/verify-review-cases.js && node --test tests/*.test.cjs",
     "samples": "node test/samples.js",
     "e2e:browser": "node test/browser-check.js",

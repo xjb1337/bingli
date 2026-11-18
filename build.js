@@ -1,5 +1,4 @@
-/* 把 src/ 下的 schema + core + templates + depth + generator + hints + app + css
- * 内联成单独的 HTML 文件。
+/* 把 packages/domain/dist/ 与 src/ 下的模块内联成单独的 HTML 文件。
  *
  * 内联顺序即运行期依赖顺序，不可随意调整：
  *   AGE → SCHEMA → CORE → REPOSITORY → TEMPLATE_DATA → TEMPLATES → DIAGNOSTICS → DEPTH → DOC_IR → GENERATOR → HINTS → ACTIONS → APP
@@ -13,7 +12,13 @@
  */
 const fs = require('fs');
 const path = require('path');
-require('./scripts/build-domain.cjs').build();
+
+let esbuild = null;
+try {
+  esbuild = require('esbuild');
+} catch (_) {
+  // Optional minification fallback when esbuild is unavailable.
+}
 
 const SRC = path.join(__dirname, 'src');
 const OUT_DIR = path.join(__dirname, 'android', 'app', 'src', 'main', 'assets');
@@ -27,33 +32,38 @@ function readDomain(name) {
   return fs.readFileSync(path.join(__dirname, 'packages', 'domain', 'dist', name), 'utf8');
 }
 
-function legacyMarker(name) {
-  // Keep the legacy source anchors visible to the existing artifact freshness
-  // check while the actual runtime implementation comes from domain/.
-  return `\n// legacy compatibility source: ${name}\n${read(name).split('\n').map(line => '// ' + line).join('\n')}\n`;
-}
-
 /** 去掉 node 的 module.exports 尾巴，避免浏览器里报错 */
 function stripModule(code) {
   return code.replace(/\nif\s*\(typeof\s+module[\s\S]*?\n\}\s*$/m, '\n');
 }
 
+function minifyJs(code) {
+  if (!esbuild) return code;
+  return esbuild.transformSync(code, {
+    loader: 'js',
+    minify: true,
+    target: 'es2020',
+  }).code;
+}
+
 function main() {
-  const age = stripModule(readDomain('age.js')) + legacyMarker('age.js');
-  const schema = stripModule(readDomain('schema.js')) + legacyMarker('schema.js');
-  const core = stripModule(readDomain('core.js')) + legacyMarker('core.js');
-  const repository = stripModule(read('record-repository.js'));
-  const tplData = stripModule(readDomain('template-data.js')) + legacyMarker('template-data.js');
-  const templates = stripModule(readDomain('templates.js')) + legacyMarker('templates.js');
-  const diagnostics = stripModule(readDomain('quality/diagnostics.js'));
-  const depth = stripModule(readDomain('depth.js')) + legacyMarker('depth.js');
-  const documentIr = stripModule(readDomain('generator/document-ir.js'));
-  const generator = stripModule(readDomain('generator.js')) + legacyMarker('generator.js');
-  const hints = stripModule(readDomain('hints.js')) + legacyMarker('hints.js');
-  const actionHandlers = stripModule(read('action-handlers.js'));
-  const app = read('app.js');
-  const aiCore = stripModule(read('ai-core.js'));
-  const ai = read('ai.js');
+  require('./scripts/build-domain.cjs').build();
+
+  const age = minifyJs(stripModule(readDomain('age.js')));
+  const schema = minifyJs(stripModule(readDomain('schema.js')));
+  const core = minifyJs(stripModule(readDomain('core.js')));
+  const repository = minifyJs(stripModule(read('record-repository.js')));
+  const tplData = minifyJs(stripModule(readDomain('template-data.js')));
+  const templates = minifyJs(stripModule(readDomain('templates.js')));
+  const diagnostics = minifyJs(stripModule(readDomain('quality/diagnostics.js')));
+  const depth = minifyJs(stripModule(readDomain('depth.js')));
+  const documentIr = minifyJs(stripModule(readDomain('generator/document-ir.js')));
+  const generator = minifyJs(stripModule(readDomain('generator.js')));
+  const hints = minifyJs(stripModule(readDomain('hints.js')));
+  const actionHandlers = minifyJs(stripModule(read('action-handlers.js')));
+  const app = minifyJs(read('app.js'));
+  const aiCore = minifyJs(stripModule(read('ai-core.js')));
+  const ai = minifyJs(read('ai.js'));
   const css = read('style.css');
   const html = read('index.html');
 
@@ -83,4 +93,6 @@ function main() {
   console.log(`文件大小：${kb} KB`);
 }
 
-main();
+if (require.main === module) main();
+
+module.exports = { main, minifyJs, stripModule };

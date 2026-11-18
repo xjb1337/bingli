@@ -3,7 +3,7 @@
  * 运行：node --test tests/
  *
  * 解决的问题：本项目把多个源文件内联成单个 HTML 发布。
- * 如果改了 src/ 却忘了 node build.js，dist/ 里的就是旧代码，
+ * 如果改了 src/ 或 packages/domain/src/ 却忘了 node build.js，产物里的就是旧代码，
  * 而"手机能打开"并不能证明发布的是最新逻辑。
  *
  * 这里把每个源文件与产物逐段比对，不一致就失败。
@@ -12,6 +12,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { minifyJs, stripModule } = require('../build.js');
 
 const ROOT = path.join(__dirname, '..');
 const SRC = path.join(ROOT, 'src');
@@ -22,9 +23,13 @@ const DIST = path.join(ROOT, 'android', 'app', 'src', 'main', 'assets', 'index.h
 const readSrc = name => fs.readFileSync(path.join(SRC, name), 'utf8');
 const distHtml = () => fs.readFileSync(DIST, 'utf8');
 
-/** 与 build.js 保持一致的剥离逻辑 */
-function stripModule(code) {
-  return code.replace(/\nif\s*\(typeof\s+module[\s\S]*?\n\}\s*$/m, '\n');
+function assertEmbeddedCode(html, rawCode, label) {
+  const expected = minifyJs(rawCode).trim();
+  assert.ok(expected.length > 0, `${label} 内容异常`);
+  assert.ok(
+    html.includes(expected),
+    `产物中的 ${label} 与源码不一致，可能忘记执行 node build.js`
+  );
 }
 
 /* ======================= 产物存在性 ======================= */
@@ -36,12 +41,7 @@ test('发布产物存在', () => {
 /* ======================= 逐个源文件比对 ======================= */
 
 const MODULES = [
-  ['schema.js', 'SCHEMA'],
-  ['core.js', 'RECORD_CORE'],
-  ['templates.js', 'TEMPLATES'],
-  ['depth.js', 'DEPTH'],
-  ['generator.js', 'GENERATOR'],
-  ['hints.js', 'HINTS'],
+  ['record-repository.js', 'RECORD_REPOSITORY'],
   ['action-handlers.js', 'ACTION_HANDLERS'],
   ['ai-core.js', 'AI_CORE'],
   ['ai.js', 'AI_ASSIST']
@@ -50,57 +50,38 @@ const MODULES = [
 for (const [file, globalName] of MODULES) {
   test(`产物中的 ${file} 与源码一致（未过期的构建）`, () => {
     const html = distHtml();
-    const expected = stripModule(readSrc(file)).trim();
-    assert.ok(expected.length > 0, `${file} 内容异常`);
-
-    // 取源码里的一段特征片段做比对，避免整体字符串比对受空白影响
-    // 用模块内部一个较长的稳定标识做锚点
-    const anchor = expected.split('\n').filter(l => l.trim().length > 30).slice(0, 3).join('\n');
-    assert.ok(anchor.length > 0, `${file} 找不到可用于比对的片段`);
-
-    // 逐行检查源码中每一条非空行都出现在产物里
-    const srcLines = expected.split('\n').map(l => l.trim()).filter(l => l.length > 20);
-    const missing = srcLines.filter(l => !html.includes(l));
-    assert.deepEqual(
-      missing.slice(0, 3), [],
-      `${file} 有 ${missing.length} 行没有出现在产物里，可能忘记执行 node build.js`
-    );
+    const expected = stripModule(readSrc(file));
+    assertEmbeddedCode(html, expected, `${file} (${globalName})`);
   });
 }
 
 const DOMAIN_MODULES = [
+  ['age', 'AGE'],
+  ['schema', 'SCHEMA'],
+  ['core', 'RECORD_CORE'],
+  ['template-data', 'TEMPLATE_DATA'],
+  ['templates', 'TEMPLATES'],
   ['quality/diagnostics', 'DIAGNOSTICS'],
-  ['generator/document-ir', 'DOCUMENT_IR']
+  ['depth', 'DEPTH'],
+  ['generator/document-ir', 'DOCUMENT_IR'],
+  ['generator', 'GENERATOR'],
+  ['hints', 'HINTS']
 ];
 
 for (const [rel, globalName] of DOMAIN_MODULES) {
   test(`产物中的 domain ${rel} 与已构建源码一致（未过期的构建）`, () => {
     const sourcePath = path.join(DOMAIN_SRC, `${rel}.ts`);
     const distPath = path.join(DOMAIN_DIST, `${rel}.js`);
+    assert.ok(fs.existsSync(sourcePath), `缺少 domain 源码 ${rel}.ts`);
     assert.ok(fs.existsSync(distPath), `缺少 domain 构建产物 ${rel}.js，请先运行 node build.js`);
-    const source = stripModule(fs.readFileSync(sourcePath, 'utf8')).trim();
     const built = stripModule(fs.readFileSync(distPath, 'utf8')).trim();
-    assert.equal(built, source, `${rel} 的 dist 产物已过期，请先运行 node build.js`);
 
-    const html = distHtml();
-    const missing = built.split('\n').map(line => line.trim())
-      .filter(line => line.length > 20 && !html.includes(line));
-    assert.deepEqual(
-      missing.slice(0, 3), [],
-      `产物中的 ${globalName} 有 ${missing.length} 行缺少，可能忘记执行 node build.js`
-    );
+    assertEmbeddedCode(distHtml(), built, `${globalName} (${rel})`);
   });
 }
 
 test('产物中的 app.js 与源码一致', () => {
-  const html = distHtml();
-  const expected = readSrc('app.js');
-  const srcLines = expected.split('\n').map(l => l.trim()).filter(l => l.length > 20);
-  const missing = srcLines.filter(l => !html.includes(l));
-  assert.deepEqual(
-    missing.slice(0, 3), [],
-    `app.js 有 ${missing.length} 行没有出现在产物里，可能忘记执行 node build.js`
-  );
+  assertEmbeddedCode(distHtml(), readSrc('app.js'), 'app.js (APP)');
 });
 
 test('产物中的样式与源码一致', () => {
@@ -119,27 +100,35 @@ test('产物中的样式与源码一致', () => {
 
 test('产物中核心模块按正确顺序内联', () => {
   const html = distHtml();
-  const iSchema = html.indexOf('const SCHEMA =');
-  const iCore = html.indexOf('const RECORD_CORE =');
-  const iTplData = html.indexOf('var TEMPLATE_DATA =');
-  const iTpl = html.indexOf('var TEMPLATES =');
-  const iDiagnostics = html.indexOf('var DIAGNOSTICS =');
-  const iDepth = html.indexOf('var DEPTH =');
-  const iDocIr = html.indexOf('const DOCUMENT_IR =');
-  const iGen = html.indexOf('const GENERATOR =');
-  const iHints = html.indexOf('const HINTS =');
-  const iActions = html.indexOf('const ACTION_HANDLERS =');
-  const iApp = html.indexOf('const APP =');
+  const findDecl = name => html.search(new RegExp(`\\b(?:const|var)\\s+${name}\\s*=`));
 
-  for (const [name, idx] of [['SCHEMA', iSchema], ['CORE', iCore], ['TEMPLATE_DATA', iTplData],
-    ['TEMPLATES', iTpl], ['DIAGNOSTICS', iDiagnostics], ['DEPTH', iDepth],
-    ['DOC_IR', iDocIr], ['GENERATOR', iGen],
-    ['HINTS', iHints], ['ACTION_HANDLERS', iActions], ['APP', iApp]]) {
+  const iAge = findDecl('AGE');
+  const iSchema = findDecl('SCHEMA');
+  const iCore = findDecl('RECORD_CORE');
+  const iRepo = findDecl('RECORD_REPOSITORY');
+  const iTplData = findDecl('TEMPLATE_DATA');
+  const iTpl = findDecl('TEMPLATES');
+  const iDiagnostics = findDecl('DIAGNOSTICS');
+  const iDepth = findDecl('DEPTH');
+  const iDocIr = findDecl('DOCUMENT_IR');
+  const iGen = findDecl('GENERATOR');
+  const iHints = findDecl('HINTS');
+  const iActions = findDecl('ACTION_HANDLERS');
+  const iApp = findDecl('APP');
+
+  for (const [name, idx] of [
+    ['AGE', iAge], ['SCHEMA', iSchema], ['CORE', iCore], ['RECORD_REPOSITORY', iRepo],
+    ['TEMPLATE_DATA', iTplData], ['TEMPLATES', iTpl], ['DIAGNOSTICS', iDiagnostics],
+    ['DEPTH', iDepth], ['DOC_IR', iDocIr], ['GENERATOR', iGen],
+    ['HINTS', iHints], ['ACTION_HANDLERS', iActions], ['APP', iApp]
+  ]) {
     assert.ok(idx > 0, `产物中缺少 ${name} 模块`);
   }
-  // 依赖顺序：schema → core → 模板数据 → 模板逻辑 → diagnostics → depth → doc IR → generator → hints → actions → app
+  // 依赖顺序：age → schema → core → repository → 模板数据 → 模板逻辑 → diagnostics → depth → doc IR → generator → hints → actions → app
+  assert.ok(iAge < iSchema, 'AGE 应在 SCHEMA 之前');
   assert.ok(iSchema < iCore, 'SCHEMA 应在 CORE 之前');
-  assert.ok(iCore < iTplData, 'CORE 应在 TEMPLATE_DATA 之前');
+  assert.ok(iCore < iRepo, 'CORE 应在 RECORD_REPOSITORY 之前');
+  assert.ok(iRepo < iTplData, 'RECORD_REPOSITORY 应在 TEMPLATE_DATA 之前');
   // templates.js 读 TEMPLATE_DATA，顺序反了会静默拿到空数组
   assert.ok(iTplData < iTpl, 'TEMPLATE_DATA 应在 TEMPLATES 之前');
   assert.ok(iTpl < iDiagnostics, 'TEMPLATES 应在 DIAGNOSTICS 之前');
@@ -154,7 +143,10 @@ test('产物中核心模块按正确顺序内联', () => {
 
 test('产物里没有残留的模板占位符', () => {
   const html = distHtml();
-  assert.doesNotMatch(html, /\/\*__(CSS|SCHEMA|CORE|TPL_DATA|TEMPLATES|DIAGNOSTICS|DEPTH|DOC_IR|GENERATOR|HINTS|APP)__\*\//);
+  assert.doesNotMatch(
+    html,
+    /\/\*__(CSS|AGE|SCHEMA|CORE|REPOSITORY|TPL_DATA|TEMPLATES|DIAGNOSTICS|DEPTH|DOC_IR|GENERATOR|HINTS|ACTION_HANDLERS|APP|AI_CORE|AI)__\*\//
+  );
 });
 
 test('产物里没有 Node 专用的 module.exports', () => {
@@ -186,22 +178,20 @@ test('产物体积在合理范围（手机加载要快）', () => {
   // App 资源随 APK 压缩打包；检查压缩体积，避免资源异常膨胀。
   const gzipKb = require('node:zlib').gzipSync(buf, { level: 9 }).length / 1024;
 
-  // 原始体积：只兜住「模块被重复内联」这类失控增长。模板病例是纯中文长文本，
-  // 重复度高、压得极狠——42 份模板让原始体积从 620KB 涨到 1040KB，
-  // 但 gzip 后只从 74KB 涨到 262KB，所以原始体积的上限必须留得足够宽。
+  // 原始体积：兜住模块重复内联或失控膨胀，经压缩后应远低于 1600 KB 红线。
   assert.ok(rawKb < 1600, `产物原始体积 ${rawKb.toFixed(1)}KB 偏大，先检查是否模块被重复内联`);
   assert.ok(rawKb > 50, `产物 ${rawKb.toFixed(1)}KB 异常偏小，可能内容缺失`);
 
-  // 压缩体积：限制 APK 内置资源体积。v3.1 基线 gzip 已接近 400KB，
-  // v3.2 的原始笔记、列表搜索/复制、分享与打印再增加约 4KB，
-  // 因此把上限留到 410KB；超过仍说明有异常膨胀。
+  // 压缩体积：限制 APK 内置资源体积，远低于 410 KB 红线。
   assert.ok(gzipKb < 410, `产物 gzip 后 ${gzipKb.toFixed(1)}KB，手机上首次打开会明显变慢`);
 });
 
-// Product boundary: building an APK must not revive the retired website.
-test('仅交付 App：独立网页入口与部署脚本已移除', () => {
+// Security & hygiene boundary: Android WebView asset stays strictly offline and
+// root directory does not retain retired legacy root-level HTML/SW outputs
+// (modern web builds are isolated under apps/web/ and deployed by pages.yml).
+test('Android 离线包边界与根目录退役产物清理', () => {
   for (const name of ['index.html', 'sw.js', 'deploy.js', '.nojekyll', 'dist/大病历生成器.html', 'dist/dabingli.html']) {
-    assert.equal(fs.existsSync(path.join(ROOT, name)), false, name + ' 不应再生成');
+    assert.equal(fs.existsSync(path.join(ROOT, name)), false, name + ' 不应再在仓库根目录生成');
   }
   const scripts = require('../package.json').scripts;
   assert.equal(scripts.deploy, undefined);

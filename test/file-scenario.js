@@ -1,12 +1,67 @@
 /* 模拟真实手机场景：file:// 打开、无网络、窄屏、点击密集操作
  * 重点验证：localStorage 在 file:// 下可用、长按复制降级路径、多病历切换
  */
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { pathToFileURL } = require('url');
 
-const CHROME = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+function resolveChromeExecutable() {
+  const envPath = process.env.CHROME_PATH || process.env.CHROMIUM_PATH || process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
+  if (envPath) {
+    if (fs.existsSync(envPath)) return envPath;
+    throw new Error(`环境变量指定的浏览器路径不存在: ${envPath}`);
+  }
+
+  for (const pkg of ['playwright', 'playwright-core']) {
+    try {
+      const pw = require(pkg);
+      const exe = pw && pw.chromium && typeof pw.chromium.executablePath === 'function'
+        ? pw.chromium.executablePath()
+        : '';
+      if (exe && fs.existsSync(exe)) return exe;
+    } catch (_) { /* optional dependency */ }
+  }
+
+  const candidates = process.platform === 'win32'
+    ? [
+        'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+        'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+        path.join(process.env.LOCALAPPDATA || '', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+        'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+        'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+      ]
+    : process.platform === 'darwin'
+      ? [
+          '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+          '/Applications/Chromium.app/Contents/MacOS/Chromium',
+          '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+        ]
+      : [
+          '/usr/bin/google-chrome',
+          '/usr/bin/google-chrome-stable',
+          '/usr/bin/chromium',
+          '/usr/bin/chromium-browser',
+          '/snap/bin/chromium',
+        ];
+
+  for (const candidate of candidates) {
+    if (candidate && fs.existsSync(candidate)) return candidate;
+  }
+
+  if (process.platform !== 'win32') {
+    for (const bin of ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser']) {
+      const res = spawnSync('which', [bin], { encoding: 'utf8' });
+      const found = res.status === 0 ? res.stdout.trim().split('\n')[0] : '';
+      if (found && fs.existsSync(found)) return found;
+    }
+  }
+
+  throw new Error('未找到 Chrome/Chromium 可执行文件，请设置 CHROME_PATH 或安装 Playwright Chromium');
+}
+
+const CHROME = resolveChromeExecutable();
 const HTML = path.resolve(__dirname, '..', 'android', 'app', 'src', 'main', 'assets', 'index.html');
 const SHOT_DIR = path.resolve(__dirname, '..', 'dist', 'shots');
 const PORT = 9224;
@@ -49,7 +104,7 @@ async function main() {
 
   await send('Runtime.enable'); await send('Page.enable');
   await send('Emulation.setDeviceMetricsOverride', { width: 412, height: 915, deviceScaleFactor: 2, mobile: true });
-  await send('Page.navigate', { url: 'file:///' + HTML.replace(/\\/g, '/') });
+  await send('Page.navigate', { url: pathToFileURL(HTML).href });
   await sleep(2200);
 
   const ev = async (expr) => {

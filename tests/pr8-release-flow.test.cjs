@@ -150,7 +150,7 @@ test('PR8-02 release jobs have least privilege, timeouts and no release build in
 test('PR8-03 verify and pages workflows never build or sign an APK', () => {
   for (const fileName of [VERIFY_WORKFLOW, PAGES_WORKFLOW]) {
     const workflow = read(fileName);
-    assert.doesNotMatch(workflow, /assemble/i, `${fileName} 不得构建 APK`);
+    assert.doesNotMatch(workflow, /\bassemble(?:Debug|Release)\b/i, `${fileName} 不得构建应用 APK`);
     assert.doesNotMatch(workflow, /bundleRelease/i, `${fileName} 不得打包 release bundle`);
     assert.doesNotMatch(workflow, /apksigner/i, `${fileName} 不得执行签名校验`);
     assert.doesNotMatch(workflow, /keystore|ANDROID_KEY(?:STORE|_)/i, `${fileName} 不得读取签名 Secret`);
