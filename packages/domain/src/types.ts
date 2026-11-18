@@ -30,6 +30,7 @@ export interface Fact {
   path: string;
   text: string;
   polarity: Polarity;
+  state?: FactState;
   source: SourceKind;
   reviewed: boolean;
   evidence?: Evidence[];
@@ -40,6 +41,7 @@ export interface Fact {
 
 export interface DocumentSection {
   title: string;
+  heading?: string;
   paragraphs: string[];
   facts: Fact[];
   warnings: DocumentWarning[];
@@ -77,18 +79,36 @@ export interface FieldState {
   sourceRef: string;
 }
 
+export interface MarriageConflict {
+  basicValue?: string;
+  marriageValue?: string;
+  resolved?: boolean;
+  chosen?: string;
+  resolvedAt?: string;
+}
+
 export interface RecordMeta {
   createdAt?: string;
   updatedAt?: string;
+  deletedAt?: string;
   revision?: number;
   fieldStates?: Record<string, Partial<FieldState> | undefined>;
-  conflicts?: Record<string, unknown>;
-  migratedFrom?: string | null;
+  conflicts?: {
+    marriage?: MarriageConflict;
+    [key: string]: unknown;
+  };
+  migratedFrom?: number | string | null;
   migrationNotes?: string[];
   /** 迁移时无法按当前结构映射的旧值：{ '字段路径': 原值 }，保证旧数据不丢失 */
   legacyUnmapped?: Record<string, unknown>;
-  lastTemplateFill?: unknown;
-  [key: string]: unknown;
+  lastTemplateFill?: {
+    key: string;
+    name: string;
+    at: string;
+    filled: string[];
+    values: Record<string, string>;
+  } | null;
+  aiProvenance?: Record<string, unknown>;
 }
 
 export interface BasicSection {
@@ -107,6 +127,7 @@ export interface BasicSection {
   phone: string;
   recordNo: string;
   bedNo: string;
+  ward?: string;
   admitDate: string;
   admitTime: string;
   recordDate: string;
@@ -116,10 +137,11 @@ export interface BasicSection {
   chiefComplaint: string;
   chiefComplaintDuration: string;
   chiefComplaintDurationUnit: string;
-  [key: string]: unknown;
 }
 
 export interface HpiSection {
+  mode?: 'structured' | 'manual' | string;
+  manual?: string;
   onset: string;
   cause: string;
   symptoms: string;
@@ -132,7 +154,6 @@ export interface HpiSection {
   treatment: string;
   generalCondition: string;
   extra: string;
-  [key: string]: unknown;
 }
 
 export interface RosEntry {
@@ -142,7 +163,6 @@ export interface RosEntry {
   factState?: FactState | string;
   time?: string;
   detail?: string;
-  [key: string]: unknown;
 }
 
 export type RosStore = Record<string, Record<string, RosEntry | undefined> | undefined>;
@@ -167,7 +187,6 @@ export interface PmhSection {
   relatedHistory: string;
   otherTreatDiseases: string;
   special: string;
-  [key: string]: unknown;
 }
 
 export interface PersonalSection {
@@ -188,7 +207,6 @@ export interface PersonalSection {
   occupationEnv: string;
   premorbidPersonality: string;
   stressEvent: string;
-  [key: string]: unknown;
 }
 
 export interface MarriageSection {
@@ -197,7 +215,6 @@ export interface MarriageSection {
   spouseHealth: string;
   sexLife: string;
   relation: string;
-  [key: string]: unknown;
 }
 
 /** 月经史「月经情况」的取值：有月经 / 已绝经 / 未初潮 / 未选择。 */
@@ -205,7 +222,7 @@ export type MenstruationApplicable = '有' | '无' | '未初潮' | '';
 
 export interface MenstruationSection {
   /** '有' = 有月经；'无' = 已绝经；'未初潮' = 尚未月经来潮；'' = 未选择。 */
-  applicable: string;
+  applicable: MenstruationApplicable | boolean | string;
   age: string;
   cycle: string;
   duration: string;
@@ -217,11 +234,10 @@ export interface MenstruationSection {
   menopauseAge: string;
   dysmenorrhea: string;
   extra?: string;
-  [key: string]: unknown;
 }
 
 export interface ChildbirthSection {
-  applicable: string;
+  applicable: string | boolean;
   fullTerm: string;
   premature: string;
   abortion: string;
@@ -233,7 +249,6 @@ export interface ChildbirthSection {
   details: string;
   lastBirth: string;
   contraception: string;
-  [key: string]: unknown;
 }
 
 export interface FamilySection {
@@ -243,7 +258,6 @@ export interface FamilySection {
   threeGeneration: string;
   similarDisease: string;
   infectionHistory: string;
-  [key: string]: unknown;
 }
 
 export type FieldStore = Record<string, string | boolean | undefined>;
@@ -260,7 +274,7 @@ export interface PhysicalExamSection {
   genital: FieldStore;
   spine: FieldStore;
   nervousPE: FieldStore;
-  [key: string]: FieldStore | Record<string, FieldStore | undefined> | undefined;
+  [key: `special_${string}`]: FieldStore | undefined;
 }
 
 export interface AuxiliaryItem {
@@ -270,14 +284,12 @@ export interface AuxiliaryItem {
   date?: string;
   hospital?: string;
   no?: string;
-  [key: string]: unknown;
 }
 
 export interface DiagnosisSection {
   confirmed: string[];
   newLine: string;
   signature: string;
-  [key: string]: unknown;
 }
 
 export interface SoapBasisRow {
@@ -285,7 +297,6 @@ export interface SoapBasisRow {
   history?: string;
   pe?: string;
   aux?: string;
-  [key: string]: unknown;
 }
 
 export interface SoapDiffRow {
@@ -293,35 +304,37 @@ export interface SoapDiffRow {
   why?: string;
   against?: string;
   points?: string;
-  [key: string]: unknown;
 }
 
 export interface SoapPlanRow {
   diagnosis?: string;
   exam?: string;
   treatment?: string;
-  [key: string]: unknown;
 }
 
 export interface SoapSection {
   recordTime: string;
-  s: { summary: string; consistency: string; [key: string]: unknown };
-  o: { pe: string; aux: string; [key: string]: unknown };
+  s: { summary: string; consistency: string };
+  o: { pe: string; aux: string };
   a: {
     basis: string;
     basisDetail: SoapBasisRow[];
     ranking: string;
     diff: SoapDiffRow[];
     diffNote: string;
-    [key: string]: unknown;
   };
   p: {
     principle: string;
     perDiagnosis: SoapPlanRow[];
     individual: string;
-    [key: string]: unknown;
   };
-  [key: string]: unknown;
+}
+
+export interface DischargeAdvice {
+  drug: string;
+  nonDrug: string;
+  lifestyle: string;
+  followUp: string;
 }
 
 export interface DischargeSection {
@@ -331,19 +344,45 @@ export interface DischargeSection {
   dischargeStatus: string;
   diagnoses: string[];
   diagnosesConfirmed: boolean;
-  advice: {
-    drug: string;
-    nonDrug: string;
-    lifestyle: string;
-    followUp: string;
-    [key: string]: unknown;
-  };
-  [key: string]: unknown;
+  advice: DischargeAdvice;
 }
 
 export interface FocusPeSection {
   keys: string[];
   note: string;
+}
+
+export interface DocumentEntryMeta {
+  origin: string;
+  inputFingerprint: string;
+  textHash: string;
+  reviewedFingerprint: string;
+  updatedAt?: string;
+}
+
+export interface DocumentDiagnosesMeta {
+  origin: string;
+  inputFingerprint: string;
+  textHash: string;
+  confirmed: boolean;
+  confirmedFingerprint: string;
+  updatedAt?: string;
+}
+
+export interface DocumentMetaStore {
+  summary?: DocumentEntryMeta;
+  firstCourse?: {
+    s?: DocumentEntryMeta;
+    oPe?: DocumentEntryMeta;
+    oAux?: DocumentEntryMeta;
+    basis?: DocumentEntryMeta;
+    [key: string]: DocumentEntryMeta | undefined;
+  };
+  discharge?: {
+    admitCondition?: DocumentEntryMeta;
+    diagnoses?: DocumentDiagnosesMeta;
+    [key: string]: DocumentEntryMeta | DocumentDiagnosesMeta | undefined;
+  };
   [key: string]: unknown;
 }
 
@@ -351,14 +390,19 @@ export interface DabingliRecord {
   id?: string;
   schemaVersion?: number;
   updatedAt?: string;
+  ward?: string;
   /** Original notes entered on the AI page. Kept with the record, excluded from backups by default. */
   rawNotes?: string;
   meta: RecordMeta;
-  documentMeta?: Record<string, unknown>;
+  documentMeta?: DocumentMetaStore;
   basic: BasicSection;
   hpi: HpiSection;
   ros: RosStore;
   peFactStates?: Record<string, Record<string, FactState | { state?: FactState; status?: FactState } | undefined> | undefined>;
+  peDefaults?: Record<string, unknown>;
+  peChecked?: Record<string, unknown>;
+  fieldStates?: Record<string, unknown>;
+  aiProvenance?: Record<string, unknown>;
   pmh: PmhSection;
   personal: PersonalSection;
   marriage: MarriageSection;
@@ -366,14 +410,13 @@ export interface DabingliRecord {
   childbirth: ChildbirthSection;
   family: FamilySection;
   pe: PhysicalExamSection;
-  auxiliary: { items: AuxiliaryItem[]; [key: string]: unknown };
+  auxiliary: { items: AuxiliaryItem[] };
   summary: string;
   diagnosis: DiagnosisSection;
   soap: SoapSection;
   discharge: DischargeSection;
   focusPE: FocusPeSection;
-  suggestions: { accepted: string[]; [key: string]: unknown };
-  [key: string]: unknown;
+  suggestions: { accepted: string[] };
 }
 
 export interface RecordListItem {
@@ -496,16 +539,19 @@ export interface PeItem {
   key: string;
   label: string;
   default?: string;
+  legacyDefault?: string;
   normal?: string;
   normalVariants?: string[];
   options?: string[];
   parent?: string;
   depts?: string[];
+  summaryOf?: string[];
 }
 
 export interface PeGroup {
   key: string;
   name: string;
+  joinWith?: string;
   items: PeItem[];
 }
 
@@ -518,6 +564,7 @@ export interface VitalDefinition {
   key: string;
   label: string;
   unit: string;
+  type?: string;
   min?: number;
   max?: number;
   placeholder?: string;
@@ -541,7 +588,6 @@ export interface Template {
   verificationStatus?: 'verified' | 'unverified' | string;
   verificationLabel?: string;
   record: Record<string, unknown>;
-  [key: string]: unknown;
 }
 
 export interface TemplateApplyResult {
@@ -579,7 +625,7 @@ export interface Hint {
 
 export interface DepthItem {
   id: string;
-  level: 'high' | 'medium' | 'low' | string;
+  level: 'high' | 'mid' | 'low';
   section: string;
   message: string;
   label: string;
@@ -601,3 +647,39 @@ export interface GeneratedRecord {
   sections: Record<string, string>;
   warnings: string[];
 }
+
+export type PeVitalsKey =
+  | 'temperature'
+  | 'pulse'
+  | 'respiration'
+  | 'sbp'
+  | 'dbp'
+  | 'height'
+  | 'weight'
+  | 'headCirc'
+  | 'chestCirc'
+  | 'abdCirc';
+
+export type RecordBasicOrRecord = DabingliRecord | Partial<BasicSection> | null | undefined;
+
+export interface VitalSnapshotEntry {
+  raw: string;
+  num: number;
+}
+
+export interface DocumentTemplateMetadata {
+  key?: string;
+  title: string;
+  alias?: string[];
+  sections?: readonly string[];
+  [key: string]: unknown;
+}
+
+export type DocumentTemplateMap = Readonly<Record<string, DocumentTemplateMetadata>>;
+
+export type BasisDetailItem = SoapBasisRow;
+export type FirstCourseDiffItem = SoapDiffRow;
+export type FirstCoursePlanItem = SoapPlanRow;
+export type DocumentBundle = RecordDocumentBundle;
+export type FactPolarity = Polarity;
+export type FactSource = SourceKind;

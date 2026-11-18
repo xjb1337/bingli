@@ -2,6 +2,21 @@
   "name": "@dabingli/domain",
   "version": "3.2.1",
   "private": true,
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts"
+  "main": "./dist/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/esm/index.js",
+      "require": "./dist/index.js",
+      "default": "./dist/esm/index.js"
+    },
+    "./templates": {
+      "types": "./dist/templates-subpath.d.ts",
+      "import": "./dist/esm/templates.js",
+      "require": "./dist/templates-subpath.js",
+      "default": "./dist/esm/templates.js"
+    }
+  }
 }

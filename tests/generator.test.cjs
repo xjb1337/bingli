@@ -160,6 +160,7 @@ test('男性患者不出现月经史', () => {
 
 test('未婚患者婚育史写"未婚"', () => {
   const r = makeRecord('general');
+  r.basic.marital = '';
   r.marriage.status = '未婚';
   assert.match(GENERATOR.buildMarriageChildbirth(r), /^未婚/);
 });
