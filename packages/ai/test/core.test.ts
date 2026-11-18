@@ -80,7 +80,7 @@ describe('AI request boundary', () => {
   it('excludes unreviewed template, default, example and prior AI content', () => {
     const record = makeRecord();
     record.hpi.symptoms = '咳嗽3天';
-    ['template', 'default', 'example', 'ai'].forEach((source) => {
+    (['template', 'default', 'example', 'ai'] as const).forEach((source) => {
       RECORD_CORE.setFieldState(record, 'hpi.symptoms', { source, reviewed: false });
       expect(() => prepareAiRequest('summary', record)).toThrow(/尚无可发送/);
       RECORD_CORE.markFieldReviewed(record, 'hpi.symptoms', source);

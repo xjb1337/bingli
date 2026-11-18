@@ -117,8 +117,8 @@ describe('browser legacy localStorage migration', () => {
     const v1 = await repository.loadCurrent('legacy-v1-respiratory');
     expect(v1.ok).toBe(true);
     expect(v1.record?.schemaVersion).toBe(RECORD_CORE.SCHEMA_VERSION);
-    expect(v1.record?.legacyUnknown).toEqual(v1Record.legacyUnknown);
-    expect(v1.record?.basic.legacyBasicTag).toBe('旧版基本字段-合成');
+    expect((v1.record as unknown as Record<string, unknown> | null)?.legacyUnknown).toEqual(v1Record.legacyUnknown);
+    expect((v1.record?.basic as unknown as Record<string, unknown> | undefined)?.legacyBasicTag).toBe('旧版基本字段-合成');
     expect(v1.record?.meta.migratedFrom).toBe(1);
     expect(v1.record?.meta.migrationNotes).toContain('已从 v1 迁移到 v3');
 

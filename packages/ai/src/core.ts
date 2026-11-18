@@ -230,11 +230,17 @@ export function requestBaseline(record: DabingliRecord): AiRequestBaseline {
 export function redactionDiff(text: unknown, record: DabingliRecord): { text: string; categories: string[] } {
   let output = String(text ?? '');
   const categories = new Set<string>();
-  const labels: Record<string, string> = {
-    name: '姓名', phone: '电话', address: '地址', workUnit: '工作单位',
-    recordNo: '病历号', bedNo: '床号', nativePlace: '籍贯', birthPlace: '出生地',
-  };
-  Object.entries(labels)
+  const labels: ReadonlyArray<readonly [keyof DabingliRecord['basic'], string]> = [
+    ['name', '姓名'],
+    ['phone', '电话'],
+    ['address', '地址'],
+    ['workUnit', '工作单位'],
+    ['recordNo', '病历号'],
+    ['bedNo', '床号'],
+    ['nativePlace', '籍贯'],
+    ['birthPlace', '出生地'],
+  ];
+  labels
     .map(([key, label]) => ({ key, value: String(record.basic[key] ?? '').trim(), label }))
     // 跳过纯数字床号、病历号、不完整电话及通用状态词的全文替换，避免误改化验值、时间和临床描述。
     .filter(({ key, value }) => value.length >= 2
