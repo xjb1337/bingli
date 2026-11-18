@@ -25,13 +25,15 @@ export function ImageRedactModal({
   const loadedImageRef = useRef<HTMLImageElement | null>(null);
   const [rects, setRects] = useState<MaskRect[]>([]);
   const [draftRect, setDraftRect] = useState<MaskRect | null>(null);
-  const dragStartRef = useRef<{ x: number; y: number } | null>(null);
+  const dragStartRef = useRef<{ x: number; y: number; pointerId: number } | null>(null);
+  const [imageReady, setImageReady] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
     if (!open || !image) return;
     setRects([]);
     setDraftRect(null);
+    setImageReady(false);
     setError('');
     const img = new Image();
     img.onload = () => {
@@ -43,9 +45,17 @@ export function ImageRedactModal({
       const ctx = canvas.getContext('2d');
       if (ctx) {
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        setImageReady(true);
       }
     };
+    img.onerror = () => setError('无法读取图片，请关闭后重试');
     img.src = image.previewDataUrl;
+    return () => {
+      img.onload = null;
+      img.onerror = null;
+      loadedImageRef.current = null;
+      dragStartRef.current = null;
+    };
   }, [image, open]);
 
   useEffect(() => {
@@ -56,7 +66,7 @@ export function ImageRedactModal({
     if (!ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = '#111827';
+    ctx.fillStyle = '#000';
     for (const r of rects) {
       ctx.fillRect(r.x, r.y, r.w, r.h);
     }
@@ -73,21 +83,22 @@ export function ImageRedactModal({
     const scaleX = bounds.width > 0 ? canvas.width / bounds.width : 1;
     const scaleY = bounds.height > 0 ? canvas.height / bounds.height : 1;
     return {
-      x: (event.clientX - bounds.left) * scaleX,
-      y: (event.clientY - bounds.top) * scaleY,
+      x: Math.max(0, Math.min(canvas.width, (event.clientX - bounds.left) * scaleX)),
+      y: Math.max(0, Math.min(canvas.height, (event.clientY - bounds.top) * scaleY)),
     };
   }
 
   function handlePointerDown(event: PointerEvent<HTMLCanvasElement>) {
+    if (!imageReady || dragStartRef.current || event.button !== 0) return;
     event.currentTarget.setPointerCapture?.(event.pointerId);
     const point = canvasCoords(event);
-    dragStartRef.current = point;
+    dragStartRef.current = { ...point, pointerId: event.pointerId };
     setDraftRect({ x: point.x, y: point.y, w: 0, h: 0 });
   }
 
   function handlePointerMove(event: PointerEvent<HTMLCanvasElement>) {
     const start = dragStartRef.current;
-    if (!start) return;
+    if (!start || start.pointerId !== event.pointerId) return;
     const point = canvasCoords(event);
     setDraftRect({
       x: Math.min(start.x, point.x),
@@ -97,18 +108,37 @@ export function ImageRedactModal({
     });
   }
 
-  function handlePointerUp() {
-    if (draftRect && (draftRect.w >= 4 || draftRect.h >= 4)) {
-      setRects((prev) => [...prev, draftRect]);
+  function handlePointerEnd(event: PointerEvent<HTMLCanvasElement>) {
+    const start = dragStartRef.current;
+    if (!start || start.pointerId !== event.pointerId) return;
+    if (event.type === 'pointerup') {
+      const point = canvasCoords(event);
+      const x = Math.floor(Math.min(start.x, point.x));
+      const y = Math.floor(Math.min(start.y, point.y));
+      const w = Math.ceil(Math.max(start.x, point.x)) - x;
+      const h = Math.ceil(Math.max(start.y, point.y)) - y;
+      if (w >= 4 && h >= 4) setRects((prev) => [...prev, { x, y, w, h }]);
     }
     dragStartRef.current = null;
     setDraftRect(null);
   }
 
   function handleApply() {
-    const canvas = canvasRef.current;
-    if (!canvas || !image) return;
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+    const source = loadedImageRef.current;
+    const preview = canvasRef.current;
+    if (!source || !preview || !image || !rects.length || dragStartRef.current) return;
+    const output = document.createElement('canvas');
+    output.width = preview.width;
+    output.height = preview.height;
+    const ctx = output.getContext('2d');
+    if (!ctx) {
+      setError('生成遮挡图片失败，请重试');
+      return;
+    }
+    ctx.drawImage(source, 0, 0, output.width, output.height);
+    ctx.fillStyle = '#000';
+    for (const rect of rects) ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+    const dataUrl = output.toDataURL('image/jpeg', 0.85);
     const match = dataUrl.match(/^data:(image\/[^;]+);base64,(.+)$/);
     if (!match?.[1] || !match[2]) {
       setError('生成遮挡图片失败，请重试');
@@ -138,8 +168,8 @@ export function ImageRedactModal({
           aria-label="病历图片遮挡画布"
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onPointerCancel={handlePointerUp}
+          onPointerUp={handlePointerEnd}
+          onPointerCancel={handlePointerEnd}
         />
       </div>
       {error ? (
@@ -164,7 +194,7 @@ export function ImageRedactModal({
         >
           重置遮挡
         </button>
-        <button type="button" className="button primary" onClick={handleApply}>
+        <button type="button" className="button primary" disabled={!imageReady || !rects.length || !!draftRect} onClick={handleApply}>
           应用遮挡（{rects.length} 处）
         </button>
       </div>

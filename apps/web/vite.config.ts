@@ -31,7 +31,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', 'VITE_');
 
   return {
-    base: process.env.VITE_BASE || env.VITE_BASE || '/bingli/',
+    base: env.VITE_BASE || '/bingli/',
     plugins: [react(), offlineServiceWorker()],
     optimizeDeps: {
       include: ['@dabingli/domain'],

@@ -33,6 +33,8 @@ export function DataTransferPanel({
   const [mode, setMode] = useState<'merge' | 'replace'>('merge');
   const [showExport, setShowExport] = useState(false);
   const [pendingReplaceRaw, setPendingReplaceRaw] = useState<string | null>(null);
+  const [readingFile, setReadingFile] = useState(false);
+  const [fileError, setFileError] = useState('');
 
   const previewText = useMemo(() => {
     if (!showExport) return '';
@@ -74,23 +76,32 @@ export function DataTransferPanel({
           type="file"
           accept="application/json,.json"
           className="visually-hidden"
+          tabIndex={-1}
           onChange={(event) => {
             const file = event.target.files?.[0];
             if (!file) return;
-            void file.text().then((raw) => {
+            setReadingFile(true);
+            setFileError('');
+            const reader = new FileReader();
+            reader.onload = () => {
+              const raw = String(reader.result ?? '');
               if (mode === 'replace') {
                 setPendingReplaceRaw(raw);
               } else {
                 onImport(raw, mode);
               }
-            });
+            };
+            reader.onerror = () => setFileError('无法读取 JSON 文件，请重新选择');
+            reader.onloadend = () => setReadingFile(false);
+            reader.readAsText(file);
             event.target.value = '';
           }}
         />
-        <button type="button" className="button primary" onClick={() => inputRef.current?.click()}>
-          选择 JSON 文件
+        <button type="button" className="button primary" disabled={readingFile} onClick={() => inputRef.current?.click()}>
+          {readingFile ? '正在读取…' : '选择 JSON 文件'}
         </button>
       </div>
+      {fileError ? <p className="field-error" role="alert">{fileError}</p> : null}
       <p className="muted">数据仅保存在本机浏览器；替换导入前会先保存恢复副本。</p>
       {onMergeLegacy || (corruptEntries.length > 0 && onExportCorruptLegacy) ? (
         <div className="button-row">

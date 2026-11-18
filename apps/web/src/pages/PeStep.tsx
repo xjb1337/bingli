@@ -145,7 +145,8 @@ export function PeStep({ record, update, replaceRecord, errors, notify }: StepCo
     group.items.forEach((item) => {
       const val = typeof store[item.key] === 'string' ? (store[item.key] as string) : '';
       const checked = SCHEMA.peChecked(record, group.groupKey, item.key);
-      const shown = val || (checked ? SCHEMA.peNormalText(item) : '');
+      if (!checked) return;
+      const shown = val || SCHEMA.peNormalText(item);
       if (!shown) return;
       const path = `pe.${group.containerKey}.${item.key}`;
       if (peReviewValid(record, path, shown)) return;
@@ -211,7 +212,7 @@ export function PeStep({ record, update, replaceRecord, errors, notify }: StepCo
             className="button ghost"
             onClick={() => setVitalsConfirmOpen(true)}
           >
-            填入正常值
+            查看正常值参考示例
           </button>
         </div>
         <p className="muted">只写入实测值；未填写项不会自动补正常值。</p>

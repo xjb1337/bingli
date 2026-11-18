@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
   RECORD_CORE,
@@ -45,26 +45,30 @@ describe('generated document side placeholder confirmation', () => {
   it('asks before copying or downloading and cancels both when declined', async () => {
     const user = userEvent.setup();
     const writeText = stubClipboard();
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const download = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
     render(<GeneratedDocuments record={emptyRecord()} warnings={[sidePlaceholderWarning()]} />);
 
-    await user.click(screen.getAllByRole('button', { name: '复制本篇' })[0]!);
-    await user.click(screen.getAllByRole('button', { name: '下载 .txt' })[0]!);
-
-    expect(confirm).toHaveBeenCalledTimes(2);
-    expect(confirm).toHaveBeenCalledWith(
-      '病历里还有 2 处（患侧/对侧/健侧）没改，确定要复制/下载吗？',
-    );
+    for (const name of ['复制本篇', '下载 .txt']) {
+      const action = screen.getAllByRole('button', { name })[0]!;
+      await user.click(action);
+      const dialog = screen.getByRole('alertdialog', { name: '侧别占位符尚未替换' });
+      expect(dialog).toHaveAccessibleDescription('病历里还有 2 处（患侧/对侧/健侧）没改，确定要复制/下载吗？');
+      expect(within(dialog).getByRole('button', { name: '取消' })).toHaveFocus();
+      await user.keyboard('{Escape}');
+      expect(dialog).not.toBeInTheDocument();
+      expect(action).toHaveFocus();
+    }
     expect(writeText).not.toHaveBeenCalled();
+    expect(download).not.toHaveBeenCalled();
   });
 
   it('continues copying when the user confirms', async () => {
     const user = userEvent.setup();
     const writeText = stubClipboard();
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     render(<GeneratedDocuments record={emptyRecord()} warnings={[sidePlaceholderWarning()]} />);
 
     await user.click(screen.getAllByRole('button', { name: '复制本篇' })[0]!);
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: '仍要继续' }));
 
     await waitFor(() => {
       expect(writeText).toHaveBeenCalledWith(screen.getByTestId('doc-record').textContent);
@@ -74,7 +78,6 @@ describe('generated document side placeholder confirmation', () => {
   it('falls back to the count in the warning message when paths are unavailable', async () => {
     const user = userEvent.setup();
     stubClipboard();
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
     render(
       <GeneratedDocuments
         record={emptyRecord()}
@@ -84,7 +87,7 @@ describe('generated document side placeholder confirmation', () => {
 
     await user.click(screen.getAllByRole('button', { name: '复制本篇' })[0]!);
 
-    expect(confirm).toHaveBeenCalledWith(
+    expect(screen.getByRole('alertdialog')).toHaveAccessibleDescription(
       '病历里还有 3 处（患侧/对侧/健侧）没改，确定要复制/下载吗？',
     );
   });

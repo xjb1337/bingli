@@ -66,7 +66,7 @@ export function BasicStep({ record, update, replaceRecord, errors, notify }: Ste
       notify('已显示患者录入提纲，未写入病历');
       return;
     }
-    replaceRecord(next, { snapshotLabel: `套用模板：${result.template?.name ?? key}` });
+    replaceRecord(next, { snapshotLabel: `套用模板：${mod.get(key)?.name ?? key}` });
     setOutline([]);
     notify(`已带入 ${result.count} 项，请逐项核对`);
   }
@@ -121,7 +121,6 @@ export function BasicStep({ record, update, replaceRecord, errors, notify }: Ste
     });
 
     next.meta.lastTemplateFill = null;
-    if (!kept) delete next.__templateKey;
     replaceRecord(next, { snapshotLabel: `撤销模板带入：${lastFill.name ?? lastFill.key}` });
     notify(`已撤销 ${cleared} 项${kept ? `，保留 ${kept} 项你后来改过的内容` : ''}`, 'success');
   }

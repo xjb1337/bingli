@@ -137,7 +137,9 @@ export function AiAssistantPanel({
   const localAbortRef = useRef<AbortController | null>(null);
   const isControlled = Boolean(sessionState && onSessionPatch);
   const state = sessionState ?? localSession;
-  const patchState = onSessionPatch ?? setLocalSession;
+  const patchState: NonNullable<AiAssistantPanelProps['onSessionPatch']> = onSessionPatch ?? ((patch) => {
+    setLocalSession((previous) => typeof patch === 'function' ? patch(previous) : { ...previous, ...patch });
+  });
   const abortRef = sharedAbortRef ?? localAbortRef;
 
   const {

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { RECORD_CORE, SCHEMA } from '@dabingli/domain';
 import {
@@ -80,8 +80,7 @@ async function saveFromHeader(user: ReturnType<typeof userEvent.setup>): Promise
 async function enterKey(user: ReturnType<typeof userEvent.setup>, key: string): Promise<void> {
   await goToAi(user);
   const input = await screen.findByLabelText('DeepSeek API Key');
-  await user.clear(input);
-  await user.type(input, key);
+  fireEvent.change(input, { target: { value: key } });
   expect(screen.getByText(/仅保存在本页内存，刷新后需重新输入/)).toBeInTheDocument();
   await user.click(screen.getByRole('button', { name: '返回编辑' }));
 }
@@ -151,7 +150,7 @@ describe('DeepSeek web security boundary', () => {
       await goToAi(user);
       expect(screen.getAllByRole('heading', { name: 'API 设置' })).toHaveLength(1);
       expect(screen.queryByRole('complementary', { name: '步骤目录' })).not.toBeInTheDocument();
-      await user.type(screen.getByLabelText('DeepSeek API Key'), 'sk-context');
+      fireEvent.change(screen.getByLabelText('DeepSeek API Key'), { target: { value: 'sk-context' } });
       await user.selectOptions(screen.getByLabelText('AI 操作'), 'polish');
       expect(screen.getByLabelText('润色字段')).toHaveValue(expectedTargets[step.key] ?? 'hpi.symptoms');
       await user.click(screen.getByRole('button', { name: '清除内存中的密钥' }));
@@ -903,6 +902,7 @@ describe('organize structured suggestions', () => {
     const symptomRow = screen.getByText('症状特点', {selector: 'strong'}).closest('li');
     expect(symptomRow).not.toBeNull();
     await user.click(within(symptomRow!).getByRole('button', { name: '去改该字段' }));
+    await screen.findByRole('heading', { name: '现病史' });
     const symptoms = document.querySelector<HTMLInputElement>('[data-field-path="hpi.symptoms"]');
     expect(symptoms).not.toBeNull();
     await user.clear(symptoms!);
@@ -913,8 +913,9 @@ describe('organize structured suggestions', () => {
     await user.click(screen.getByRole('button', { name: '返回编辑' }));
     expect(document.querySelector<HTMLInputElement>('[data-field-path="hpi.symptoms"]')?.value).toBe('手改后的症状');
     await user.click(within(screen.getByRole('complementary', { name: '步骤目录' })).getByRole('button', { name: /体格检查/ }));
+    await screen.findByRole('heading', { name: '体格检查（一）/（二）' });
     expect(document.querySelector<HTMLInputElement>('[data-field-path="pe.vitals.temperature"]')?.value).toBe('');
     await user.click(within(screen.getByRole('complementary', { name: '步骤目录' })).getByRole('button', { name: /个人史/ }));
-    expect(within(screen.getByRole('radiogroup', { name: '吸烟' })).getByText('未问')).toHaveAttribute('aria-checked', 'true');
+    expect(within(await screen.findByRole('radiogroup', { name: '吸烟' })).getByText('未问')).toHaveAttribute('aria-checked', 'true');
   });
 });

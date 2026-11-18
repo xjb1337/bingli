@@ -104,6 +104,38 @@ function LazyContentFallback() {
   return <LoadingState label="正在加载页面…" compact />;
 }
 
+function FocusStepField({
+  path,
+  onHandled,
+}: {
+  path: string | null;
+  onHandled: (path: null) => void;
+}) {
+  useEffect(() => {
+    if (!path) return;
+    const frame = window.requestAnimationFrame(() => {
+      const fields = [...document.querySelectorAll<HTMLElement>('.editor-form [data-field-path]')];
+      const matched = fields.find((element) => element.dataset.fieldPath === path)
+        ?? fields.find((element) => element.dataset.fieldPath?.startsWith(`${path}.`));
+      if (matched) {
+        for (let parent = matched.parentElement; parent; parent = parent.parentElement) {
+          if (parent instanceof HTMLDetailsElement) parent.open = true;
+        }
+        const target = matched.matches('input, select, textarea, button, [tabindex]')
+          ? matched
+          : matched.querySelector<HTMLElement>('button[tabindex="0"], input, select, textarea, button') ?? matched;
+        target.scrollIntoView?.({ block: 'center' });
+        target.focus();
+      } else {
+        document.getElementById('step-heading')?.focus();
+      }
+      onHandled(null);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [onHandled, path]);
+  return null;
+}
+
 type AppView = 'editor' | 'records' | 'settings' | 'ai';
 
 async function loadSessionState(repository: RecordRepository): Promise<InitialSessionState> {
@@ -304,6 +336,7 @@ function EditorApp({
     : Object.keys(AI_FIELDS).find((path) => path.startsWith(`${step.key}.`)) ?? 'hpi.symptoms';
 
   const aiSession = useAiSession(session.record.id, defaultAiTarget);
+  const lastAiEditorTarget = useRef(defaultAiTarget);
 
   const mobileStepButtonRef = useRef<HTMLButtonElement | null>(null);
   const mobileStepPanelRef = useRef<HTMLDivElement | null>(null);
@@ -364,14 +397,6 @@ function EditorApp({
     return session.saveAiMutation(next, '已标记为已核对');
   }
 
-  const attemptSave = useCallback(
-    async (showToast = true): Promise<boolean> => {
-      validation.setValidationAttempted(true);
-      return session.persistRecord(showToast);
-    },
-    [session, validation],
-  );
-
   const goToStep = useCallback(
     (index: number) => {
       const safeIndex = Math.max(0, Math.min(STEPS.length - 1, index));
@@ -402,11 +427,17 @@ function EditorApp({
         });
         if (!ok) return;
       }
-      if (nextView === 'ai') refreshAndroidAiStatus();
+      if (nextView === 'ai') {
+        if (lastAiEditorTarget.current !== defaultAiTarget && !aiSession.session.request && !aiSession.hasUnsentWork) {
+          aiSession.patchSession({ target: defaultAiTarget });
+          lastAiEditorTarget.current = defaultAiTarget;
+        }
+        refreshAndroidAiStatus();
+      }
       setMobileNavOpen(false);
       setView(nextView);
     },
-    [aiSession.hasUnsentWork, aiSession.session.busy, confirmAction, refreshAndroidAiStatus, view],
+    [aiSession, confirmAction, defaultAiTarget, refreshAndroidAiStatus, view],
   );
 
   const jumpToPath = useCallback(
@@ -419,20 +450,23 @@ function EditorApp({
     [goToStep, validation],
   );
 
-  const jumpToFirstInvalid = useCallback(() => {
+  const firstInvalidPath = validation.warnings.find((warning) => warning.severity === 'error' && warning.paths?.length)?.paths?.[0]
+    ?? validation.warnings.find((warning) => warning.paths?.length)?.paths?.[0];
+  const jumpToFirstInvalid = () => {
     validation.setValidationAttempted(true);
-    const ordered = [
-      ...validation.warnings.filter((warning) => warning.severity === 'error'),
-      ...validation.warnings.filter((warning) => warning.severity !== 'error'),
-    ];
-    const first = ordered.find((warning) => warning.paths?.length);
-    const path = first?.paths?.[0];
-    if (path) {
-      jumpToPath(path);
-      return;
-    }
-    session.notify(first?.message ?? '没有可定位的提醒，请人工核对', first ? 'info' : 'success');
-  }, [jumpToPath, session, validation]);
+    if (firstInvalidPath) jumpToPath(firstInvalidPath);
+    else session.notify('没有可定位的提醒，请人工核对', 'info');
+  };
+
+  const attemptSave = useCallback(
+    async (showToast = true): Promise<boolean> => {
+      validation.setValidationAttempted(true);
+      const saved = await session.persistRecord(showToast);
+      if (firstInvalidPath) jumpToPath(firstInvalidPath);
+      return saved;
+    },
+    [firstInvalidPath, jumpToPath, session, validation],
+  );
 
   async function handleImportJson(raw: string, mode: 'merge' | 'replace') {
     const ok = await session.importJson(raw, mode);
@@ -475,37 +509,16 @@ function EditorApp({
   }, [session.settings.fontScale]);
 
   useEffect(() => {
-    if (theme === 'auto') {
-      document.documentElement.removeAttribute('data-theme');
-    } else {
-      document.documentElement.setAttribute('data-theme', theme);
+    const systemDark = window.matchMedia?.('(prefers-color-scheme: dark)');
+    const applyTheme = () => {
+      document.documentElement.dataset.theme = theme === 'auto' ? (systemDark?.matches ? 'dark' : 'light') : theme;
+    };
+    applyTheme();
+    if (theme === 'auto' && systemDark) {
+      systemDark.addEventListener('change', applyTheme);
+      return () => systemDark.removeEventListener('change', applyTheme);
     }
   }, [theme]);
-
-  useEffect(() => {
-    if (!pendingFocus) return;
-    const frame = window.requestAnimationFrame(() => {
-      const fields = [...document.querySelectorAll<HTMLElement>('[data-field-path]')];
-      const matched = fields.find((element) => element.dataset.fieldPath === pendingFocus)
-        ?? fields.find((element) => element.dataset.fieldPath?.startsWith(`${pendingFocus}.`));
-      if (matched) {
-        let parent = matched.parentElement;
-        while (parent) {
-          if (parent instanceof HTMLDetailsElement) parent.open = true;
-          parent = parent.parentElement;
-        }
-        const focusTarget = matched.matches('input, select, textarea, button, [tabindex]')
-          ? matched
-          : matched.querySelector<HTMLElement>('button[tabindex="0"], input, select, textarea, button') ?? matched;
-        focusTarget.scrollIntoView?.({ block: 'center' });
-        focusTarget.focus();
-      } else {
-        document.getElementById('step-heading')?.focus();
-      }
-      setPendingFocus(null);
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [pendingFocus, stepIndex, view]);
 
   // Close mobile step panel on outside click
   useEffect(() => {
@@ -891,6 +904,7 @@ function EditorApp({
               >
                 <Suspense fallback={<LazyContentFallback />}>
                   {stepContent}
+                  <FocusStepField key={stepKey} path={pendingFocus} onHandled={setPendingFocus} />
                 </Suspense>
                 <footer className="editor-footer">
                   <button

@@ -1,5 +1,5 @@
 import type { AppSettings, DabingliRecord, DocumentWarning } from '@dabingli/domain';
-import type { ConfirmDialogOptions } from '../components/ConfirmModal';
+import type { ConfirmDialogOptions } from './components/ConfirmModal';
 
 export type UpdateField = (path: string, value: unknown, options?: { snapshotLabel?: string }) => void;
 

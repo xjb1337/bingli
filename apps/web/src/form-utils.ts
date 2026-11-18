@@ -1,6 +1,6 @@
 import { useRef } from 'react';
 import { RECORD_CORE, SCHEMA, type DabingliRecord, type FieldStore } from '@dabingli/domain';
-import type { StepKey } from '../steps';
+import type { StepKey } from './steps';
 
 export function stringAt(record: DabingliRecord, path: string): string {
   const value = RECORD_CORE.getPath(record, path);

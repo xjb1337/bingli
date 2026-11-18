@@ -183,15 +183,15 @@ export function useRecordSession({
 
   const saveAiMutation = useCallback(
     async (nextRecord: DabingliRecord, message: string): Promise<boolean> => {
-      cancelSaveTimer();
+      const expectedSequence = mutationSeqRef.current;
       return enqueueSave(async () => {
-        const currentRevision = Number(recordRef.current.meta.revision) || 0;
+        const previous = recordRef.current;
+        if (previous.id !== nextRecord.id || mutationSeqRef.current !== expectedSequence) {
+          notify('病历已改变，请核对后重试 AI 操作', 'error');
+          return false;
+        }
+        const currentRevision = Number(previous.meta.revision) || 0;
         const payload = mergeRevisionMeta(nextRecord, currentRevision, nextRecord.updatedAt);
-        historyRef.current.push(recordRef.current, message);
-        setUndoVersion((v) => v + 1);
-        mutationSeqRef.current += 1;
-        const targetSeq = mutationSeqRef.current;
-
         const saved = await repo.saveToLibrary(payload, currentRevision);
         if (!saved.ok) {
           const reason = saved.reason ?? 'AI 内容保存失败，请先导出备份。';
@@ -201,6 +201,20 @@ export function useRecordSession({
         }
 
         const persisted = saved.record ?? payload;
+        if (mutationSeqRef.current !== expectedSequence) {
+          const latest = mergeRevisionMeta(recordRef.current, saved.revision ?? persisted.meta.revision,
+            persisted.meta.updatedAt ?? persisted.updatedAt);
+          recordRef.current = latest;
+          setRecord(latest);
+          void persistRecord(false);
+          notify('保存 AI 建议时病历有新编辑，已保留最新编辑，请核对后重试', 'info');
+          return false;
+        }
+
+        cancelSaveTimer();
+        historyRef.current.push(previous, message);
+        setUndoVersion((v) => v + 1);
+        mutationSeqRef.current += 1;
         recordRef.current = persisted;
         dirtyRef.current = false;
         setRecord(persisted);
@@ -208,15 +222,11 @@ export function useRecordSession({
 
         const loaded = await repo.loadList();
         if (loaded.ok) setList(loaded.list);
-        if (mutationSeqRef.current !== targetSeq) {
-          dirtyRef.current = true;
-          setDirty(true);
-        }
         notify(message, 'success');
         return true;
       });
     },
-    [cancelSaveTimer, enqueueSave, notify, repo],
+    [cancelSaveTimer, enqueueSave, notify, persistRecord, repo],
   );
 
   const update: UpdateField = useCallback(
@@ -350,6 +360,7 @@ export function useRecordSession({
         const stored = await repo.loadCurrent(item.id);
         const next = RECORD_CORE.cloneValue(stored.ok && stored.record ? stored.record : item.data);
         mutationSeqRef.current += 1;
+        const openSequence = mutationSeqRef.current;
         recordRef.current = next;
         dirtyRef.current = false;
         setRecord(next);
@@ -359,8 +370,12 @@ export function useRecordSession({
         const saved = await repo.saveToLibrary(next, Number(next.meta.revision) || 0);
         if (saved.ok) {
           const persisted = saved.record ?? next;
-          recordRef.current = persisted;
-          setRecord(persisted);
+          const latest = mutationSeqRef.current === openSequence
+            ? persisted
+            : mergeRevisionMeta(recordRef.current, saved.revision ?? persisted.meta.revision,
+              persisted.meta.updatedAt ?? persisted.updatedAt);
+          recordRef.current = latest;
+          setRecord(latest);
         }
         notify(`已打开 ${item.basic?.name || RECORD_CORE.summarize(item).name}`);
         return true;

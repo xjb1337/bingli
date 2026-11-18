@@ -5,7 +5,6 @@ import {
   HINTS,
   RECORD_CORE,
   type DabingliRecord,
-  type DocumentStateResult,
   type DocumentWarning,
   type SoapBasisRow,
   type SoapDiffRow,
@@ -17,6 +16,8 @@ import { Card, FormGrid, StepShell } from '../components/StepShell';
 import type { StepComponentProps } from '../editor-types';
 import { stringAt, useStableListKeys } from '../form-utils';
 import { STEP_DESCRIPTIONS } from '../steps';
+
+type DocumentStateResult = ReturnType<typeof RECORD_CORE.documentState>;
 
 const DOC_LABEL: Record<string, string> = {
   empty: '留空（实时自动生成）',
@@ -709,6 +710,7 @@ export function SummaryStep({
               const next = RECORD_CORE.cloneValue(record);
               next.discharge.diagnoses = diagnoses.slice();
               next.discharge.diagnosesConfirmed = false;
+              RECORD_CORE.markDocumentGenerated(next, 'discharge', 'diagnoses');
               replaceRecord(next, { snapshotLabel: '从初步诊断带入出院诊断' });
             }}
           >
@@ -783,7 +785,11 @@ export function SummaryStep({
           <input
             type="checkbox"
             checked={record.discharge.diagnosesConfirmed}
-            onChange={(event) => update('discharge.diagnosesConfirmed', event.target.checked)}
+            disabled={!dischargeDiagnoses.some((diagnosis) => diagnosis.trim())}
+            onChange={(event) => {
+              if (event.target.checked) confirmDischargeDiagnoses();
+              else update('discharge.diagnosesConfirmed', false);
+            }}
           />
           <span>我已核对并确认以上出院诊断</span>
         </label>

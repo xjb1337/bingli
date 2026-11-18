@@ -11,6 +11,7 @@ import { Collapsible } from '../components/Collapsible';
 import { ConfirmModal, ModalDialog } from '../components/ConfirmModal';
 import { Card, StepShell } from '../components/StepShell';
 import type { StepComponentProps } from '../editor-types';
+import { fieldStoreAt } from '../form-utils';
 import {
   nativeCopyText,
   nativeExportFile,
@@ -99,7 +100,7 @@ function collectPreOutputChecklist(record: DabingliRecord): ChecklistItem[] {
     if (sp) groups.push({ key: `special_${k}`, container: `special_${k}`, items: sp.items });
   });
   groups.forEach((g) => {
-    const store = (record.pe as Record<string, Record<string, unknown>>)[g.container] ?? {};
+    const store = fieldStoreAt(record, `pe.${g.container}`);
     g.items.forEach((it) => {
       const val = String(store[it.key] ?? '').trim();
       if (val) return;

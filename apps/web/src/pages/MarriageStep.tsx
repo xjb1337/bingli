@@ -37,14 +37,14 @@ export function MarriageStep({ record, update, replaceRecord, errors, notify }: 
               <button
                 type="button"
                 className="button primary compact-button"
-                onClick={() => resolveConflict(conflict.basicValue)}
+                onClick={() => resolveConflict(conflict.basicValue ?? '')}
               >
                 采用「{conflict.basicValue || '未填'}」
               </button>
               <button
                 type="button"
                 className="button secondary compact-button"
-                onClick={() => resolveConflict(conflict.marriageValue)}
+                onClick={() => resolveConflict(conflict.marriageValue ?? '')}
               >
                 采用「{conflict.marriageValue || '未填'}」
               </button>

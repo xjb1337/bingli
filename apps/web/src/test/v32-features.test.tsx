@@ -143,9 +143,8 @@ describe('v3.2 record notes and list features', () => {
     expect(screen.getByLabelText('病历数量：2')).toHaveTextContent('2');
     const card = screen.getByRole('heading', { name: '虚构肺炎患者' }).closest('article');
     if (!card) throw new Error('missing record card');
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
     await user.click(within(card).getByRole('button', { name: '复制为新病历' }));
-    expect(confirm).toHaveBeenCalled();
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: '确认复制' }));
 
     await waitFor(async () => {
       const loaded = await repository.loadList();

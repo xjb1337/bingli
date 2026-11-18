@@ -92,7 +92,7 @@ describe('step navigation and keyboard flow', () => {
     await user.type(name, '导航测试患者');
     await user.click(screen.getByRole('button', { name: '下一步' }));
 
-    expect(screen.getByRole('heading', { name: '现病史' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '现病史' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '上一步' }));
 
     expect(screen.getByRole('heading', { name: '基本情况' })).toBeInTheDocument();
@@ -146,7 +146,7 @@ describe('step navigation and keyboard flow', () => {
 
     const directory = screen.getByRole('complementary', { name: '步骤目录' });
     await user.click(within(directory).getByRole('button', { name: /体格检查/ }));
-    expect(screen.getByRole('heading', { name: '体格检查（一）/（二）' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '体格检查（一）/（二）' })).toBeInTheDocument();
 
     await user.click(within(directory).getByRole('button', { name: /生成病历/ }));
     expect(await screen.findByRole('heading', { name: '生成病历' })).toBeInTheDocument();
@@ -164,7 +164,7 @@ describe('step navigation and keyboard flow', () => {
     const directory = screen.getByRole('complementary', { name: '步骤目录' });
     expect(within(directory).queryByRole('button', { name: /系统回顾/ })).not.toBeInTheDocument();
     await user.click(within(directory).getByRole('button', { name: /实验室 \/ 特殊检查/ }));
-    await user.type(screen.getByLabelText('检查项目'), '虚构检查项目');
+    await user.type(await screen.findByLabelText('检查项目'), '虚构检查项目');
     await user.type(screen.getByLabelText('结果'), '虚构检查结果');
     await user.selectOptions(screen.getByLabelText('检查分类'), 'special');
     await waitFor(async () => expect((await repository.loadCurrent()).record?.auxiliary.items[0]?.category).toBe('special'));
@@ -239,7 +239,7 @@ describe('step navigation and keyboard flow', () => {
 
     const directory = screen.getByRole('complementary', { name: '步骤目录' });
     await user.click(within(directory).getByRole('button', { name: /摘要与诊断/ }));
-    await user.click(screen.getByText('问诊补充提示'));
+    await user.click(await screen.findByText('问诊补充提示'));
 
     const code = await screen.findByText('DEPTH_SYMPTOM_QUANTIFICATION');
     const row = code.closest('li');
@@ -248,7 +248,7 @@ describe('step navigation and keyboard flow', () => {
     expect(row).toHaveTextContent('证据：hpi.symptoms');
 
     await user.click(within(row).getByRole('button', { name: '定位' }));
-    expect(screen.getByRole('heading', { name: '现病史' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '现病史' })).toBeInTheDocument();
     await waitFor(() => {
       expect(document.activeElement).toHaveAttribute('data-field-path', 'hpi.symptoms');
     });
