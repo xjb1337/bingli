@@ -15,8 +15,8 @@ android {
         minSdk 26
         targetSdk 35
         testInstrumentationRunner 'android.test.InstrumentationTestRunner'
-        versionCode = (project.findProperty('versionCode') ?: '320001').toInteger()
-        versionName = (project.findProperty('versionName') ?: '3.2.1')
+        versionCode = (project.findProperty('versionCode') ?: '320002').toInteger()
+        versionName = (project.findProperty('versionName') ?: '3.2.2')
         buildConfigField 'String', 'UPDATE_REPOSITORY', '"xjb1337/bingli"'
         buildConfigField 'boolean', 'USE_MODERN_WEB', useModernWeb.toString()
     }

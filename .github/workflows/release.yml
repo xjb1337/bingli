@@ -56,7 +56,6 @@ jobs:
         with:
           node-version: '22'
       - run: npm ci
-      - run: npm ci
       - run: npm run typecheck
       - run: npm run test:domain
       - run: npm run test:storage

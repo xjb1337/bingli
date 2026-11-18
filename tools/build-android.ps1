@@ -1,4 +1,4 @@
-﻿param([string]$VersionName = '3.2.1', [int]$VersionCode = 320001)
+﻿param([string]$VersionName = '3.2.2', [int]$VersionCode = 320002)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $signing = Join-Path $root 'android/.signing'
