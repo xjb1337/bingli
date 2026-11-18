@@ -4,45 +4,92 @@
  * to display it (plain text, HTML, or a future editor).
  */
 
-/** @typedef {'record'|'firstCourse'|'discharge'} DocumentKind */
+import {
+  isBareTimeFragment as sharedIsBareTimeFragment,
+  NEG_HEAD_RE,
+  normalizeNegationScope as sharedNormalizeNegationScope,
+  squashText,
+  stripTail
+} from '../shared/text-utils';
+import type {
+  DiagnosticSeverity,
+  DocumentIR,
+  DocumentKind,
+  DocumentSection,
+  DocumentWarning,
+  Evidence,
+  Fact,
+  FactState,
+  Polarity,
+  SourceKind
+} from '../types';
 
-function clean(value) {
+export interface DocumentIRWithPrefix extends DocumentIR {
+  prefix?: string;
+}
+
+export interface RawSectionInput {
+  title: string;
+  heading?: string;
+  body?: string;
+  paragraphs?: string[];
+  facts?: Array<Fact | RawFactInput | null>;
+  warnings?: ReadonlyArray<Partial<DocumentWarning> | string>;
+}
+
+export interface RawFactInput {
+  path?: string;
+  text?: string;
+  polarity?: Polarity | string;
+  state?: FactState | string;
+  source?: SourceKind | string;
+  reviewed?: boolean;
+  evidence?: Evidence[];
+  onset?: string;
+  duration?: string;
+  laterality?: string;
+}
+
+function clean(value: unknown): string {
   return String(value == null ? '' : value).trim();
 }
 
-function stripTail(value) {
-  return clean(value).replace(/[，,；;。\s]+$/g, '');
-}
-
-function bodyLines(value) {
+function bodyLines(value: unknown): string[] {
   const lines = String(value == null ? '' : value).replace(/\r\n?/g, '\n').replace(/[ \t]+$/gm, '').split('\n');
   while (lines.length && !lines[0].trim()) lines.shift();
   while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
   return lines;
 }
 
-function warningList(warnings) {
-  return (Array.isArray(warnings) ? warnings : []).map((w) => {
+export function warningList(warnings?: ReadonlyArray<Partial<DocumentWarning> | string> | null): DocumentWarning[] {
+  return (Array.isArray(warnings) ? warnings : []).map((w): DocumentWarning => {
     if (typeof w === 'string') {
       return { code: 'GENERAL', severity: 'info', message: clean(w), path: 'document', paths: ['document'] };
     }
-    const paths = Array.isArray(w && w.paths) ? w.paths.map(clean).filter(Boolean) : [];
-    const path = clean(w && w.path) || paths[0] || 'document';
+    const obj = (w || {}) as Partial<DocumentWarning>;
+    const paths = Array.isArray(obj.paths) ? obj.paths.map(clean).filter(Boolean) : [];
+    const path = clean(obj.path) || paths[0] || 'document';
     if (!paths.includes(path)) paths.unshift(path);
     return {
-      code: clean(w && w.code) || 'GENERAL',
-      severity: clean(w && w.severity) || 'info',
-      message: clean(w && w.message),
+      code: clean(obj.code) || 'GENERAL',
+      severity: (clean(obj.severity) || 'info') as DiagnosticSeverity,
+      message: clean(obj.message),
       path,
       paths,
-      document: w && w.document,
-      action: w && w.action,
-      evidence: Array.isArray(w && w.evidence) ? w.evidence.slice() : []
+      document: obj.document,
+      action: obj.action,
+      evidence: Array.isArray(obj.evidence) ? obj.evidence.slice() : []
     };
   });
 }
 
-function section(title, body, facts, warnings, heading) {
+export function section(
+  title: string,
+  body: string,
+  facts?: readonly Fact[],
+  warnings?: ReadonlyArray<Partial<DocumentWarning> | string>,
+  heading?: string
+): DocumentSection {
   return {
     title,
     heading: clean(heading) || title,
@@ -52,17 +99,20 @@ function section(title, body, facts, warnings, heading) {
   };
 }
 
-function createFact(input) {
+export function createFact(input: RawFactInput | null | undefined): Fact | null {
   const source = input || {};
   const text = clean(source.text);
   const path = clean(source.path);
   if (!path || !text) return null;
+  const polarity: Polarity =
+    source.polarity === 'positive' || source.polarity === 'negative' ? source.polarity : 'unknown';
+  const state = clean(source.state) as FactState | '';
   return {
     path,
     text,
-    polarity: source.polarity === 'positive' || source.polarity === 'negative' ? source.polarity : 'unknown',
-    state: clean(source.state) || '',
-    source: clean(source.source) || 'unknown',
+    polarity,
+    state: (state || undefined) as FactState | undefined,
+    source: (clean(source.source) || 'unknown') as SourceKind,
     reviewed: source.reviewed === true,
     evidence: Array.isArray(source.evidence) ? source.evidence.slice() : [{ path, text }],
     onset: clean(source.onset) || undefined,
@@ -71,21 +121,32 @@ function createFact(input) {
   };
 }
 
-function documentFromSections(kind, title, sections, warnings, prefix) {
-  const list = (Array.isArray(sections) ? sections : []).map((item) => {
-    if (!item) return null;
-    if (typeof item === 'string') return section(item, '', [], []);
-    return {
-      title: clean(item.title),
-      heading: clean(item.heading) || clean(item.title),
-      paragraphs: Array.isArray(item.paragraphs)
-        ? bodyLines(item.paragraphs.join('\n'))
-        : bodyLines(item.body),
-      facts: Array.isArray(item.facts) ? item.facts.map(createFact).filter(Boolean) : [],
-      warnings: warningList(item.warnings)
-    };
-  }).filter((item) => item && item.title);
-  const ir = {
+export function documentFromSections(
+  kind: DocumentKind,
+  title: string,
+  sections: ReadonlyArray<RawSectionInput | string | null>,
+  warnings?: ReadonlyArray<Partial<DocumentWarning> | string>,
+  prefix?: string
+): DocumentIRWithPrefix {
+  const list: DocumentSection[] = (Array.isArray(sections) ? sections : [])
+    .map((item): DocumentSection | null => {
+      if (!item) return null;
+      if (typeof item === 'string') return section(item, '', [], []);
+      return {
+        title: clean(item.title),
+        heading: clean(item.heading) || clean(item.title),
+        paragraphs: Array.isArray(item.paragraphs)
+          ? bodyLines(item.paragraphs.join('\n'))
+          : bodyLines(item.body),
+        facts: Array.isArray(item.facts)
+          ? item.facts.map((f: RawFactInput) => createFact(f)).filter((f: Fact | null): f is Fact => f !== null)
+          : [],
+        warnings: warningList(item.warnings)
+      };
+    })
+    .filter((item): item is DocumentSection => item !== null && Boolean(item.title));
+
+  const ir: DocumentIRWithPrefix = {
     kind,
     title,
     prefix: clean(prefix) || undefined,
@@ -97,7 +158,13 @@ function documentFromSections(kind, title, sections, warnings, prefix) {
   return ir;
 }
 
-function fromRecordText(kind, title, text, warnings, sectionTitles) {
+export function fromRecordText(
+  kind: DocumentKind,
+  title: string,
+  text: string,
+  warnings?: ReadonlyArray<Partial<DocumentWarning> | string>,
+  sectionTitles?: readonly string[]
+): DocumentIR {
   const raw = clean(text);
   const chunks = raw.split(/\n(?=【[^】]+】)/).filter(Boolean);
   const sections = chunks.map((chunk) => {
@@ -110,26 +177,50 @@ function fromRecordText(kind, title, text, warnings, sectionTitles) {
       if (!sections.some((s) => s.title === name)) sections.push(section(name, '', [], warnings));
     }
   }
-  return { kind, title, sections, text: raw ? raw + (raw.endsWith('\n') ? '' : '\n') : '', warnings: warningList(warnings) };
+  return {
+    kind,
+    title,
+    sections,
+    text: raw ? raw + (raw.endsWith('\n') ? '' : '\n') : '',
+    warnings: warningList(warnings)
+  };
 }
 
-function fromPlainText(kind, title, text, warnings) {
+export function fromPlainText(
+  kind: DocumentKind,
+  title: string,
+  text: string,
+  warnings?: ReadonlyArray<Partial<DocumentWarning> | string>
+): DocumentIR {
   const raw = clean(text);
-  const sections = raw.split(/\n(?=\S+：)/).filter(Boolean).map((chunk) => {
-    const match = chunk.match(/^([^：\n]+)：\n?([\s\S]*)$/);
-    return match ? section(match[1], match[2], [], warnings) : section(title, chunk, [], warnings);
-  });
-  return { kind, title, sections: sections.length ? sections : [section(title, raw, [], warnings)], text: raw ? raw + '\n' : '', warnings: warningList(warnings) };
+  const sections = raw
+    .split(/\n(?=\S+：)/)
+    .filter(Boolean)
+    .map((chunk) => {
+      const match = chunk.match(/^([^：\n]+)：\n?([\s\S]*)$/);
+      return match ? section(match[1], match[2], [], warnings) : section(title, chunk, [], warnings);
+    });
+  return {
+    kind,
+    title,
+    sections: sections.length ? sections : [section(title, raw, [], warnings)],
+    text: raw ? raw + '\n' : '',
+    warnings: warningList(warnings)
+  };
 }
 
-function renderPlain(ir) {
-  return (ir && Array.isArray(ir.sections) ? ir.sections : []).map((s) => {
-    const body = (s.paragraphs || []).join('\n');
-    return body ? `${s.title}：\n${body}` : `${s.title}：`;
-  }).join('\n') + '\n';
+export function renderPlain(ir: DocumentIR | null | undefined): string {
+  return (
+    (ir && Array.isArray(ir.sections) ? ir.sections : [])
+      .map((s) => {
+        const body = (s.paragraphs || []).join('\n');
+        return body ? `${s.title}：\n${body}` : `${s.title}：`;
+      })
+      .join('\n') + '\n'
+  );
 }
 
-function renderRecord(ir) {
+export function renderRecord(ir: DocumentIRWithPrefix | null | undefined): string {
   const head = clean(ir && ir.prefix);
   const body = (ir && Array.isArray(ir.sections) ? ir.sections : [])
     .map((s) => `【${s.title}】\n${(s.paragraphs || []).join('\n')}`)
@@ -137,18 +228,20 @@ function renderRecord(ir) {
   return (head ? `${head}\n\n` : '') + body + '\n';
 }
 
-function renderNumbered(ir) {
-  const head = clean(ir && ir.prefix) ? `${clean(ir.prefix)}\n` : '';
-  const body = (ir && Array.isArray(ir.sections) ? ir.sections : []).map((s) => {
-    const heading = clean(s.heading) || clean(s.title);
-    const paragraphs = (s.paragraphs || []).join('\n');
-    return paragraphs ? `${heading}\n${paragraphs}` : heading;
-  }).join('\n');
+export function renderNumbered(ir: DocumentIRWithPrefix | null | undefined): string {
+  const head = clean(ir && ir.prefix) ? `${clean(ir && ir.prefix)}\n` : '';
+  const body = (ir && Array.isArray(ir.sections) ? ir.sections : [])
+    .map((s) => {
+      const heading = clean(s.heading) || clean(s.title);
+      const paragraphs = (s.paragraphs || []).join('\n');
+      return paragraphs ? `${heading}\n${paragraphs}` : heading;
+    })
+    .join('\n');
   return head + body + (head || body ? '\n' : '');
 }
 
 /** Render all three document kinds from the same IR contract. */
-function renderDocument(ir) {
+export function renderDocument(ir: DocumentIRWithPrefix | null | undefined): string {
   if (!ir) return '';
   if (ir.kind === 'record') return renderRecord(ir);
   if (ir.kind === 'firstCourse' || ir.kind === 'discharge') return renderNumbered(ir);
@@ -159,12 +252,18 @@ function renderDocument(ir) {
  * 把「一、病历特点」这类编号文书切成 IR 小节。三份文书共用这一入口，
  * 生成器的字符串 API 只作为兼容输出，不再成为数据源。
  */
-function fromNumberedText(kind, title, text, warnings, factsByTitle) {
+export function fromNumberedText(
+  kind: DocumentKind,
+  title: string,
+  text: string,
+  warnings?: ReadonlyArray<Partial<DocumentWarning> | string>,
+  factsByTitle?: Readonly<Record<string, Fact[]>> | readonly Fact[]
+): DocumentIRWithPrefix {
   const raw = clean(text);
   const lines = raw.split(/\n/);
-  const prefix = lines[0] && /^【[^】]+】/.test(lines[0].trim()) ? lines.shift().trim() : '';
-  const sections = [];
-  let current = null;
+  const prefix = lines[0] && /^【[^】]+】/.test(lines[0].trim()) ? clean(lines.shift()) : '';
+  const sections: RawSectionInput[] = [];
+  let current: RawSectionInput | null = null;
   lines.forEach((line) => {
     const match = line.match(/^([一二三四五六七八九十]+、[^\n]+)$/);
     if (match) {
@@ -172,92 +271,45 @@ function fromNumberedText(kind, title, text, warnings, factsByTitle) {
       sections.push(current);
       return;
     }
-    if (clean(line) && current) current.paragraphs.push(clean(line));
+    if (clean(line) && current && current.paragraphs) current.paragraphs.push(clean(line));
   });
   const supplied = Array.isArray(factsByTitle) ? factsByTitle : [];
   sections.forEach((item) => {
-    const pool = factsByTitle && typeof factsByTitle === 'object' && !Array.isArray(factsByTitle)
-      ? (factsByTitle[item.title] || [])
-      : supplied;
+    const pool =
+      factsByTitle && typeof factsByTitle === 'object' && !Array.isArray(factsByTitle)
+        ? ((factsByTitle as Readonly<Record<string, Fact[]>>)[item.title] || [])
+        : supplied;
     item.facts = Array.isArray(pool) ? pool.slice() : [];
   });
   return documentFromSections(kind, title, sections, warnings, prefix);
 }
 
-function isBareTimeFragment(text) {
-  const value = stripTail(text);
-  if (!value) return false;
-  return /^(?:约|大约|近|距今|迄今)?[0-9０-９一二三四五六七八九十百千万两半十几数余]+(?:个)?(?:天|日|周|星期|月|年|小时|分钟|h|min)(?:余|多|来|左右|之后|以后|前|以前)?$/.test(value);
+export function isBareTimeFragment(text: unknown): boolean {
+  return sharedIsBareTimeFragment(text);
 }
 
-function squashed(text) {
-  return clean(text).replace(/[\s，,。；;、：:]+/g, '');
+export function normalizeNegationScope(text: unknown): string {
+  return sharedNormalizeNegationScope(text);
 }
 
-function isNegatedClause(text) {
-  return /^(?:无|未见|未出现|未诉|否认|没有|不伴|无明显|未曾|未)/.test(clean(text));
-}
-
-/**
- * 修正中文阴性清单的作用域。例：
- *   「无发热、咳嗽加重」会被读成「发热和咳嗽都没有」，
- *   但「加重」是阳性病程词，应输出「无发热；咳嗽加重」。
- * 只在后续分句含明确阳性病程词时断开，普通阴性清单（无咯血、盗汗、消瘦）
- * 保持原样，避免把用户原意改坏。
- */
-function normalizeNegationScope(text) {
-  const sentences = clean(text).split(/。/).map(stripTail).filter(Boolean);
-  return sentences.map((sentence) => {
-    const tokens = sentence.split(/([、，,])/);
-    if (tokens.length < 3) return sentence;
-    let out = '';
-    let inheritedNegative = false;
-    tokens.forEach((token, index) => {
-      if (index % 2 === 1) {
-        out += token;
-        return;
-      }
-      const clause = stripTail(token);
-      if (!clause) return;
-      const negated = isNegatedClause(clause);
-      const positiveTurn = /(?:加重|加剧|缓解|好转|减轻|恶化|出现|发生|伴有|伴|再发|复发|增多|减少|持续|反复|转为|变为)/.test(clause);
-      if (index > 0 && inheritedNegative && positiveTurn && !negated) {
-        out = out.replace(/[、，,]$/, '') + '；';
-        inheritedNegative = false;
-      }
-      out += clause;
-      if (negated) inheritedNegative = true;
-      else if (positiveTurn) inheritedNegative = false;
-    });
-    return out.replace(/[、，,；]\s*$/g, '');
-  }).join('。');
-}
-
-function polarityKey(text) {
-  return (isNegatedClause(text) ? 'neg:' : 'pos:') + squashed(text);
+function polarityKey(text: string): string {
+  return (NEG_HEAD_RE.test(clean(text)) ? 'neg:' : 'pos:') + squashText(text);
 }
 
 /**
  * Assemble structured HPI fields into clinical sentences.
- *
- * - A field containing only a time fragment ("3天前") is dropped, never rendered
- *   as "3天前。".
- * - Negation scope is repaired before punctuation assembly.
- * - Exact fragments repeated across different fields are emitted once; repeated
- *   fragments inside one user field are kept because validate() must be able to
- *   warn about them rather than silently destroying the user's original text.
  */
-function assembleClinicalNarrative(parts) {
+export function assembleClinicalNarrative(parts: readonly string[]): string[] {
   const sourceParts = (Array.isArray(parts) ? parts : []).map(clean).filter(Boolean);
-  const prior = [];
-  const sentences = [];
-  let current = [];
+  const prior: string[] = [];
+  const sentences: string[] = [];
+  let current: string[] = [];
 
-  const flush = () => {
+  const flush = (): void => {
     if (current.length) sentences.push(current.join('，'));
     current = [];
   };
-  const redundant = (unit) => {
+  const redundant = (unit: string): boolean => {
     const key = polarityKey(unit);
     const core = key.slice(4);
     if (prior.includes(key)) return true;
@@ -268,13 +320,13 @@ function assembleClinicalNarrative(parts) {
 
   sourceParts.forEach((part) => {
     const units = part.split(/。/).map(stripTail).filter(Boolean);
-    const seenInPart = [];
+    const seenInPart: string[] = [];
     units.forEach((unit, index) => {
       const normalized = normalizeNegationScope(unit);
-      // A repaired negation scope can contain two independent facts
-      // ("无发热；咳嗽加重"). Dedupe each fact against earlier *fields*, while
-      // retaining duplicates that the user typed inside this same field.
-      const kept = normalized.split(/[；;]/).map(stripTail).filter(Boolean)
+      const kept = normalized
+        .split(/[；;]/)
+        .map(stripTail)
+        .filter(Boolean)
         .filter((clause) => !isBareTimeFragment(clause))
         .filter((clause) => !redundant(clause));
       if (!kept.length) return;
@@ -288,7 +340,7 @@ function assembleClinicalNarrative(parts) {
   return sentences;
 }
 
-const DOCUMENT_IR = {
+export const DOCUMENT_IR = {
   section,
   createFact,
   documentFromSections,
@@ -304,6 +356,5 @@ const DOCUMENT_IR = {
   normalizeNegationScope,
   assembleClinicalNarrative
 };
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = DOCUMENT_IR;
-}
+
+export default DOCUMENT_IR;

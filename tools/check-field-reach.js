@@ -153,6 +153,14 @@ function probe(text, value) {
   return 'lost';
 }
 
+/* PR10 入院记录版式刻意不打印的字段（仍保存在 JSON，不在入院记录打印） */
+const EXCLUDED_BY_SPEC = new Set([
+  'basic.nativePlace',
+  'basic.workUnit',
+  'basic.address',
+  'basic.phone',
+]);
+
 const results = [];
 for (const [dotted, value, opts] of FIELDS) {
   const r = SCHEMA.emptyRecord();
@@ -169,9 +177,9 @@ for (const [dotted, value, opts] of FIELDS) {
     results.push([dotted, value, 'error', String(e.message).slice(0, 60)]);
     continue;
   }
-  const verdict = probe(text, value);
+  const verdict = EXCLUDED_BY_SPEC.has(dotted) ? 'excluded_by_spec' : probe(text, value);
   let where = '';
-  if (verdict !== 'ok' && verdict !== 'skip') {
+  if (verdict !== 'ok' && verdict !== 'skip' && verdict !== 'excluded_by_spec') {
     // 找最接近的一行，帮助判读
     const line = text.split('\n').find(l => l.trim() && l.length > 2) || '';
     where = line.slice(0, 40);
@@ -181,9 +189,14 @@ for (const [dotted, value, opts] of FIELDS) {
 
 const lost = results.filter(x => x[2] === 'lost' || x[2] === 'error');
 const wrapped = results.filter(x => x[2] === 'wrapped');
+const excluded = results.filter(x => x[2] === 'excluded_by_spec');
 const ok = results.filter(x => x[2] === 'ok');
 
-console.log(`字段总数 ${results.length}：原样落地 ${ok.length} / 换说法 ${wrapped.length} / 丢失 ${lost.length}`);
+console.log(`字段总数 ${results.length}：原样落地 ${ok.length} / 换说法 ${wrapped.length} / 规格刻意不打印 ${excluded.length} / 丢失 ${lost.length}`);
+if (excluded.length && SHOW_ALL) {
+  console.log('\n[规格刻意不打印 (excluded_by_spec)]');
+  excluded.forEach(x => console.log(`  ${x[0].padEnd(32)} ${JSON.stringify(x[1])}`));
+}
 if (wrapped.length && SHOW_ALL) {
   console.log('\n[换说法]');
   wrapped.forEach(x => console.log(`  ${x[0].padEnd(32)} ${JSON.stringify(x[1])}`));
