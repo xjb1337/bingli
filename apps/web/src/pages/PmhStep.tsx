@@ -38,10 +38,12 @@ export function PmhStep({ record, update, errors }: StepComponentProps) {
           />
         </FormGrid>
         <CheckGroup
+          path="pmh.diseaseChecks"
           label="勾选既往疾病（可多选）"
           values={record.pmh.diseaseChecks}
           options={SCHEMA.COMMON_PMH}
           onChange={toggleMap('pmh.diseaseChecks')}
+          error={errors['pmh.diseaseChecks']}
         />
         <FormGrid>
           <FieldRenderer
@@ -179,10 +181,12 @@ export function PmhStep({ record, update, errors }: StepComponentProps) {
         {allergy === '有' ? (
           <div className="conditional-panel">
             <CheckGroup
+              path="pmh.allergenChecks"
               label="过敏原"
               values={record.pmh.allergenChecks}
               options={SCHEMA.ALLERGENS}
               onChange={toggleMap('pmh.allergenChecks')}
+              error={errors['pmh.allergenChecks']}
             />
             <FormGrid>
               <FieldRenderer
@@ -194,10 +198,12 @@ export function PmhStep({ record, update, errors }: StepComponentProps) {
               />
             </FormGrid>
             <CheckGroup
+              path="pmh.allergenReactionChecks"
               label="过敏反应表现"
               values={record.pmh.allergenReactionChecks}
               options={SCHEMA.ALLERGY_REACTIONS}
               onChange={toggleMap('pmh.allergenReactionChecks')}
+              error={errors['pmh.allergenReactionChecks']}
             />
             <FormGrid>
               <FieldRenderer

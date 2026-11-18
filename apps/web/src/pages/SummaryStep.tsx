@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   DEPTH,
   GENERATOR,
   HINTS,
   RECORD_CORE,
+  type DabingliRecord,
+  type DocumentStateResult,
   type DocumentWarning,
   type SoapBasisRow,
   type SoapDiffRow,
@@ -13,8 +15,46 @@ import { Collapsible } from '../components/Collapsible';
 import { FieldRenderer } from '../components/FieldRenderer';
 import { Card, FormGrid, StepShell } from '../components/StepShell';
 import type { StepComponentProps } from '../editor-types';
-import { stringAt } from '../form-utils';
+import { stringAt, useStableListKeys } from '../form-utils';
 import { STEP_DESCRIPTIONS } from '../steps';
+
+const DOC_LABEL: Record<string, string> = {
+  empty: '留空（实时自动生成）',
+  fresh: '与最新资料同步',
+  reviewed: '已核对',
+  manual: '手工修改（已保留）',
+  stale: '已过期（原始资料有更新）',
+  'manual-stale': '手工文字未同步更新',
+  legacy: '旧存档迁移（来源待核对）',
+};
+
+const GROUP_NAME: Record<string, string> = {
+  identity: '身份与主诉',
+  hpi: '现病史',
+  pe: '体格检查',
+  aux: '辅助检查',
+  diagnoses: '诊断',
+};
+
+function docTone(st: DocumentStateResult | null): string {
+  if (!st) return 'muted';
+  if (/(^|-)stale$/.test(st.state)) return 'stale';
+  if (st.state === 'reviewed' || st.state === 'fresh') return 'ok';
+  if (st.state === 'manual') return 'manual';
+  return 'muted';
+}
+
+function changedGroupsText(st: DocumentStateResult | null): string {
+  return (st?.changed ?? []).map((k) => GROUP_NAME[k] ?? k).join('、');
+}
+
+function safeDocState(record: DabingliRecord, kind: string, section?: string): DocumentStateResult | null {
+  try {
+    return RECORD_CORE.documentState(record, kind, section);
+  } catch {
+    return null;
+  }
+}
 
 function WarningList({
   warnings,
@@ -48,26 +88,195 @@ function WarningList({
   );
 }
 
-export function SummaryStep({ record, update, errors, onJump }: StepComponentProps) {
+type SoapSegmentKey = 's' | 'oPe' | 'oAux' | 'basis';
+
+function soapDraftFor(record: DabingliRecord, seg: SoapSegmentKey): string {
+  switch (seg) {
+    case 's':
+      return GENERATOR.draftCaseSummary(record);
+    case 'oPe':
+      return GENERATOR.draftObjectivePE(record);
+    case 'oAux':
+      return GENERATOR.draftObjectiveAux(record);
+    case 'basis':
+      return GENERATOR.buildBasisSection(record, { fresh: true });
+  }
+}
+
+export function SummaryStep({
+  record,
+  update,
+  replaceRecord,
+  errors,
+  onJump,
+  notify,
+  warnings: warningsProp,
+  onUndo,
+  canUndo,
+}: StepComponentProps) {
   const [newDiagnosis, setNewDiagnosis] = useState('');
-  const warnings = GENERATOR.validateStructured(record);
-  const hints = HINTS.analyze(record);
-  const depth = DEPTH.check(record);
+  const warnings = useMemo(
+    () => warningsProp ?? GENERATOR.validateStructured(record),
+    [record, warningsProp],
+  );
+  const hints = useMemo(() => HINTS.analyze(record), [record]);
+  const depth = useMemo(() => DEPTH.check(record), [record]);
+  const draftSummary = useMemo(() => GENERATOR.draftSummary(record), [record]);
+
   const diagnoses = record.diagnosis.confirmed;
   const basisRows = record.soap.a.basisDetail;
   const diffRows = record.soap.a.diff;
   const planRows = record.soap.p.perDiagnosis;
-  const draftSummary = GENERATOR.draftSummary(record);
+  const dischargeDiagnoses = record.discharge.diagnoses;
+
+  const diagKeys = useStableListKeys(diagnoses.length, record.id);
+  const basisKeys = useStableListKeys(basisRows.length, record.id);
+  const diffKeys = useStableListKeys(diffRows.length, record.id);
+  const planKeys = useStableListKeys(planRows.length, record.id);
+  const dischargeDxKeys = useStableListKeys(dischargeDiagnoses.length, record.id);
+
+  const summaryState = useMemo(() => safeDocState(record, 'summary'), [record]);
+  const soapStates = useMemo(
+    () => ({
+      s: safeDocState(record, 'firstCourse', 's'),
+      oPe: safeDocState(record, 'firstCourse', 'oPe'),
+      oAux: safeDocState(record, 'firstCourse', 'oAux'),
+      basis: safeDocState(record, 'firstCourse', 'basis'),
+    }),
+    [record],
+  );
+  const admitState = useMemo(() => safeDocState(record, 'discharge', 'admitCondition'), [record]);
+  const dischargeDxState = useMemo(() => safeDocState(record, 'discharge', 'diagnoses'), [record]);
 
   function addDiagnosis(value: string) {
     const diagnosis = value.trim();
     if (!diagnosis || diagnoses.includes(diagnosis)) return;
-    update('diagnosis.confirmed', [...diagnoses, diagnosis]);
+    update('diagnosis.confirmed', [...diagnoses, diagnosis], { snapshotLabel: `添加诊断：${diagnosis}` });
     setNewDiagnosis('');
   }
 
   function updateArray<T>(path: string, rows: readonly T[], index: number, patch: Partial<T>) {
     update(path, rows.map((row, rowIndex) => (rowIndex === index ? { ...row, ...patch } : row)));
+  }
+
+  function adoptDraftSummary() {
+    const next = RECORD_CORE.cloneValue(record);
+    next.summary = GENERATOR.draftSummary(next);
+    RECORD_CORE.markDocumentGenerated(next, 'summary');
+    replaceRecord(next, { snapshotLabel: '更新摘要草稿' });
+    notify('已采用最新摘要草稿；旧摘要可通过撤销恢复', 'success');
+  }
+
+  function keepSummaryReviewed() {
+    const next = RECORD_CORE.cloneValue(record);
+    RECORD_CORE.markDocumentReviewed(next, 'summary');
+    replaceRecord(next, { snapshotLabel: '标记摘要已核对' });
+    notify('已按当前摘要文字标记核对；资料再变化时会重新提示', 'success');
+  }
+
+  function draftAllBlankSoap() {
+    const next = RECORD_CORE.cloneValue(record);
+    const fillSeg = (seg: SoapSegmentKey, path: string, current: string, text: string) => {
+      if (current.trim() || !text) return;
+      RECORD_CORE.setPath(next, path, text);
+      RECORD_CORE.markDocumentGenerated(next, 'firstCourse', seg);
+    };
+    fillSeg('s', 'soap.s.summary', next.soap.s.summary, GENERATOR.draftCaseSummary(next));
+    fillSeg('oPe', 'soap.o.pe', next.soap.o.pe, GENERATOR.draftObjectivePE(next));
+    fillSeg('oAux', 'soap.o.aux', next.soap.o.aux, GENERATOR.draftObjectiveAux(next));
+    fillSeg('basis', 'soap.a.basis', next.soap.a.basis, GENERATOR.buildBasisSection(next));
+    if (!next.soap.a.basisDetail.length) {
+      next.soap.a.basisDetail = GENERATOR.draftBasisDetail(next);
+      RECORD_CORE.markDocumentGenerated(next, 'firstCourse', 'basis');
+    }
+    replaceRecord(next, { snapshotLabel: '补全首次病程录空白段落' });
+    notify('已补全空白段落，已有手写内容未改动', 'success');
+  }
+
+  function updateSoapSeg(seg: SoapSegmentKey) {
+    const next = RECORD_CORE.cloneValue(record);
+    if (seg === 'basis') {
+      next.soap.a.basisDetail = GENERATOR.draftBasisDetail(next, { fresh: true });
+      next.soap.a.basis = '';
+    } else {
+      const pathMap: Record<Exclude<SoapSegmentKey, 'basis'>, string> = {
+        s: 'soap.s.summary',
+        oPe: 'soap.o.pe',
+        oAux: 'soap.o.aux',
+      };
+      RECORD_CORE.setPath(next, pathMap[seg], soapDraftFor(next, seg));
+    }
+    RECORD_CORE.markDocumentGenerated(next, 'firstCourse', seg);
+    replaceRecord(next, { snapshotLabel: `更新 SOAP ${seg} 段` });
+    notify('已更新该段，其他段落未改动', 'success');
+  }
+
+  function reviewSoapSeg(seg: SoapSegmentKey) {
+    const next = RECORD_CORE.cloneValue(record);
+    RECORD_CORE.markDocumentReviewed(next, 'firstCourse', seg);
+    replaceRecord(next, { snapshotLabel: `标记 SOAP ${seg} 已核对` });
+    notify('已按当前文字标记核对', 'success');
+  }
+
+  function updateAdmitCondition() {
+    const next = RECORD_CORE.cloneValue(record);
+    next.discharge.admitCondition = GENERATOR.draftAdmitCondition(next);
+    RECORD_CORE.markDocumentGenerated(next, 'discharge', 'admitCondition');
+    replaceRecord(next, { snapshotLabel: '更新入院情况' });
+    notify('已按当前资料重写入院情况；旧文字可通过撤销恢复', 'success');
+  }
+
+  function confirmDischargeDiagnoses() {
+    const valid = dischargeDiagnoses.map((x) => x.trim()).filter(Boolean);
+    if (!valid.length) {
+      notify('出院诊断还没有内容');
+      return;
+    }
+    const next = RECORD_CORE.cloneValue(record);
+    next.discharge.diagnosesConfirmed = true;
+    RECORD_CORE.markDocumentReviewed(next, 'discharge', 'diagnoses');
+    replaceRecord(next, { snapshotLabel: '确认出院诊断' });
+    notify('出院诊断已确认；初步诊断再变化时会提示差异', 'success');
+  }
+
+  function renderSoapStateBar(seg: SoapSegmentKey, title: string) {
+    const st = soapStates[seg];
+    if (!st) return null;
+    if (st.state === 'empty') {
+      return (
+        <div className="doc-state doc-state-muted" data-doc-state={`fc-${seg}`}>
+          <div className="doc-state-title">{title}：留空时按当前资料自动生成，未写入存档。</div>
+        </div>
+      );
+    }
+    const stale = /(^|-)stale$/.test(st.state);
+    const changed = changedGroupsText(st);
+    const draft = stale ? soapDraftFor(record, seg) : '';
+    return (
+      <div className={`doc-state doc-state-${docTone(st)}`} data-doc-state={`fc-${seg}`}>
+        <div className="doc-state-title">
+          {title}：{DOC_LABEL[st.state] ?? st.state}
+          {stale && changed ? `（${changed}已变化）` : ''}
+        </div>
+        {stale ? (
+          <details className="doc-diff">
+            <summary>对比最新草稿</summary>
+            <div className="doc-diff-label">现有文字</div>
+            <pre className="document-preview small">{st.text}</pre>
+            <div className="doc-diff-label">最新草稿</div>
+            <pre className="document-preview small">{draft}</pre>
+          </details>
+        ) : null}
+        <div className="button-row compact">
+          <button type="button" className="button secondary compact-button" onClick={() => updateSoapSeg(seg)}>
+            更新此段
+          </button>
+          <button type="button" className="button ghost compact-button" onClick={() => reviewSoapSeg(seg)}>
+            标记已核对
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -84,13 +293,13 @@ export function SummaryStep({ record, update, errors, onJump }: StepComponentPro
         <div className="diagnosis-list">
           {diagnoses.length ? (
             diagnoses.map((diagnosis, index) => (
-              <div className="inline-row" key={`${diagnosis}-${index}`}>
+              <div className="inline-row" key={diagKeys.keys[index]}>
                 <span className="diagnosis-number">{index + 1}.</span>
                 <input
                   type="text"
                   value={diagnosis}
                   aria-label={`诊断 ${index + 1}`}
-                  data-field-path={index === 0 ? 'diagnosis.confirmed' : undefined}
+                  data-field-path="diagnosis.confirmed"
                   onChange={(event) => {
                     const next = [...diagnoses];
                     next[index] = event.target.value;
@@ -100,7 +309,14 @@ export function SummaryStep({ record, update, errors, onJump }: StepComponentPro
                 <button
                   type="button"
                   className="button ghost compact-button"
-                  onClick={() => update('diagnosis.confirmed', diagnoses.filter((_, row) => row !== index))}
+                  onClick={() => {
+                    diagKeys.removeKeyAt(index);
+                    update(
+                      'diagnosis.confirmed',
+                      diagnoses.filter((_, row) => row !== index),
+                      { snapshotLabel: `删除诊断 ${index + 1}` },
+                    );
+                  }}
                 >
                   删除
                 </button>
@@ -130,7 +346,7 @@ export function SummaryStep({ record, update, errors, onJump }: StepComponentPro
           </button>
         </div>
         {errors['diagnosis.confirmed'] ? (
-          <div className="field-error">{errors['diagnosis.confirmed']}</div>
+          <div className="field-error" role="alert">{errors['diagnosis.confirmed']}</div>
         ) : null}
         <FieldRenderer
           path="diagnosis.signature"
@@ -168,11 +384,50 @@ export function SummaryStep({ record, update, errors, onJump }: StepComponentPro
       </Card>
 
       <Card title="病历摘要">
+        {summaryState ? (
+          summaryState.state === 'empty' ? (
+            <div className="doc-state doc-state-muted" data-doc-state="summary">
+              <div className="doc-state-title">摘要为空：生成时实时使用自动草稿，未写入存档。</div>
+            </div>
+          ) : (
+            <div className={`doc-state doc-state-${docTone(summaryState)}`} data-doc-state="summary">
+              <div className="doc-state-title">
+                摘要状态：{DOC_LABEL[summaryState.state] ?? summaryState.state}
+                {/(^|-)stale$/.test(summaryState.state) && changedGroupsText(summaryState)
+                  ? `（${changedGroupsText(summaryState)}已变化）`
+                  : ''}
+              </div>
+              {/(^|-)stale$/.test(summaryState.state) ? (
+                <details className="doc-diff">
+                  <summary>对比最新自动草稿</summary>
+                  <div className="doc-diff-label">现有摘要</div>
+                  <pre className="document-preview small">{summaryState.text}</pre>
+                  <div className="doc-diff-label">最新自动草稿</div>
+                  <pre className="document-preview small">{draftSummary}</pre>
+                </details>
+              ) : null}
+              <div className="button-row compact">
+                <button type="button" className="button secondary compact-button" onClick={adoptDraftSummary}>
+                  采用新草稿
+                </button>
+                <button type="button" className="button ghost compact-button" onClick={keepSummaryReviewed}>
+                  保留原文并标记已核对
+                </button>
+                {onUndo && canUndo ? (
+                  <button type="button" className="button ghost compact-button" onClick={() => void onUndo()}>
+                    撤销上一步
+                  </button>
+                ) : null}
+              </div>
+              <p className="field-hint">「保留原文」只确认当前文字，不会因为资料变化自动改写。</p>
+            </div>
+          )
+        ) : null}
         <div className="button-row compact">
           <button
             type="button"
             className="button secondary"
-            onClick={() => update('summary', draftSummary)}
+            onClick={adoptDraftSummary}
           >
             使用自动初稿
           </button>
@@ -189,7 +444,7 @@ export function SummaryStep({ record, update, errors, onJump }: StepComponentPro
           error={errors.summary}
         />
         {draftSummary ? (
-          <Collapsible title="查看当前自动摘要草稿">
+          <Collapsible title="查看当前自动摘要草稿" syncKey={record.id}>
             <pre className="document-preview small">{draftSummary}</pre>
           </Collapsible>
         ) : null}
@@ -199,7 +454,13 @@ export function SummaryStep({ record, update, errors, onJump }: StepComponentPro
         title="首次病程录（SOAP）"
         className="major-collapsible"
         defaultOpen={Boolean(record.soap.s.summary || record.soap.a.basis)}
+        syncKey={record.id}
       >
+        <div className="button-row compact">
+          <button type="button" className="button secondary" onClick={draftAllBlankSoap}>
+            补全空白段落
+          </button>
+        </div>
         <FieldRenderer
           path="soap.recordTime"
           label="首次病程录记录时间"
@@ -209,7 +470,8 @@ export function SummaryStep({ record, update, errors, onJump }: StepComponentPro
           error={errors['soap.recordTime']}
         />
 
-        <Collapsible title="S 主观资料" defaultOpen>
+        <Collapsible title="S 主观资料" defaultOpen syncKey={record.id}>
+          {renderSoapStateBar('s', 'S 段')}
           <FormGrid>
             <FieldRenderer
               path="soap.s.summary"
@@ -233,7 +495,9 @@ export function SummaryStep({ record, update, errors, onJump }: StepComponentPro
           </FormGrid>
         </Collapsible>
 
-        <Collapsible title="O 客观资料">
+        <Collapsible title="O 客观资料" syncKey={record.id}>
+          {renderSoapStateBar('oPe', 'O 段·体格检查')}
+          {renderSoapStateBar('oAux', 'O 段·辅助检查')}
           <FormGrid>
             <FieldRenderer
               path="soap.o.pe"
@@ -257,7 +521,8 @@ export function SummaryStep({ record, update, errors, onJump }: StepComponentPro
           </FormGrid>
         </Collapsible>
 
-        <Collapsible title="A 评估与鉴别" defaultOpen={Boolean(record.soap.a.basis)}>
+        <Collapsible title="A 评估与鉴别" defaultOpen={Boolean(record.soap.a.basis)} syncKey={record.id}>
+          {renderSoapStateBar('basis', 'A 段·诊断依据')}
           <FieldRenderer
             path="soap.a.basis"
             label="诊断依据概述"
@@ -269,43 +534,83 @@ export function SummaryStep({ record, update, errors, onJump }: StepComponentPro
           />
           <div className="array-list compact-list">
             {basisRows.map((row: SoapBasisRow, index) => (
-              <div className="soap-row" key={index}>
+              <div className="soap-row" key={basisKeys.keys[index]}>
                 <div className="array-card-head">
                   <strong>诊断依据 {index + 1}</strong>
-                  <button type="button" className="button ghost compact-button" onClick={() => update('soap.a.basisDetail', basisRows.filter((_, rowIndex) => rowIndex !== index))}>删除</button>
+                  <button
+                    type="button"
+                    className="button ghost compact-button"
+                    onClick={() => {
+                      basisKeys.removeKeyAt(index);
+                      update(
+                        'soap.a.basisDetail',
+                        basisRows.filter((_, rowIndex) => rowIndex !== index),
+                        { snapshotLabel: `删除诊断依据 ${index + 1}` },
+                      );
+                    }}
+                  >
+                    删除
+                  </button>
                 </div>
-                <input type="text" aria-label={`依据诊断 ${index + 1}`} data-field-path={index === 0 ? 'soap.a.basisDetail' : undefined} value={row.diagnosis ?? ''} placeholder="诊断名称" onChange={(event) => updateArray('soap.a.basisDetail', basisRows, index, { diagnosis: event.target.value })} />
-                <input type="text" aria-label={`依据病史 ${index + 1}`} value={row.history ?? ''} placeholder="① 病史依据" onChange={(event) => updateArray('soap.a.basisDetail', basisRows, index, { history: event.target.value })} />
-                <input type="text" aria-label={`依据体检 ${index + 1}`} value={row.pe ?? ''} placeholder="② 体检依据" onChange={(event) => updateArray('soap.a.basisDetail', basisRows, index, { pe: event.target.value })} />
-                <input type="text" aria-label={`依据检查 ${index + 1}`} value={row.aux ?? ''} placeholder="③ 辅助检查依据" onChange={(event) => updateArray('soap.a.basisDetail', basisRows, index, { aux: event.target.value })} />
+                <input type="text" aria-label={`依据诊断 ${index + 1}`} data-field-path="soap.a.basisDetail" value={row.diagnosis ?? ''} placeholder="诊断名称" onChange={(event) => updateArray('soap.a.basisDetail', basisRows, index, { diagnosis: event.target.value })} />
+                <input type="text" aria-label={`依据病史 ${index + 1}`} data-field-path="soap.a.basisDetail" value={row.history ?? ''} placeholder="① 病史依据" onChange={(event) => updateArray('soap.a.basisDetail', basisRows, index, { history: event.target.value })} />
+                <input type="text" aria-label={`依据体检 ${index + 1}`} data-field-path="soap.a.basisDetail" value={row.pe ?? ''} placeholder="② 体检依据" onChange={(event) => updateArray('soap.a.basisDetail', basisRows, index, { pe: event.target.value })} />
+                <input type="text" aria-label={`依据检查 ${index + 1}`} data-field-path="soap.a.basisDetail" value={row.aux ?? ''} placeholder="③ 辅助检查依据" onChange={(event) => updateArray('soap.a.basisDetail', basisRows, index, { aux: event.target.value })} />
               </div>
             ))}
           </div>
-          <button type="button" className="button secondary" data-field-path={basisRows.length === 0 ? 'soap.a.basisDetail' : undefined} onClick={() => update('soap.a.basisDetail', [...basisRows, { diagnosis: '', history: '', pe: '', aux: '' }])}>+ 添加诊断依据</button>
+          <button
+            type="button"
+            className="button secondary"
+            data-field-path={basisRows.length === 0 ? 'soap.a.basisDetail' : undefined}
+            onClick={() => update('soap.a.basisDetail', [...basisRows, { diagnosis: '', history: '', pe: '', aux: '' }])}
+          >
+            + 添加诊断依据
+          </button>
 
           <div className="array-list compact-list">
             {diffRows.map((row: SoapDiffRow, index) => (
-              <div className="soap-row" key={index}>
+              <div className="soap-row" key={diffKeys.keys[index]}>
                 <div className="array-card-head">
                   <strong>鉴别诊断 {index + 1}</strong>
-                  <button type="button" className="button ghost compact-button" onClick={() => update('soap.a.diff', diffRows.filter((_, rowIndex) => rowIndex !== index))}>删除</button>
+                  <button
+                    type="button"
+                    className="button ghost compact-button"
+                    onClick={() => {
+                      diffKeys.removeKeyAt(index);
+                      update(
+                        'soap.a.diff',
+                        diffRows.filter((_, rowIndex) => rowIndex !== index),
+                        { snapshotLabel: `删除鉴别诊断 ${index + 1}` },
+                      );
+                    }}
+                  >
+                    删除
+                  </button>
                 </div>
-                <input type="text" aria-label={`鉴别诊断 ${index + 1}`} data-field-path={index === 0 ? 'soap.a.diff' : undefined} value={row.diagnosis ?? ''} placeholder="需要鉴别的疾病" onChange={(event) => updateArray('soap.a.diff', diffRows, index, { diagnosis: event.target.value })} />
-                <input type="text" aria-label={`鉴别支持点 ${index + 1}`} value={row.why ?? ''} placeholder="支持点" onChange={(event) => updateArray('soap.a.diff', diffRows, index, { why: event.target.value })} />
-                <input type="text" aria-label={`鉴别不支持点 ${index + 1}`} value={row.against ?? ''} placeholder="不支持点" onChange={(event) => updateArray('soap.a.diff', diffRows, index, { against: event.target.value })} />
-                <input type="text" aria-label={`鉴别要点 ${index + 1}`} value={row.points ?? ''} placeholder="鉴别要点（可留空）" onChange={(event) => updateArray('soap.a.diff', diffRows, index, { points: event.target.value })} />
+                <input type="text" aria-label={`鉴别诊断 ${index + 1}`} data-field-path="soap.a.diff" value={row.diagnosis ?? ''} placeholder="需要鉴别的疾病" onChange={(event) => updateArray('soap.a.diff', diffRows, index, { diagnosis: event.target.value })} />
+                <input type="text" aria-label={`鉴别支持点 ${index + 1}`} data-field-path="soap.a.diff" value={row.why ?? ''} placeholder="支持点" onChange={(event) => updateArray('soap.a.diff', diffRows, index, { why: event.target.value })} />
+                <input type="text" aria-label={`鉴别不支持点 ${index + 1}`} data-field-path="soap.a.diff" value={row.against ?? ''} placeholder="不支持点" onChange={(event) => updateArray('soap.a.diff', diffRows, index, { against: event.target.value })} />
+                <input type="text" aria-label={`鉴别要点 ${index + 1}`} data-field-path="soap.a.diff" value={row.points ?? ''} placeholder="鉴别要点（可留空）" onChange={(event) => updateArray('soap.a.diff', diffRows, index, { points: event.target.value })} />
               </div>
             ))}
           </div>
-          <button type="button" className="button secondary" data-field-path={diffRows.length === 0 ? 'soap.a.diff' : undefined} onClick={() => update('soap.a.diff', [...diffRows, { diagnosis: '', why: '', against: '', points: '' }])}>+ 添加鉴别诊断</button>
-          {errors['soap.a.diff'] ? <div className="field-error">{errors['soap.a.diff']}</div> : null}
+          <button
+            type="button"
+            className="button secondary"
+            data-field-path={diffRows.length === 0 ? 'soap.a.diff' : undefined}
+            onClick={() => update('soap.a.diff', [...diffRows, { diagnosis: '', why: '', against: '', points: '' }])}
+          >
+            + 添加鉴别诊断
+          </button>
+          {errors['soap.a.diff'] ? <div className="field-error" role="alert">{errors['soap.a.diff']}</div> : null}
           <FormGrid>
             <FieldRenderer path="soap.a.ranking" label="诊断主次排序说明" value={stringAt(record, 'soap.a.ranking')} onChange={update} error={errors['soap.a.ranking']} />
             <FieldRenderer path="soap.a.diffNote" label="鉴别诊断补充说明" value={stringAt(record, 'soap.a.diffNote')} onChange={update} kind="textarea" rows={2} error={errors['soap.a.diffNote']} />
           </FormGrid>
         </Collapsible>
 
-        <Collapsible title="P 诊疗计划" defaultOpen={Boolean(record.soap.p.principle)}>
+        <Collapsible title="P 诊疗计划" defaultOpen={Boolean(record.soap.p.principle)} syncKey={record.id}>
           <FieldRenderer
             path="soap.p.principle"
             label="诊疗计划总述"
@@ -317,19 +622,39 @@ export function SummaryStep({ record, update, errors, onJump }: StepComponentPro
           />
           <div className="array-list compact-list">
             {planRows.map((row: SoapPlanRow, index) => (
-              <div className="soap-row" key={index}>
+              <div className="soap-row" key={planKeys.keys[index]}>
                 <div className="array-card-head">
                   <strong>诊疗计划 {index + 1}</strong>
-                  <button type="button" className="button ghost compact-button" onClick={() => update('soap.p.perDiagnosis', planRows.filter((_, rowIndex) => rowIndex !== index))}>删除</button>
+                  <button
+                    type="button"
+                    className="button ghost compact-button"
+                    onClick={() => {
+                      planKeys.removeKeyAt(index);
+                      update(
+                        'soap.p.perDiagnosis',
+                        planRows.filter((_, rowIndex) => rowIndex !== index),
+                        { snapshotLabel: `删除诊疗计划 ${index + 1}` },
+                      );
+                    }}
+                  >
+                    删除
+                  </button>
                 </div>
-                <input type="text" aria-label={`计划诊断 ${index + 1}`} data-field-path={index === 0 ? 'soap.p.perDiagnosis' : undefined} value={row.diagnosis ?? ''} placeholder="诊断名称" onChange={(event) => updateArray('soap.p.perDiagnosis', planRows, index, { diagnosis: event.target.value })} />
-                <input type="text" aria-label={`计划检查 ${index + 1}`} value={row.exam ?? ''} placeholder="拟完善的检查" onChange={(event) => updateArray('soap.p.perDiagnosis', planRows, index, { exam: event.target.value })} />
-                <input type="text" aria-label={`计划治疗 ${index + 1}`} value={row.treatment ?? ''} placeholder="治疗措施" onChange={(event) => updateArray('soap.p.perDiagnosis', planRows, index, { treatment: event.target.value })} />
+                <input type="text" aria-label={`计划诊断 ${index + 1}`} data-field-path="soap.p.perDiagnosis" value={row.diagnosis ?? ''} placeholder="诊断名称" onChange={(event) => updateArray('soap.p.perDiagnosis', planRows, index, { diagnosis: event.target.value })} />
+                <input type="text" aria-label={`计划检查 ${index + 1}`} data-field-path="soap.p.perDiagnosis" value={row.exam ?? ''} placeholder="拟完善的检查" onChange={(event) => updateArray('soap.p.perDiagnosis', planRows, index, { exam: event.target.value })} />
+                <input type="text" aria-label={`计划治疗 ${index + 1}`} data-field-path="soap.p.perDiagnosis" value={row.treatment ?? ''} placeholder="治疗措施" onChange={(event) => updateArray('soap.p.perDiagnosis', planRows, index, { treatment: event.target.value })} />
               </div>
             ))}
           </div>
-          <button type="button" className="button secondary" data-field-path={planRows.length === 0 ? 'soap.p.perDiagnosis' : undefined} onClick={() => update('soap.p.perDiagnosis', [...planRows, { diagnosis: '', exam: '', treatment: '' }])}>+ 添加诊疗计划</button>
-          {errors['soap.p.perDiagnosis'] ? <div className="field-error">{errors['soap.p.perDiagnosis']}</div> : null}
+          <button
+            type="button"
+            className="button secondary"
+            data-field-path={planRows.length === 0 ? 'soap.p.perDiagnosis' : undefined}
+            onClick={() => update('soap.p.perDiagnosis', [...planRows, { diagnosis: '', exam: '', treatment: '' }])}
+          >
+            + 添加诊疗计划
+          </button>
+          {errors['soap.p.perDiagnosis'] ? <div className="field-error" role="alert">{errors['soap.p.perDiagnosis']}</div> : null}
           <FieldRenderer
             path="soap.p.individual"
             label="个体化说明"
@@ -346,7 +671,28 @@ export function SummaryStep({ record, update, errors, onJump }: StepComponentPro
         title="出院记录"
         className="major-collapsible"
         defaultOpen={Boolean(record.discharge.admitCondition || record.discharge.course)}
+        syncKey={record.id}
       >
+        {admitState && admitState.state !== 'empty' ? (
+          <div className={`doc-state doc-state-${docTone(admitState)}`} data-doc-state="discharge-admit">
+            <div className="doc-state-title">
+              入院情况：{DOC_LABEL[admitState.state] ?? admitState.state}
+              {/(^|-)stale$/.test(admitState.state) && changedGroupsText(admitState)
+                ? `（${changedGroupsText(admitState)}已变化）`
+                : ''}
+            </div>
+            {/(^|-)stale$/.test(admitState.state) ? (
+              <>
+                <p className="field-hint">已确认的入院情况不会被后来更新的出院查体悄悄改写；如需按当前资料重写，请点「更新入院情况」。</p>
+                <div className="button-row compact">
+                  <button type="button" className="button secondary compact-button" onClick={updateAdmitCondition}>
+                    更新入院情况
+                  </button>
+                </div>
+              </>
+            ) : null}
+          </div>
+        ) : null}
         <FormGrid>
           <FieldRenderer path="discharge.dischargeDate" label="出院日期" value={stringAt(record, 'discharge.dischargeDate')} onChange={update} kind="date" error={errors['discharge.dischargeDate']} />
           <FieldRenderer path="discharge.course" label="诊疗经过" value={stringAt(record, 'discharge.course')} onChange={update} kind="textarea" rows={4} error={errors['discharge.course']} />
@@ -360,47 +706,76 @@ export function SummaryStep({ record, update, errors, onJump }: StepComponentPro
             type="button"
             className="button ghost compact-button"
             onClick={() => {
-              update('discharge.diagnoses', diagnoses.slice());
-              update('discharge.diagnosesConfirmed', false);
+              const next = RECORD_CORE.cloneValue(record);
+              next.discharge.diagnoses = diagnoses.slice();
+              next.discharge.diagnosesConfirmed = false;
+              replaceRecord(next, { snapshotLabel: '从初步诊断带入出院诊断' });
             }}
           >
             从初步诊断带入
           </button>
         </div>
+        {dischargeDxState ? (
+          !dischargeDiagnoses.length ? (
+            <div className="doc-state doc-state-muted" data-doc-state="discharge-dx">
+              <div className="doc-state-title">出院诊断：待填写。不会自动沿用初步诊断。</div>
+            </div>
+          ) : (
+            <div
+              className={`doc-state doc-state-${record.discharge.diagnosesConfirmed ? 'ok' : 'stale'}`}
+              data-doc-state="discharge-dx"
+            >
+              <div className="doc-state-title">
+                出院诊断：{record.discharge.diagnosesConfirmed ? '已确认' : '已填写，尚未确认'}
+              </div>
+              {dischargeDxState.state === 'legacy' ? (
+                <p className="field-hint">这份出院诊断来自旧存档，来源无法判断，请核对。</p>
+              ) : null}
+              <div className="button-row compact">
+                <button type="button" className="button secondary compact-button" onClick={confirmDischargeDiagnoses}>
+                  确认出院诊断
+                </button>
+              </div>
+            </div>
+          )
+        ) : null}
         <div className="diagnosis-list">
-          {record.discharge.diagnoses.map((diagnosis, index) => (
-            <div className="inline-row" key={index}>
+          {dischargeDiagnoses.map((diagnosis, index) => (
+            <div className="inline-row" key={dischargeDxKeys.keys[index]}>
               <input
                 type="text"
                 value={diagnosis}
                 aria-label={`出院诊断 ${index + 1}`}
-                data-field-path={index === 0 ? 'discharge.diagnoses' : undefined}
+                data-field-path="discharge.diagnoses"
                 onChange={(event) => {
-                  const next = [...record.discharge.diagnoses];
-                  next[index] = event.target.value;
-                  update('discharge.diagnoses', next);
-                  update('discharge.diagnosesConfirmed', false);
+                  const next = RECORD_CORE.cloneValue(record);
+                  next.discharge.diagnoses[index] = event.target.value;
+                  next.discharge.diagnosesConfirmed = false;
+                  replaceRecord(next);
                 }}
               />
               <button
                 type="button"
                 className="button ghost compact-button"
                 onClick={() => {
-                  update('discharge.diagnoses', record.discharge.diagnoses.filter((_, row) => row !== index));
-                  update('discharge.diagnosesConfirmed', false);
+                  dischargeDxKeys.removeKeyAt(index);
+                  const next = RECORD_CORE.cloneValue(record);
+                  next.discharge.diagnoses = dischargeDiagnoses.filter((_, row) => row !== index);
+                  next.discharge.diagnosesConfirmed = false;
+                  replaceRecord(next, { snapshotLabel: `删除出院诊断 ${index + 1}` });
                 }}
               >
                 删除
               </button>
             </div>
           ))}
-          {record.discharge.diagnoses.length ? null : <p className="muted">尚未填写出院诊断。</p>}
+          {dischargeDiagnoses.length ? null : <p className="muted">尚未填写出院诊断。</p>}
         </div>
         <button
           type="button"
           className="button secondary"
-          data-field-path={record.discharge.diagnoses.length === 0 ? 'discharge.diagnoses' : undefined}
-          onClick={() => update('discharge.diagnoses', [...record.discharge.diagnoses, ''])}
+          data-field-path={dischargeDiagnoses.length === 0 ? 'discharge.diagnoses' : undefined}
+          onClick={() => update('discharge.diagnoses', [...dischargeDiagnoses, ''])}
         >
           + 添加出院诊断
         </button>
@@ -412,7 +787,9 @@ export function SummaryStep({ record, update, errors, onJump }: StepComponentPro
           />
           <span>我已核对并确认以上出院诊断</span>
         </label>
-        {errors['discharge.diagnoses'] ? <div className="field-error">{errors['discharge.diagnoses']}</div> : null}
+        {errors['discharge.diagnoses'] ? (
+          <div className="field-error" role="alert">{errors['discharge.diagnoses']}</div>
+        ) : null}
 
         <div className="subsection-heading"><h4>出院医嘱</h4></div>
         <FormGrid>
@@ -423,7 +800,7 @@ export function SummaryStep({ record, update, errors, onJump }: StepComponentPro
         </FormGrid>
       </Collapsible>
 
-      <Collapsible title="问诊补充提示" badge={`${depth.length} 条`}>
+      <Collapsible title="问诊补充提示" badge={`${depth.length} 条`} syncKey={record.id}>
         {depth.length ? (
           <ul className="depth-list">
             {depth.map((item) => {

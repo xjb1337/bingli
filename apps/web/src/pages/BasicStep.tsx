@@ -1,17 +1,29 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   GENERATOR,
   RECORD_CORE,
   SCHEMA,
-  TEMPLATES,
+  type Template,
   type TemplateOutlineItem,
 } from '@dabingli/domain';
 import { Collapsible } from '../components/Collapsible';
+import { ModalDialog } from '../components/ConfirmModal';
 import { FieldRenderer, type FieldOption } from '../components/FieldRenderer';
 import { Card, FormGrid, StepShell } from '../components/StepShell';
-import { STEP_DESCRIPTIONS } from '../steps';
 import type { StepComponentProps } from '../editor-types';
 import { stringAt } from '../form-utils';
+import { STEP_DESCRIPTIONS } from '../steps';
+
+type TemplatesModule = typeof import('@dabingli/domain/templates');
+
+let templatesModulePromise: Promise<TemplatesModule> | null = null;
+
+function loadTemplatesModule(): Promise<TemplatesModule> {
+  if (!templatesModulePromise) {
+    templatesModulePromise = import('@dabingli/domain/templates');
+  }
+  return templatesModulePromise;
+}
 
 const reliabilityOptions: FieldOption[] = [
   { value: '', label: '未评估' },
@@ -20,15 +32,31 @@ const reliabilityOptions: FieldOption[] = [
 
 export function BasicStep({ record, update, replaceRecord, errors, notify }: StepComponentProps) {
   const [outline, setOutline] = useState<TemplateOutlineItem[]>([]);
-  const templates = useMemo(
-    () => TEMPLATES.listByDept(record.basic.department || 'general'),
-    [record.basic.department],
-  );
-  const chiefPreview = GENERATOR.buildChiefComplaint(record);
+  const [templatesMod, setTemplatesMod] = useState<TemplatesModule | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
 
-  function applyTemplate(key: string, mode: 'example' | 'patient') {
+  useEffect(() => {
+    let active = true;
+    void loadTemplatesModule().then((mod) => {
+      if (active) setTemplatesMod(mod);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const templates: Template[] = useMemo(() => {
+    if (!templatesMod) return [];
+    return templatesMod.listByDept(record.basic.department || 'general');
+  }, [record.basic.department, templatesMod]);
+
+  const chiefPreview = useMemo(() => GENERATOR.buildChiefComplaint(record), [record]);
+  const lastFill = record.meta.lastTemplateFill;
+
+  async function applyTemplate(key: string, mode: 'example' | 'patient') {
+    const mod = templatesMod ?? (await loadTemplatesModule());
     const next = RECORD_CORE.cloneValue(record);
-    const result = TEMPLATES.apply(next, key, { mode });
+    const result = mod.apply(next, key, { mode });
     if (!result.ok) {
       notify('模板无法套用', 'error');
       return;
@@ -38,9 +66,64 @@ export function BasicStep({ record, update, replaceRecord, errors, notify }: Ste
       notify('已显示患者录入提纲，未写入病历');
       return;
     }
-    replaceRecord(next);
+    replaceRecord(next, { snapshotLabel: `套用模板：${result.template?.name ?? key}` });
     setOutline([]);
     notify(`已带入 ${result.count} 项，请逐项核对`);
+  }
+
+  function undoTemplateFill() {
+    if (!lastFill) {
+      notify('没有本次带入记录');
+      return;
+    }
+    const values = lastFill.values ?? {};
+    const allPaths = Array.from(new Set([...(lastFill.filled ?? []), ...Object.keys(values)]));
+    if (!allPaths.length) {
+      notify('本次带入没有可撤销的文字字段');
+      return;
+    }
+    const next = RECORD_CORE.cloneValue(record);
+    const blank = SCHEMA.emptyRecord();
+    let cleared = 0;
+    let kept = 0;
+
+    allPaths.forEach((path) => {
+      const cur = RECORD_CORE.getPath(next, path);
+      const hasSavedString = Object.prototype.hasOwnProperty.call(values, path);
+      const st = RECORD_CORE.fieldState(next, path);
+      if (hasSavedString) {
+        if (String(cur ?? '') === String(values[path] ?? '')) {
+          const fallback = RECORD_CORE.getPath(blank, path);
+          RECORD_CORE.setPath(next, path, typeof fallback === 'string' ? fallback : '');
+          RECORD_CORE.setFieldState(next, path, {
+            source: 'manual',
+            reviewed: false,
+            reviewedValueHash: '',
+            sourceRef: '',
+          });
+          cleared += 1;
+        } else {
+          kept += 1;
+        }
+      } else if (st.source === 'template' && !RECORD_CORE.fieldReviewValid(next, path)) {
+        const fallback = RECORD_CORE.getPath(blank, path);
+        RECORD_CORE.setPath(next, path, fallback !== undefined ? RECORD_CORE.cloneValue(fallback) : '');
+        RECORD_CORE.setFieldState(next, path, {
+          source: 'manual',
+          reviewed: false,
+          reviewedValueHash: '',
+          sourceRef: '',
+        });
+        cleared += 1;
+      } else {
+        kept += 1;
+      }
+    });
+
+    next.meta.lastTemplateFill = null;
+    if (!kept) delete next.__templateKey;
+    replaceRecord(next, { snapshotLabel: `撤销模板带入：${lastFill.name ?? lastFill.key}` });
+    notify(`已撤销 ${cleared} 项${kept ? `，保留 ${kept} 项你后来改过的内容` : ''}`, 'success');
   }
 
   return (
@@ -51,14 +134,17 @@ export function BasicStep({ record, update, replaceRecord, errors, notify }: Ste
     >
       <Card title="模板起点（可选）">
         <Collapsible
-          title={`用模板开始（可选，${templates.length} 个病种）`}
+          title={templatesMod ? `用模板开始（可选，${templates.length} 个病种）` : '用模板开始（可选，正在加载模板…）'}
           defaultOpen={false}
-          badge={templates.length ? undefined : '本科室暂无模板'}
+          syncKey={record.id}
+          badge={templatesMod ? (templates.length ? undefined : '本科室暂无模板') : '加载中'}
         >
           <p className="muted">
             学习范例会补入典型病例并逐字段标记为模板来源；患者录入提纲只列应问、应查项目，不写入事实。
           </p>
-          {templates.length ? (
+          {!templatesMod ? (
+            <p className="muted">正在按需加载专科模板数据…</p>
+          ) : templates.length ? (
             <div className="template-list">
               {templates.map((template) => (
                 <article key={template.key} className="template-item">
@@ -75,10 +161,18 @@ export function BasicStep({ record, update, replaceRecord, errors, notify }: Ste
                     </p>
                   </div>
                   <div className="button-row compact">
-                    <button type="button" className="button primary" onClick={() => applyTemplate(template.key, 'example')}>
+                    <button
+                      type="button"
+                      className="button primary"
+                      onClick={() => void applyTemplate(template.key, 'example')}
+                    >
                       作为学习范例填入
                     </button>
-                    <button type="button" className="button ghost" onClick={() => applyTemplate(template.key, 'patient')}>
+                    <button
+                      type="button"
+                      className="button ghost"
+                      onClick={() => void applyTemplate(template.key, 'patient')}
+                    >
                       查看录入提纲
                     </button>
                   </div>
@@ -88,6 +182,22 @@ export function BasicStep({ record, update, replaceRecord, errors, notify }: Ste
           ) : (
             <p className="muted">通用/全科不提供标准病例模板，请直接填写。</p>
           )}
+          {lastFill ? (
+            <div className="doc-state doc-state-muted" data-doc-state="template-fill">
+              <div className="doc-state-title">
+                本次带入：{lastFill.name ?? lastFill.key}（{(lastFill.filled ?? []).length} 项，来源已逐字段标记）
+              </div>
+              <div className="button-row compact">
+                <button type="button" className="button secondary compact-button" onClick={() => setDetailOpen(true)}>
+                  查看本次带入内容
+                </button>
+                <button type="button" className="button ghost compact-button" onClick={undoTemplateFill}>
+                  撤销本次带入
+                </button>
+              </div>
+              <p className="field-hint">撤销只回滚本次带入且此后没被改过的字段；你后来手改的内容会保留。</p>
+            </div>
+          ) : null}
           {outline.length ? (
             <div className="outline-panel" aria-live="polite">
               <h4>患者录入提纲</h4>
@@ -225,7 +335,7 @@ export function BasicStep({ record, update, replaceRecord, errors, notify }: Ste
             error={errors['basic.reliability']}
           />
         </FormGrid>
-        <Collapsible title="出生日期、籍贯、工作单位和联系方式（补充资料）">
+        <Collapsible title="出生日期、籍贯、工作单位和联系方式（补充资料）" syncKey={record.id}>
           <FormGrid>
             <FieldRenderer path="basic.birthDate" label="出生日期" value={stringAt(record, 'basic.birthDate')} onChange={update} kind="date" error={errors['basic.birthDate']} />
             <FieldRenderer path="basic.nativePlace" label="籍贯" value={stringAt(record, 'basic.nativePlace')} onChange={update} error={errors['basic.nativePlace']} />
@@ -275,6 +385,23 @@ export function BasicStep({ record, update, replaceRecord, errors, notify }: Ste
           <strong>{chiefPreview || '填写后显示'}</strong>
         </div>
       </Card>
+
+      <ModalDialog open={detailOpen} title="本次带入内容" onClose={() => setDetailOpen(false)}>
+        <p className="muted">
+          共 {(lastFill?.filled ?? []).length} 项，全部标记为「模板来源、未核对」。请逐条对照实际问诊和查体修改。
+        </p>
+        <ul className="outline-list">
+          {Object.entries(lastFill?.values ?? {}).length ? (
+            Object.entries(lastFill?.values ?? {}).map(([path, value]) => (
+              <li key={path}>
+                <code>{path}</code>：{String(value)}
+              </li>
+            ))
+          ) : (
+            <li>（没有可显示的文字字段）</li>
+          )}
+        </ul>
+      </ModalDialog>
     </StepShell>
   );
 }

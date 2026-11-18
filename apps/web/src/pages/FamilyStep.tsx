@@ -14,12 +14,14 @@ export function FamilyStep({ record, update, errors }: StepComponentProps) {
     >
       <Card title="家族疾病情况">
         <CheckGroup
+          path="family.diseaseChecks"
           label="家族中患有的疾病（可多选）"
           values={record.family.diseaseChecks}
           options={SCHEMA.FAMILY_DISEASES}
           onChange={(value, checked) =>
             update('family.diseaseChecks', { ...record.family.diseaseChecks, [value]: checked })
           }
+          error={errors['family.diseaseChecks']}
         />
         <FormGrid>
           <FieldRenderer

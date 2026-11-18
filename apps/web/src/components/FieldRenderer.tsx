@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useRef, type KeyboardEvent, type ReactNode } from 'react';
 
 export type FieldOption = string | { value: string; label: string };
 
@@ -46,6 +46,7 @@ export function FieldRenderer({
   const errorId = `${id}-error`;
   const describedBy = [hint ? hintId : '', error ? errorId : ''].filter(Boolean).join(' ');
   const normalized = options.map(normalizeOption);
+  const radioRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const common = {
     id,
     value,
@@ -54,6 +55,80 @@ export function FieldRenderer({
     'aria-describedby': describedBy || undefined,
     'data-field-path': path,
   };
+
+  if (kind === 'segmented') {
+    const activeIndex = normalized.findIndex((option) => option.value === value);
+    const focusableIndex = activeIndex >= 0 ? activeIndex : 0;
+
+    const handleRadioKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+      if (!normalized.length) return;
+      let nextIndex = -1;
+      if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+        nextIndex = (index + 1) % normalized.length;
+      } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+        nextIndex = (index - 1 + normalized.length) % normalized.length;
+      } else if (event.key === 'Home') {
+        nextIndex = 0;
+      } else if (event.key === 'End') {
+        nextIndex = normalized.length - 1;
+      }
+      if (nextIndex < 0) return;
+      event.preventDefault();
+      const targetOption = normalized[nextIndex];
+      if (!targetOption) return;
+      onChange(path, targetOption.value);
+      radioRefs.current[nextIndex]?.focus();
+    };
+
+    return (
+      <fieldset className={`field-renderer field-segmented ${className}`.trim()} data-field-wrap={path}>
+        <legend className="field-label">
+          <span>{label}</span>
+          {required ? <span className="field-required">必填</span> : null}
+        </legend>
+        <div
+          className="segmented"
+          role="radiogroup"
+          aria-label={label}
+          aria-describedby={describedBy || undefined}
+          data-field-path={path}
+        >
+          {normalized.map((option, index) => {
+            const selected = option.value === value;
+            return (
+              <button
+                key={option.value}
+                ref={(node) => {
+                  radioRefs.current[index] = node;
+                }}
+                type="button"
+                id={index === focusableIndex ? id : undefined}
+                role="radio"
+                tabIndex={index === focusableIndex ? 0 : -1}
+                aria-checked={selected}
+                aria-invalid={error && index === focusableIndex ? true : undefined}
+                className={selected ? 'is-selected' : ''}
+                onClick={() => onChange(path, option.value)}
+                onKeyDown={(event) => handleRadioKeyDown(event, index)}
+              >
+                {option.label}
+              </button>
+            );
+          })}
+        </div>
+        {hint ? (
+          <div className="field-hint" id={hintId}>
+            {hint}
+          </div>
+        ) : null}
+        {error ? (
+          <div className="field-error" id={errorId} role="alert">
+            {error}
+          </div>
+        ) : null}
+      </fieldset>
+    );
+  }
 
   let control: ReactNode;
   if (kind === 'textarea') {
@@ -74,25 +149,6 @@ export function FieldRenderer({
           </option>
         ))}
       </select>
-    );
-  } else if (kind === 'segmented') {
-    control = (
-      <div className="segmented" role="radiogroup" aria-label={label} aria-describedby={describedBy || undefined}>
-        {normalized.map((option) => (
-          <button
-            key={option.value}
-            type="button"
-            id={option.value === value ? id : undefined}
-            role="radio"
-            aria-checked={option.value === value}
-            className={option.value === value ? 'is-selected' : ''}
-            data-field-path={option.value === value ? path : undefined}
-            onClick={() => onChange(path, option.value)}
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
     );
   } else {
     control = (
@@ -128,16 +184,18 @@ export function FieldRenderer({
 }
 
 export interface CheckGroupProps {
+  path?: string;
   label: string;
   values: Record<string, boolean>;
   options: readonly string[];
   onChange: (value: string, checked: boolean) => void;
   hint?: ReactNode;
+  error?: string;
 }
 
-export function CheckGroup({ label, values, options, onChange, hint }: CheckGroupProps) {
+export function CheckGroup({ path, label, values, options, onChange, hint, error }: CheckGroupProps) {
   return (
-    <fieldset className="check-group">
+    <fieldset className="check-group" data-field-wrap={path} data-field-path={path}>
       <legend>{label}</legend>
       {hint ? <div className="field-hint">{hint}</div> : null}
       <div className="check-grid">
@@ -152,6 +210,11 @@ export function CheckGroup({ label, values, options, onChange, hint }: CheckGrou
           </label>
         ))}
       </div>
+      {error ? (
+        <div className="field-error" role="alert">
+          {error}
+        </div>
+      ) : null}
     </fieldset>
   );
 }

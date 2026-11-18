@@ -12,9 +12,18 @@ function manualChunkName(id: string): string | undefined {
     return 'vendor-react';
   }
   if (path.includes('/node_modules/dexie/')) return 'vendor-dexie';
-  if (path.includes('/packages/domain/dist/template-data.js')) return 'domain-template-data';
+  if (path.includes('/packages/domain/dist/') && path.endsWith('/template-data.js')) {
+    return 'template-data';
+  }
+  if (
+    path.includes('/packages/domain/dist/esm/templates.js')
+    || path.includes('/packages/domain/dist/templates-subpath.js')
+  ) {
+    return 'domain-templates';
+  }
   if (path.includes('/packages/domain/')) return 'domain';
   if (path.includes('/packages/ai/')) return 'ai';
+  if (path.includes('/packages/storage/')) return 'storage';
   return undefined;
 }
 
@@ -22,7 +31,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', 'VITE_');
 
   return {
-    base: env.VITE_BASE || '/bingli/',
+    base: process.env.VITE_BASE || env.VITE_BASE || '/bingli/',
     plugins: [react(), offlineServiceWorker()],
     optimizeDeps: {
       include: ['@dabingli/domain'],

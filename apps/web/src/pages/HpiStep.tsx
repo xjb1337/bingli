@@ -21,7 +21,7 @@ export function HpiStep({ record, update, errors, notify }: StepComponentProps) 
           className="button secondary"
           disabled={!canDraft}
           onClick={() => {
-            update('hpi', draft);
+            update('hpi', draft, { snapshotLabel: '生成现病史初稿' });
             notify('已根据主诉补起病初稿，请核对');
           }}
         >

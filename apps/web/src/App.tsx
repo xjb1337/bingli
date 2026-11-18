@@ -1,21 +1,16 @@
 import {
   lazy,
   Suspense,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
-  type FocusEvent,
-  type FormEvent,
   type ReactNode,
 } from 'react';
 import {
-  GENERATOR,
   RECORD_CORE,
-  type AppSettings,
   type DabingliRecord,
-  type DocumentWarning,
-  type RecordListItem,
 } from '@dabingli/domain';
 import {
   AI_FIELDS,
@@ -23,50 +18,72 @@ import {
   WebFetchTransport,
   confirmAiField,
   createAiAdoptionUndo,
+  getAndroidAiBridge,
   undoAiAdoption,
   type AiAdoptionUndo,
-  getAndroidAiBridge,
   type AiTransport,
   type AiTransportFactory,
   type AiTransportStatus,
 } from '@dabingli/ai';
 import {
   createIndexedDbRepository,
+  importStagedLegacy,
   serializeBackup,
-  type RecoveryCopySummary,
+  type CorruptLegacyEntry,
   type RecordRepository,
 } from '@dabingli/storage';
+import { ConfirmModal, type ConfirmDialogOptions } from './components/ConfirmModal';
 import { Notice } from './components/Notice';
 import { StepDirectory } from './components/StepDirectory';
-import { AuxStep } from './pages/AuxStep';
-import { BasicStep } from './pages/BasicStep';
-import { FamilyStep } from './pages/FamilyStep';
-import { HpiStep } from './pages/HpiStep';
-import { MarriageStep } from './pages/MarriageStep';
-import { PeStep } from './pages/PeStep';
-import { PersonalStep } from './pages/PersonalStep';
-import { PmhStep } from './pages/PmhStep';
-import { SummaryStep } from './pages/SummaryStep';
-import { STEPS, stepIndexOf, stepKeyForPath, type StepKey } from './steps';
 import type { StepComponentProps } from './editor-types';
+import { stepState, type StepCompletionState } from './form-utils';
+import { useAiSession } from './hooks/useAiSession';
+import { useMobileViewport } from './hooks/useMobileViewport';
+import { useRecordSession, type InitialSessionState } from './hooks/useRecordSession';
+import { useValidation } from './hooks/useValidation';
+import {
+  nativeExportFile,
+  notifyNativeLegacyImported,
+  notifyNativeLegacyLaunched,
+  readNativeStagedLegacy,
+  registerBingliWebHost,
+} from './native-host';
+import type { ThemePreference } from './pages/SettingsPage';
+import { STEPS, stepIndexOf, stepKeyForPath, type StepKey } from './steps';
 
-const OutputStep = lazy(() =>
-  import('./pages/OutputStep').then((module) => ({ default: module.OutputStep })),
-);
-const RecordsPage = lazy(() =>
-  import('./pages/RecordsPage').then((module) => ({ default: module.RecordsPage })),
-);
-const SettingsPage = lazy(() =>
-  import('./pages/SettingsPage').then((module) => ({ default: module.SettingsPage })),
-);
+const BasicStep = lazy(() => import('./pages/BasicStep').then((m) => ({ default: m.BasicStep })));
+const HpiStep = lazy(() => import('./pages/HpiStep').then((m) => ({ default: m.HpiStep })));
+const PmhStep = lazy(() => import('./pages/PmhStep').then((m) => ({ default: m.PmhStep })));
+const PersonalStep = lazy(() => import('./pages/PersonalStep').then((m) => ({ default: m.PersonalStep })));
+const MarriageStep = lazy(() => import('./pages/MarriageStep').then((m) => ({ default: m.MarriageStep })));
+const FamilyStep = lazy(() => import('./pages/FamilyStep').then((m) => ({ default: m.FamilyStep })));
+const PeStep = lazy(() => import('./pages/PeStep').then((m) => ({ default: m.PeStep })));
+const AuxStep = lazy(() => import('./pages/AuxStep').then((m) => ({ default: m.AuxStep })));
+const SummaryStep = lazy(() => import('./pages/SummaryStep').then((m) => ({ default: m.SummaryStep })));
+const OutputStep = lazy(() => import('./pages/OutputStep').then((m) => ({ default: m.OutputStep })));
+const RecordsPage = lazy(() => import('./pages/RecordsPage').then((m) => ({ default: m.RecordsPage })));
+const SettingsPage = lazy(() => import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })));
+const AiPage = lazy(() => import('./pages/AiPage').then((m) => ({ default: m.AiPage })));
 
-const AiPage = lazy(() =>
-  import('./pages/AiPage').then((module) => ({ default: module.AiPage })),
-);
+const THEME_STORAGE_KEY = 'dabingli.web.theme';
+
+function readStoredTheme(): ThemePreference {
+  try {
+    const raw = window.localStorage.getItem(THEME_STORAGE_KEY);
+    return raw === 'dark' || raw === 'light' ? raw : 'auto';
+  } catch {
+    return 'auto';
+  }
+}
 
 function LoadingState({ label, compact = false }: { label: string; compact?: boolean }) {
   return (
-    <section className={`loading-state${compact ? ' is-compact' : ''}`} role="status" aria-live="polite" aria-busy="true">
+    <section
+      className={`loading-state${compact ? ' is-compact' : ''}`}
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+    >
       <div className="loading-state-head">
         <span className="loading-spinner" aria-hidden="true" />
         <div>
@@ -89,27 +106,14 @@ function LazyContentFallback() {
 
 type AppView = 'editor' | 'records' | 'settings' | 'ai';
 
-interface InitialState {
-  record: DabingliRecord;
-  list: RecordListItem[];
-  settings: AppSettings;
-  recovery: RecoveryCopySummary | null;
-  stepIndex: number;
-  alert: string;
-}
-
-interface ToastState {
-  message: string;
-  tone: 'info' | 'success' | 'error';
-  key: number;
-}
-
-async function initialize(repository: RecordRepository): Promise<InitialState> {
-  const [current, listResult, settingsResult, recoveries] = await Promise.all([
+async function loadSessionState(repository: RecordRepository): Promise<InitialSessionState> {
+  const [current, listResult, settingsResult, recoveries, corruptEntries, quotaInfo] = await Promise.all([
     repository.loadCurrent(),
     repository.loadList(),
     repository.loadSettings(),
     repository.listRecoveryCopies().catch(() => []),
+    repository.exportCorruptLegacyEntries?.().catch(() => [] as CorruptLegacyEntry[]) ?? Promise.resolve([]),
+    repository.estimateStorageQuota?.().catch(() => null) ?? Promise.resolve(null),
   ]);
   const settings = settingsResult.settings;
   const alerts: string[] = [];
@@ -124,57 +128,23 @@ async function initialize(repository: RecordRepository): Promise<InitialState> {
   if (!record) record = repository.newRecord();
   if (!current.ok) alerts.push(current.reason ?? '当前病历读取失败，原始数据未被覆盖。');
 
+  if (corruptEntries.length) {
+    alerts.push(`检测到 ${corruptEntries.length} 条损坏的旧数据已安全隔离，可在「设置」或「病历列表」导出排查。`);
+  }
+  if (quotaInfo?.lowSpace) {
+    alerts.push('本机存储空间接近上限，建议尽快导出 JSON 备份。');
+  }
+
   return {
     record,
     list: listResult.list,
     settings,
     recovery: recoveries[0] ?? null,
+    corruptEntries,
+    quotaInfo,
     stepIndex: stepIndexOf(settings.lastStep),
     alert: alerts.join(' '),
   };
-}
-
-function validationMap(warnings: readonly DocumentWarning[]): Record<string, string> {
-  const mapped: Record<string, string> = {};
-  warnings.forEach((warning) => {
-    warning.paths?.forEach((path) => {
-      if (!mapped[path]) mapped[path] = warning.message;
-    });
-  });
-  return mapped;
-}
-
-function validationMapForTouched(
-  warnings: readonly DocumentWarning[],
-  touchedPaths: ReadonlySet<string>,
-): Record<string, string> {
-  const mapped = validationMap(warnings);
-  const visible: Record<string, string> = {};
-
-  Object.entries(mapped).forEach(([errorPath, message]) => {
-    for (const touchedPath of touchedPaths) {
-      if (
-        errorPath === touchedPath
-        || errorPath.startsWith(`${touchedPath}.`)
-        || touchedPath.startsWith(`${errorPath}.`)
-      ) {
-        visible[errorPath] = message;
-        break;
-      }
-    }
-  });
-
-  return visible;
-}
-
-function downloadJson(text: string, filename: string) {
-  const blob = new Blob([text], { type: 'application/json;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-  URL.revokeObjectURL(url);
 }
 
 export function App({
@@ -187,7 +157,7 @@ export function App({
   const repositoryRef = useRef<RecordRepository | null>(repository ?? null);
   if (!repositoryRef.current) repositoryRef.current = createIndexedDbRepository();
   const repo = repositoryRef.current;
-  const [initial, setInitial] = useState<InitialState | null>(null);
+  const [initial, setInitial] = useState<InitialSessionState | null>(null);
   const [loadError, setLoadError] = useState('');
 
   useEffect(() => {
@@ -195,18 +165,51 @@ export function App({
     void (async () => {
       try {
         const init = await repo.initialize();
-        const loaded = await initialize(repo);
         const alerts: string[] = [];
+
         if (!init.ok) {
           alerts.push(
             `本地数据迁移未完成：${init.migration?.reason ?? init.reason ?? '未知错误'}。旧 localStorage 保持原样。`,
           );
         } else if (init.migration?.status === 'migrated') {
+          const corruptSuffix = init.migration.corruptCount
+            ? `（另隔离 ${init.migration.corruptCount} 条损坏旧数据）`
+            : '';
           alerts.push(
-            `已从 localStorage 迁移 ${init.migration.recordCount} 份病历到 IndexedDB；旧数据仍保留。`,
+            `已从 localStorage 迁移 ${init.migration.recordCount} 份病历到 IndexedDB${corruptSuffix}；旧数据仍保留。`,
           );
         }
+
+        // Android staged legacy import closure: BingliAndroid.stagedLegacy() -> importStagedLegacy() -> legacyImportSucceeded()
+        const stagedRaw = readNativeStagedLegacy();
+        if (stagedRaw) {
+          const [existingList, existingCurrent, existingSettings] = await Promise.all([
+            repo.loadList(),
+            repo.loadCurrent(),
+            repo.loadSettings(),
+          ]);
+          const isDbEmpty = existingList.ok
+            && existingList.list.length === 0
+            && !existingCurrent.record
+            && !existingSettings.raw;
+          if (isDbEmpty) {
+            try {
+              const stagedResult = await importStagedLegacy(stagedRaw, repo);
+              notifyNativeLegacyImported();
+              const corruptSuffix = stagedResult.corruptCount
+                ? `；已隔离 ${stagedResult.corruptCount} 条损坏旧数据供导出`
+                : '';
+              alerts.push(`已从 Android 旧版本迁移 ${stagedResult.recordCount} 份病历${corruptSuffix}。`);
+            } catch (stagedError) {
+              const message = stagedError instanceof Error ? stagedError.message : String(stagedError);
+              alerts.push(`Android 旧数据导入未完成：${message}`);
+            }
+          }
+        }
+
+        const loaded = await loadSessionState(repo);
         if (loaded.alert) alerts.push(loaded.alert);
+        notifyNativeLegacyLaunched();
         if (active) setInitial({ ...loaded, alert: alerts.join(' ') });
       } catch (error) {
         if (active) setLoadError(error instanceof Error ? error.message : String(error));
@@ -248,48 +251,71 @@ function EditorApp({
   aiTransportFactory,
 }: {
   repository: RecordRepository;
-  initial: InitialState;
+  initial: InitialSessionState;
   aiTransportFactory?: AiTransportFactory;
 }) {
-  const [record, setRecord] = useState<DabingliRecord>(initial.record);
-  const [list, setList] = useState<RecordListItem[]>(initial.list);
-  const [settings, setSettings] = useState<AppSettings>(initial.settings);
-  const [recovery, setRecovery] = useState<RecoveryCopySummary | null>(initial.recovery);
+  useMobileViewport();
+
   const [stepIndex, setStepIndex] = useState(initial.stepIndex);
   const [view, setView] = useState<AppView>('editor');
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [storageAlert, setStorageAlert] = useState(initial.alert);
-  const [dirty, setDirty] = useState(false);
-  const [validationAttempted, setValidationAttempted] = useState(false);
-  const [touchedPaths, setTouchedPaths] = useState<ReadonlySet<string>>(() => new Set());
-  const [toast, setToast] = useState<ToastState | null>(null);
   const [pendingFocus, setPendingFocus] = useState<string | null>(null);
-  const [exportText, setExportText] = useState(() =>
-    JSON.stringify(RECORD_CORE.buildExport(initial.list, undefined, { includeDraft: true, draft: initial.record }), null, 2),
-  );
   const [exportIncludeNotes, setExportIncludeNotes] = useState(false);
+  const [theme, setTheme] = useState<ThemePreference>(() => readStoredTheme());
+
+  // Accessible inline ConfirmModal promise queue
+  const [confirmState, setConfirmState] = useState<(ConfirmDialogOptions & { resolve: (ok: boolean) => void }) | null>(null);
+  const confirmAction = useCallback((options: ConfirmDialogOptions): Promise<boolean> => (
+    new Promise((resolve) => {
+      setConfirmState({ ...options, resolve });
+    })
+  ), []);
+
+  const validationResetRef = useRef<() => void>(() => {});
+  const onResetValidation = useCallback(() => validationResetRef.current(), []);
+  const onAfterRecordSwitch = useCallback(() => {
+    setView('editor');
+    setStepIndex(0);
+    setMobileNavOpen(false);
+  }, []);
+
+  const session = useRecordSession({
+    repo,
+    initial,
+    onResetValidation,
+    onAfterRecordSwitch,
+    confirmAction,
+  });
+
+  const validation = useValidation(session.record);
+  validationResetRef.current = validation.resetValidationState;
+
   const [apiKey, setApiKey] = useState('');
   const [webAiModel, setWebAiModel] = useState('deepseek-flash');
   const androidBridge = useMemo(() => getAndroidAiBridge(), []);
   const [androidStatus, setAndroidStatus] = useState<AiTransportStatus | null>(null);
   const [androidStatusLoading, setAndroidStatusLoading] = useState(Boolean(androidBridge));
-  const toastTimer = useRef<number | null>(null);
-  const saveTimer = useRef<number | null>(null);
-  const saveFlushRef = useRef(false);
-  const recordRef = useRef(record);
   const [aiUndo, setAiUndo] = useState<AiAdoptionUndo | null>(null);
-  const dirtyRef = useRef(dirty);
-  recordRef.current = record;
-  dirtyRef.current = dirty;
 
-  function refreshAndroidAiStatus() {
+  const step = STEPS[stepIndex] ?? STEPS[0];
+  const stepKey: StepKey = step.key;
+  const defaultAiTarget = step.key === 'hpi'
+    ? 'hpi.symptoms'
+    : Object.keys(AI_FIELDS).find((path) => path.startsWith(`${step.key}.`)) ?? 'hpi.symptoms';
+
+  const aiSession = useAiSession(session.record.id, defaultAiTarget);
+
+  const mobileStepButtonRef = useRef<HTMLButtonElement | null>(null);
+  const mobileStepPanelRef = useRef<HTMLDivElement | null>(null);
+
+  const refreshAndroidAiStatus = useCallback(() => {
     if (!androidBridge) return;
     setAndroidStatusLoading(true);
     void new AndroidBridgeTransport({ bridge: androidBridge }).status().then((status) => {
       setAndroidStatus(status);
       setAndroidStatusLoading(false);
     });
-  }
+  }, [androidBridge]);
 
   useEffect(() => {
     if (!androidBridge) return;
@@ -305,206 +331,99 @@ function EditorApp({
     };
   }, [androidBridge]);
 
-  const warnings = useMemo(() => GENERATOR.validateStructured(record), [record]);
-  const errors = useMemo(
-    () => (validationAttempted ? validationMap(warnings) : validationMapForTouched(warnings, touchedPaths)),
-    [validationAttempted, touchedPaths, warnings],
-  );
-
-  function resetValidationState() {
-    setValidationAttempted(false);
-    setTouchedPaths(new Set());
-  }
-
-  function markFieldTouched(path: string) {
-    setTouchedPaths((previous) => {
-      if (previous.has(path)) return previous;
-      const next = new Set(previous);
-      next.add(path);
-      return next;
-    });
-  }
-
-  function handleFieldBlur(event: FocusEvent<HTMLFormElement>) {
-    const target = event.target;
-    if (!(target instanceof HTMLElement)) return;
-    const field = target.closest<HTMLElement>('[data-field-path]');
-    const path = field?.dataset.fieldPath;
-    if (path) markFieldTouched(path);
-  }
-
-  function notify(message: string, tone: ToastState['tone'] = 'info') {
-    if (toastTimer.current !== null) window.clearTimeout(toastTimer.current);
-    setToast({ message, tone, key: Date.now() });
-    toastTimer.current = window.setTimeout(() => setToast(null), 2600);
-  }
-
-  function refreshExportPreview(nextRecord = record, nextList = list, includeNotes = exportIncludeNotes) {
-    const bundle = RECORD_CORE.buildExport(nextList, undefined, {
-      includeDraft: true,
-      draft: nextRecord,
-      includeNotes,
-    });
-    setExportText(JSON.stringify(bundle, null, 2));
-  }
-
-  function changeExportIncludeNotes(value: boolean) {
-    setExportIncludeNotes(value);
-    refreshExportPreview(recordRef.current, list, value);
-  }
-
-  function cancelSaveTimer() {
-    if (saveTimer.current !== null) {
-      window.clearTimeout(saveTimer.current);
-      saveTimer.current = null;
-    }
-  }
-
-  async function saveAiMutation(nextRecord: DabingliRecord, message: string): Promise<boolean> {
-    cancelSaveTimer();
-    const revision = Number(recordRef.current.meta.revision) || 0;
-    const saved = await repo.saveToLibrary(nextRecord, revision);
-    if (!saved.ok) {
-      setStorageAlert(saved.reason ?? 'AI 内容保存失败，请先导出备份。');
-      notify(saved.reason ?? 'AI 内容保存失败', 'error');
-      return false;
-    }
-    const persisted = saved.record ?? nextRecord;
-    recordRef.current = persisted;
-    setRecord(persisted);
-    setDirty(false);
-    dirtyRef.current = false;
-    const loaded = await repo.loadList();
-    if (loaded.ok) {
-      setList(loaded.list);
-      refreshExportPreview(persisted, loaded.list);
-    }
-    notify(message, 'success');
-    return true;
-  }
-
-  async function adoptAiRecord(nextRecord: DabingliRecord, paths: readonly string[]): Promise<boolean> {
-    const undo = createAiAdoptionUndo(recordRef.current, nextRecord, paths);
-    const saved = await saveAiMutation(nextRecord, 'AI 建议已采纳，仍需逐项核对');
-    if (saved) setAiUndo(undo);
-    return saved;
-  }
-
-  async function undoAiRecord(): Promise<boolean> {
-    if (!aiUndo || aiUndo.recordId !== recordRef.current.id) return false;
-    const undone = undoAiAdoption(recordRef.current, aiUndo);
-    const message = `已撤销 ${undone.restored} 项${undone.kept ? `，保留 ${undone.kept} 项后来修改的内容` : ''}`;
-    const saved = await saveAiMutation(undone.record, message);
-    if (saved) setAiUndo(null);
-    return saved;
-  }
-
-  async function confirmAiContent(path: string): Promise<boolean> {
-    const next = confirmAiField(recordRef.current, path);
-    return saveAiMutation(next, '已标记为已核对');
+  function clearKeyAndResetTransport() {
+    setApiKey('');
+    aiSession.resetTransportAndAbort();
   }
 
   function createAiTransport(): AiTransport {
+    void aiSession.transportEpoch;
     if (aiTransportFactory) return aiTransportFactory(apiKey);
     if (androidBridge) return new AndroidBridgeTransport({ bridge: androidBridge });
     return new WebFetchTransport({ apiKey, model: webAiModel });
   }
 
-  async function persistRecord(showToast = true, snapshot = recordRef.current): Promise<boolean> {
-    const revision = Number(snapshot.meta.revision) || 0;
-    const saved = await repo.saveToLibrary(snapshot, revision);
-    if (!saved.ok) {
-      setStorageAlert(saved.reason ?? '保存失败，请先导出备份。');
-      notify(saved.reason ?? '保存失败', 'error');
-      return false;
-    }
-    const nextRecord = saved.record ?? snapshot;
-    recordRef.current = nextRecord;
-    setRecord(nextRecord);
-    setDirty(false);
-    dirtyRef.current = false;
-    const loaded = await repo.loadList();
-    if (loaded.ok) {
-      setList(loaded.list);
-      refreshExportPreview(nextRecord, loaded.list);
-    }
-    if (showToast) notify('已保存到本机', 'success');
-    return true;
-  }
-
-  function flushPendingSave() {
-    if (!dirtyRef.current || saveFlushRef.current) return;
-    if (saveTimer.current !== null) {
-      window.clearTimeout(saveTimer.current);
-      saveTimer.current = null;
-    }
-    saveFlushRef.current = true;
-    void persistRecord(false, recordRef.current).finally(() => {
-      saveFlushRef.current = false;
-    });
-  }
-
-  async function attemptSave(showToast = true): Promise<boolean> {
-    setValidationAttempted(true);
-    const saved = await persistRecord(showToast);
-    if (warnings.some((warning) => warning.paths?.length)) jumpToFirstInvalid();
+  async function adoptAiRecord(nextRecord: DabingliRecord, paths: readonly string[]): Promise<boolean> {
+    const undo = createAiAdoptionUndo(session.recordRef.current, nextRecord, paths);
+    const saved = await session.saveAiMutation(nextRecord, 'AI 建议已采纳，仍需逐项核对');
+    if (saved) setAiUndo(undo);
     return saved;
   }
 
-  function update(path: string, value: unknown) {
-    setRecord((previous) => {
-      const next = RECORD_CORE.cloneValue(previous);
-      RECORD_CORE.setPath(next, path, value);
-      RECORD_CORE.markFieldManual(next, path);
-      return next;
-    });
-    setDirty(true);
+  async function undoAiRecord(): Promise<boolean> {
+    if (!aiUndo || aiUndo.recordId !== session.recordRef.current.id) return false;
+    const undone = undoAiAdoption(session.recordRef.current, aiUndo);
+    const message = `已撤销 ${undone.restored} 项${undone.kept ? `，保留 ${undone.kept} 项后来修改的内容` : ''}`;
+    const saved = await session.saveAiMutation(undone.record, message);
+    if (saved) setAiUndo(null);
+    return saved;
   }
 
-  function updateRawNotes(value: string) {
-    setRecord((previous) => {
-      const next = RECORD_CORE.cloneValue(previous);
-      next.rawNotes = String(value).slice(0, 16000);
-      return next;
-    });
-    setDirty(true);
+  async function confirmAiContent(path: string): Promise<boolean> {
+    const next = confirmAiField(session.recordRef.current, path);
+    return session.saveAiMutation(next, '已标记为已核对');
   }
 
-  function replaceRecord(next: DabingliRecord) {
-    setRecord(RECORD_CORE.cloneValue(next));
-    setDirty(true);
-  }
+  const attemptSave = useCallback(
+    async (showToast = true): Promise<boolean> => {
+      validation.setValidationAttempted(true);
+      return session.persistRecord(showToast);
+    },
+    [session, validation],
+  );
 
-  async function saveSettings(next: AppSettings) {
-    const normalized = RECORD_CORE.normalizeSettings(next);
-    setSettings(normalized);
-    const result = await repo.saveSettings(normalized);
-    if (!result.ok) notify(result.reason ?? '设置保存失败', 'error');
-  }
+  const goToStep = useCallback(
+    (index: number) => {
+      const safeIndex = Math.max(0, Math.min(STEPS.length - 1, index));
+      if (STEPS[safeIndex]?.key === 'output') validation.setValidationAttempted(true);
+      setView('editor');
+      setStepIndex(safeIndex);
+      setMobileNavOpen(false);
+      if (session.settings.lastStep !== STEPS[safeIndex]?.key) {
+        const nextSettings = { ...session.settings, lastStep: STEPS[safeIndex]?.key ?? 'basic' };
+        void session.saveSettings(nextSettings);
+      }
+    },
+    [session, validation],
+  );
 
-  function goToStep(index: number) {
-    const safeIndex = Math.max(0, Math.min(STEPS.length - 1, index));
-    if (STEPS[safeIndex]?.key === 'output') setValidationAttempted(true);
-    setView('editor');
-    setStepIndex(safeIndex);
-    setMobileNavOpen(false);
-    const nextSettings = { ...settings, lastStep: STEPS[safeIndex]?.key ?? 'basic' };
-    setSettings(nextSettings);
-    void repo.saveSettings(nextSettings);
-  }
+  const navigateView = useCallback(
+    async (nextView: AppView) => {
+      if (nextView === view) return;
+      if (view === 'ai' && aiSession.hasUnsentWork) {
+        const message = aiSession.session.busy
+          ? 'AI 请求正在进行中，离开当前页面后请求会继续在后台保留（不会丢失），确定切换页面吗？'
+          : '当前有尚未采纳的待识别图片，确定离开 AI 助手吗？（图片会暂留在当前会话中）';
+        const ok = await confirmAction({
+          title: '离开 AI 助手',
+          message,
+          confirmLabel: '切换页面',
+          cancelLabel: '留在本页',
+        });
+        if (!ok) return;
+      }
+      if (nextView === 'ai') refreshAndroidAiStatus();
+      setMobileNavOpen(false);
+      setView(nextView);
+    },
+    [aiSession.hasUnsentWork, aiSession.session.busy, confirmAction, refreshAndroidAiStatus, view],
+  );
 
-  function jumpToPath(path: string) {
-    if (!path) return;
-    setValidationAttempted(true);
-    goToStep(stepIndexOf(stepKeyForPath(path)));
-    setPendingFocus(path);
-  }
+  const jumpToPath = useCallback(
+    (path: string) => {
+      if (!path) return;
+      validation.setValidationAttempted(true);
+      goToStep(stepIndexOf(stepKeyForPath(path)));
+      setPendingFocus(path);
+    },
+    [goToStep, validation],
+  );
 
-  function jumpToFirstInvalid() {
-    setValidationAttempted(true);
+  const jumpToFirstInvalid = useCallback(() => {
+    validation.setValidationAttempted(true);
     const ordered = [
-      ...warnings.filter((warning) => warning.severity === 'error'),
-      ...warnings.filter((warning) => warning.severity !== 'error'),
+      ...validation.warnings.filter((warning) => warning.severity === 'error'),
+      ...validation.warnings.filter((warning) => warning.severity !== 'error'),
     ];
     const first = ordered.find((warning) => warning.paths?.length);
     const path = first?.paths?.[0];
@@ -512,154 +431,17 @@ function EditorApp({
       jumpToPath(path);
       return;
     }
-    notify(first?.message ?? '没有可定位的提醒，请人工核对', first ? 'info' : 'success');
+    session.notify(first?.message ?? '没有可定位的提醒，请人工核对', first ? 'info' : 'success');
+  }, [jumpToPath, session, validation]);
+
+  async function handleImportJson(raw: string, mode: 'merge' | 'replace') {
+    const ok = await session.importJson(raw, mode);
+    if (ok) setView('records');
   }
 
-  async function createNewRecord() {
-    cancelSaveTimer();
-    if (dirtyRef.current) await persistRecord(false);
-    const next = repo.newRecord();
-    const saved = await repo.saveToLibrary(next, 0);
-    if (!saved.ok) {
-      notify(saved.reason ?? '新建病历保存失败', 'error');
-      return;
-    }
-    const persisted = saved.record ?? next;
-    recordRef.current = persisted;
-    setRecord(persisted);
-    setView('editor');
-    setStepIndex(0);
-    setDirty(false);
-    dirtyRef.current = false;
-    resetValidationState();
-    const loaded = await repo.loadList();
-    if (loaded.ok) setList(loaded.list);
-    refreshExportPreview(persisted, loaded.ok ? loaded.list : list);
-    notify('已新建空白病历', 'success');
-  }
-
-  async function openRecord(item: RecordListItem) {
-    cancelSaveTimer();
-    if (dirtyRef.current) await persistRecord(false);
-    const stored = await repo.loadCurrent(item.id);
-    const next = RECORD_CORE.cloneValue(stored.ok && stored.record ? stored.record : item.data);
-    recordRef.current = next;
-    setRecord(next);
-    setView('editor');
-    setStepIndex(0);
-    setDirty(false);
-    dirtyRef.current = false;
-    resetValidationState();
-    const saved = await repo.saveToLibrary(next, Number(next.meta.revision) || 0);
-    if (saved.ok) {
-      const persisted = saved.record ?? next;
-      recordRef.current = persisted;
-      setRecord(persisted);
-      refreshExportPreview(persisted, list);
-    }
-    notify(`已打开 ${item.basic?.name || RECORD_CORE.summarize(item).name}`);
-  }
-
-  async function copyRecord(item: RecordListItem) {
-    cancelSaveTimer();
-    if (dirtyRef.current) await persistRecord(false);
-    const stored = await repo.loadCurrent(item.id);
-    const source = stored.ok && stored.record ? stored.record : item.data;
-    const copy = RECORD_CORE.copyRecordAsNew(source);
-    const saved = await repo.saveToLibrary(copy, 0);
-    if (!saved.ok) {
-      notify(saved.reason ?? '复制病历保存失败', 'error');
-      return;
-    }
-    const persisted = saved.record ?? copy;
-    recordRef.current = persisted;
-    setRecord(persisted);
-    setView('editor');
-    setStepIndex(0);
-    setDirty(false);
-    dirtyRef.current = false;
-    resetValidationState();
-    const loaded = await repo.loadList();
-    const nextList = loaded.ok ? loaded.list : list;
-    if (loaded.ok) setList(nextList);
-    refreshExportPreview(persisted, nextList);
-    notify('已复制为新病历；身份信息、生命体征数值、日期和号码已清空', 'success');
-  }
-
-  async function deleteRecord(item: RecordListItem) {
-    if (record.id === item.id) cancelSaveTimer();
-    const nextList = RECORD_CORE.removeRecord(list, item.id);
-    const result = await repo.deleteRecord(item.id);
-    if (!result.ok) {
-      notify(result.reason ?? '删除失败', 'error');
-      return;
-    }
-    setList(nextList);
-    if (record.id === item.id) {
-      const next = repo.newRecord();
-      recordRef.current = next;
-      setRecord(next);
-      setDirty(false);
-      dirtyRef.current = false;
-      resetValidationState();
-      refreshExportPreview(next, nextList);
-    }
-    notify('病历已删除', 'success');
-  }
-
-  async function importJson(raw: string, mode: 'merge' | 'replace') {
-    try {
-      cancelSaveTimer();
-      const summary = await repo.importBackup(raw, mode);
-      const loaded = await repo.loadList();
-      const nextList = loaded.ok ? loaded.list : [];
-      setList(nextList);
-
-      const preferred = summary.firstRecordId
-        ? await repo.loadCurrent(summary.firstRecordId)
-        : await repo.loadCurrent();
-      if (preferred.ok && preferred.record) {
-        recordRef.current = preferred.record;
-        setRecord(preferred.record);
-        setDirty(false);
-        dirtyRef.current = false;
-        refreshExportPreview(preferred.record, nextList);
-      }
-      const recoveries = await repo.listRecoveryCopies().catch(() => []);
-      setRecovery(recoveries[0] ?? null);
-      setView('records');
-      const recovery = summary.recoveryId ? '；已生成替换前恢复副本' : '';
-      notify(`导入完成：${summary.recordCount} 份病历${recovery}`, 'success');
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      notify(`导入失败：${message}`, 'error');
-    }
-  }
-
-  async function restoreRecovery() {
-    if (!recovery) return;
-    if (!window.confirm(`恢复替换导入前的 ${recovery.recordCount} 份病历吗？`)) return;
-    try {
-      await repo.restoreRecovery(recovery.id);
-      const [loaded, current, loadedSettings] = await Promise.all([
-        repo.loadList(),
-        repo.loadCurrent(),
-        repo.loadSettings(),
-      ]);
-      const nextList = loaded.ok ? loaded.list : [];
-      const nextRecord = current.ok && current.record ? current.record : repo.newRecord();
-      setList(nextList);
-      setRecord(nextRecord);
-      if (loadedSettings.ok) setSettings(loadedSettings.settings);
-      setDirty(false);
-      setView('records');
-      resetValidationState();
-      refreshExportPreview(nextRecord, nextList);
-      notify('已恢复替换前病历', 'success');
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      notify(`恢复失败：${message}`, 'error');
-    }
+  async function handleRestoreRecovery() {
+    const ok = await session.restoreRecovery();
+    if (ok) setView('records');
   }
 
   async function exportJson(scope: 'current' | 'all', options: { includeNotes?: boolean } = {}) {
@@ -667,27 +449,196 @@ function EditorApp({
     try {
       const bundle = await repo.exportBackup(scope, { includeNotes });
       const text = serializeBackup(bundle);
-      setExportText(text);
-      downloadJson(text, scope === 'all' ? 'dabingli-records.json' : `dabingli-${record.id ?? 'record'}.json`);
-      notify(includeNotes ? '已下载 JSON 备份（含原始笔记）' : '已下载 JSON 备份（不含原始笔记）', 'success');
+      nativeExportFile(
+        text,
+        scope === 'all' ? 'dabingli-records.json' : `dabingli-${session.record.id ?? 'record'}.json`,
+        'application/json',
+      );
+      session.notify(includeNotes ? '已下载 JSON 备份（含原始笔记）' : '已下载 JSON 备份（不含原始笔记）', 'success');
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      notify(`导出失败：${message}`, 'error');
+      session.notify(`导出失败：${message}`, 'error');
     }
   }
+
+  function changeTheme(next: ThemePreference) {
+    setTheme(next);
+    try {
+      window.localStorage.setItem(THEME_STORAGE_KEY, next);
+    } catch {
+      // Ignore storage write restriction.
+    }
+  }
+
+  useEffect(() => {
+    document.documentElement.style.setProperty('--app-font-scale', String(session.settings.fontScale));
+  }, [session.settings.fontScale]);
+
+  useEffect(() => {
+    if (theme === 'auto') {
+      document.documentElement.removeAttribute('data-theme');
+    } else {
+      document.documentElement.setAttribute('data-theme', theme);
+    }
+  }, [theme]);
+
+  useEffect(() => {
+    if (!pendingFocus) return;
+    const frame = window.requestAnimationFrame(() => {
+      const fields = [...document.querySelectorAll<HTMLElement>('[data-field-path]')];
+      const matched = fields.find((element) => element.dataset.fieldPath === pendingFocus)
+        ?? fields.find((element) => element.dataset.fieldPath?.startsWith(`${pendingFocus}.`));
+      if (matched) {
+        let parent = matched.parentElement;
+        while (parent) {
+          if (parent instanceof HTMLDetailsElement) parent.open = true;
+          parent = parent.parentElement;
+        }
+        const focusTarget = matched.matches('input, select, textarea, button, [tabindex]')
+          ? matched
+          : matched.querySelector<HTMLElement>('button[tabindex="0"], input, select, textarea, button') ?? matched;
+        focusTarget.scrollIntoView?.({ block: 'center' });
+        focusTarget.focus();
+      } else {
+        document.getElementById('step-heading')?.focus();
+      }
+      setPendingFocus(null);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [pendingFocus, stepIndex, view]);
+
+  // Close mobile step panel on outside click
+  useEffect(() => {
+    if (!mobileNavOpen) return undefined;
+    const onPointerDown = (event: MouseEvent | TouchEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (mobileStepPanelRef.current?.contains(target)) return;
+      if (mobileStepButtonRef.current?.contains(target)) return;
+      setMobileNavOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('touchstart', onPointerDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('touchstart', onPointerDown);
+    };
+  }, [mobileNavOpen]);
+
+  // Warn before closing tab/window with unsaved edits or active AI image/request
+  useEffect(() => {
+    if (!session.dirty && !aiSession.hasUnsentWork) return undefined;
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [aiSession.hasUnsentWork, session.dirty]);
+
+  // Stable global keyboard handler via ref
+  const keyHandlerRef = useRef<(event: KeyboardEvent) => void>(() => {});
+  keyHandlerRef.current = (event: KeyboardEvent) => {
+    if (event.key === 'Escape') {
+      if (confirmState) {
+        confirmState.resolve(false);
+        setConfirmState(null);
+        return;
+      }
+      if (mobileNavOpen) {
+        setMobileNavOpen(false);
+        mobileStepButtonRef.current?.focus();
+        return;
+      }
+      const active = document.activeElement;
+      if (active instanceof HTMLElement) {
+        const details = active.closest('details');
+        if (details?.open) {
+          details.open = false;
+          details.querySelector<HTMLElement>('summary')?.focus();
+          return;
+        }
+      }
+      if (view !== 'editor') {
+        void navigateView('editor');
+      }
+    }
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
+      event.preventDefault();
+      void attemptSave(true);
+    }
+  };
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => keyHandlerRef.current(event);
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  // Register unified window.BingliWebHost contract for Android native host
+  const webHostRef = useRef<{ handleBack: () => boolean; flushPendingSave: () => void }>({
+    handleBack: () => false,
+    flushPendingSave: () => {},
+  });
+  webHostRef.current = {
+    handleBack: () => {
+      if (confirmState) {
+        confirmState.resolve(false);
+        setConfirmState(null);
+        return true;
+      }
+      if (mobileNavOpen) {
+        setMobileNavOpen(false);
+        mobileStepButtonRef.current?.focus();
+        return true;
+      }
+      if (view !== 'editor') {
+        void navigateView('editor');
+        return true;
+      }
+      if (stepIndex > 0) {
+        session.flushPendingSave();
+        goToStep(stepIndex - 1);
+        return true;
+      }
+      return false;
+    },
+    flushPendingSave: session.flushPendingSave,
+  };
+
+  useEffect(() => (
+    registerBingliWebHost({
+      handleBack: () => webHostRef.current.handleBack(),
+      flushPendingSave: () => webHostRef.current.flushPendingSave(),
+    })
+  ), []);
+
+  const stepStates = useMemo<Partial<Record<StepKey, StepCompletionState>>>(() => {
+    const map: Partial<Record<StepKey, StepCompletionState>> = {};
+    for (const def of STEPS) {
+      map[def.key] = stepState(session.record, def.key);
+    }
+    return map;
+  }, [session.record]);
 
   const aiSecurityContext = androidBridge ? 'android' as const : 'web' as const;
   const aiConfigured = androidBridge ? androidStatus?.configured === true : apiKey.trim().length > 0;
   const aiModel = androidBridge ? androidStatus?.model ?? 'deepseek-flash' : webAiModel;
-  const step = STEPS[stepIndex] ?? STEPS[0];
-  const stepKey: StepKey = step.key;
+
   const stepProps: StepComponentProps = {
-    record,
-    update,
-    replaceRecord,
-    errors,
+    record: session.record,
+    update: session.update,
+    replaceRecord: session.replaceRecord,
+    errors: validation.errors,
     onJump: jumpToPath,
-    notify,
+    notify: session.notify,
+    warnings: validation.warnings,
+    settings: session.settings,
+    pushUndoSnapshot: session.pushUndoSnapshot,
+    onUndo: session.undoLast,
+    canUndo: session.canUndo,
+    undoLabel: session.undoLabel,
+    confirmAction,
   };
 
   let stepContent: ReactNode;
@@ -720,112 +671,9 @@ function EditorApp({
       stepContent = <SummaryStep {...stepProps} />;
       break;
     case 'output':
-      stepContent = (
-        <OutputStep
-          {...stepProps}
-          settings={settings}
-        />
-      );
+      stepContent = <OutputStep {...stepProps} settings={session.settings} />;
       break;
   }
-
-  useEffect(() => {
-    if (!dirty) return;
-    if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
-    saveTimer.current = window.setTimeout(() => {
-      saveTimer.current = null;
-      void persistRecord(false);
-    }, 900);
-    return () => {
-      if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
-    };
-  }, [dirty, record]);
-
-  useEffect(() => {
-    function handlePageHide() {
-      flushPendingSave();
-    }
-    function handleVisibilityChange() {
-      if (document.visibilityState === 'hidden') flushPendingSave();
-    }
-    window.addEventListener('pagehide', handlePageHide);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => {
-      window.removeEventListener('pagehide', handlePageHide);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, []);
-
-  useEffect(() => {
-    document.documentElement.style.setProperty('--app-font-scale', String(settings.fontScale));
-  }, [settings.fontScale]);
-
-  useEffect(() => {
-    if (!pendingFocus) return;
-    const frame = window.requestAnimationFrame(() => {
-      const fields = [...document.querySelectorAll<HTMLElement>('[data-field-path]')];
-      const field = fields.find((element) => element.dataset.fieldPath === pendingFocus)
-        ?? fields.find((element) => element.dataset.fieldPath?.startsWith(`${pendingFocus}.`));
-      if (field) {
-        let parent = field.parentElement;
-        while (parent) {
-          if (parent instanceof HTMLDetailsElement) parent.open = true;
-          parent = parent.parentElement;
-        }
-        field.scrollIntoView?.({ block: 'center' });
-        field.focus();
-      } else {
-        document.getElementById('step-heading')?.focus();
-      }
-      setPendingFocus(null);
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [pendingFocus, stepIndex, view]);
-
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        if (mobileNavOpen) {
-          setMobileNavOpen(false);
-          return;
-        }
-        const active = document.activeElement;
-        if (active instanceof HTMLElement) {
-          const details = active.closest('details');
-          if (details?.open) {
-            details.open = false;
-            details.querySelector<HTMLElement>('summary')?.focus();
-            return;
-          }
-        }
-        if (view !== 'editor') setView('editor');
-      }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
-        event.preventDefault();
-        void attemptSave(true);
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  });
-
-  function submitStep(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (stepIndex < STEPS.length - 1) {
-      goToStep(stepIndex + 1);
-    } else {
-      void attemptSave(true);
-    }
-  }
-
-  const alertNode = storageAlert ? (
-    <Notice tone="warning" title="存储提示">
-      {storageAlert}
-      <button type="button" className="button ghost compact-button" onClick={() => setStorageAlert('')}>
-        知道了
-      </button>
-    </Notice>
-  ) : null;
 
   return (
     <div className="app-shell">
@@ -844,19 +692,19 @@ function EditorApp({
           </div>
           <div>
             <div className="brand-title">大病历生成器</div>
-            <div className="brand-subtitle">Web UI · {record.basic.name || '未命名病历'}</div>
+            <div className="brand-subtitle">Web UI · {session.record.basic.name || '未命名病历'}</div>
           </div>
         </div>
         <nav className="header-actions" aria-label="全局操作">
           {view !== 'editor' ? (
-            <button type="button" className="button ghost" onClick={() => setView('editor')}>
+            <button type="button" className="button ghost" onClick={() => void navigateView('editor')}>
               返回编辑
             </button>
           ) : null}
           <button
             type="button"
             className={`button ghost${view === 'records' ? ' is-active' : ''}`}
-            onClick={() => setView('records')}
+            onClick={() => void navigateView('records')}
           >
             病历列表
           </button>
@@ -864,79 +712,116 @@ function EditorApp({
             type="button"
             className={`button ghost${view === 'ai' ? ' is-active' : ''}`}
             aria-current={view === 'ai' ? 'page' : undefined}
-            onClick={() => { refreshAndroidAiStatus(); setMobileNavOpen(false); setView('ai'); }}
+            onClick={() => void navigateView('ai')}
           >
             AI 助手
           </button>
           <button
             type="button"
             className={`button ghost${view === 'settings' ? ' is-active' : ''}`}
-            onClick={() => setView('settings')}
+            onClick={() => void navigateView('settings')}
           >
             设置
           </button>
-          <button type="button" className="button primary" onClick={() => attemptSave(true)}>
-            {dirty ? '保存病历 *' : '保存病历'}
+          <button type="button" className="button primary" onClick={() => void attemptSave(true)}>
+            {session.dirty ? '保存病历 *' : '保存病历'}
           </button>
         </nav>
       </header>
 
-      {alertNode ? <div className="global-notice">{alertNode}</div> : null}
+      {session.storageAlert ? (
+        <div className="global-notice">
+          <Notice tone="warning" title="存储提示">
+            <span>{session.storageAlert}</span>
+            <div className="button-row compact">
+              {session.corruptEntries.length ? (
+                <button
+                  type="button"
+                  className="button secondary compact-button"
+                  onClick={() => void session.exportCorruptLegacy()}
+                >
+                  导出损坏旧数据
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="button ghost compact-button"
+                onClick={() => session.setStorageAlert('')}
+              >
+                知道了
+              </button>
+            </div>
+          </Notice>
+        </div>
+      ) : null}
 
       <main id="main-content" className={`app-main${view === 'editor' ? ' has-editor-footer' : ''}`}>
         {view === 'records' ? (
           <Suspense fallback={<LazyContentFallback />}>
             <RecordsPage
-              list={list}
-              activeId={record.id}
-              exportText={exportText}
-              recovery={recovery}
+              list={session.list}
+              activeId={session.record.id}
+              getExportText={session.buildExportJson}
+              recovery={session.recovery}
+              corruptEntries={session.corruptEntries}
               includeNotes={exportIncludeNotes}
-              onNew={createNewRecord}
-              onOpen={openRecord}
-              onCopy={(item) => void copyRecord(item)}
-              onDelete={deleteRecord}
-              onImport={importJson}
+              onNew={() => void session.createNewRecord()}
+              onOpen={(item) => void session.openRecord(item)}
+              onCopy={(item) => void session.copyRecord(item)}
+              onDelete={(item) => void session.deleteRecord(item)}
+              onImport={(raw, mode) => void handleImportJson(raw, mode)}
               onDownload={exportJson}
-              onIncludeNotesChange={changeExportIncludeNotes}
-              onRestoreRecovery={restoreRecovery}
+              onIncludeNotesChange={setExportIncludeNotes}
+              onRestoreRecovery={() => void handleRestoreRecovery()}
+              onMergeLegacy={() => void session.mergeLegacy()}
+              onExportCorruptLegacy={() => void session.exportCorruptLegacy()}
             />
           </Suspense>
         ) : view === 'ai' ? (
           <Suspense fallback={<LazyContentFallback />}>
             <AiPage
-              record={record}
+              record={session.record}
               configured={aiConfigured}
               securityContext={aiSecurityContext}
               model={aiModel}
               apiKey={apiKey}
               onApiKeyChange={setApiKey}
+              onClearApiKey={clearKeyAndResetTransport}
               onModelChange={setWebAiModel}
               loadingAndroidStatus={androidBridge ? androidStatusLoading : false}
               onOpenAndroidAiSettings={androidBridge?.aiSettings ? () => androidBridge.aiSettings?.() : undefined}
               onRefreshAndroidStatus={androidBridge ? refreshAndroidAiStatus : undefined}
-              initialTarget={step.key === 'hpi' ? 'hpi.symptoms' : Object.keys(AI_FIELDS).find((path) => path.startsWith(`${step.key}.`)) ?? 'hpi.symptoms'}
+              initialTarget={defaultAiTarget}
               createTransport={createAiTransport}
               onAdoptRecord={adoptAiRecord}
-              onRawNotesChange={updateRawNotes}
-              canUndoAdoption={aiUndo?.recordId === record.id}
+              onRawNotesChange={session.updateRawNotes}
+              canUndoAdoption={aiUndo?.recordId === session.record.id}
               onUndoAdoption={undoAiRecord}
               onConfirmField={confirmAiContent}
               onJumpToPath={jumpToPath}
+              sessionState={aiSession.session}
+              onSessionPatch={aiSession.patchSession}
+              sharedAbortRef={aiSession.abortRef}
             />
           </Suspense>
         ) : view === 'settings' ? (
           <Suspense fallback={<LazyContentFallback />}>
             <SettingsPage
-              settings={settings}
-              exportText={exportText}
-              recovery={recovery}
+              settings={session.settings}
+              theme={theme}
+              onThemeChange={changeTheme}
+              getExportText={session.buildExportJson}
+              recovery={session.recovery}
+              corruptEntries={session.corruptEntries}
+              quotaInfo={session.quotaInfo}
               includeNotes={exportIncludeNotes}
-              onChange={saveSettings}
-              onImport={importJson}
+              onChange={(next) => void session.saveSettings(next)}
+              onImport={(raw, mode) => void handleImportJson(raw, mode)}
               onDownload={exportJson}
-              onIncludeNotesChange={changeExportIncludeNotes}
-              onRestoreRecovery={restoreRecovery}
+              onIncludeNotesChange={setExportIncludeNotes}
+              onRestoreRecovery={() => void handleRestoreRecovery()}
+              onMergeLegacy={() => void session.mergeLegacy()}
+              onExportCorruptLegacy={() => void session.exportCorruptLegacy()}
             />
           </Suspense>
         ) : (
@@ -946,12 +831,18 @@ function EditorApp({
                 <div className="eyebrow">病历目录</div>
                 <strong>{stepIndex + 1} / {STEPS.length}</strong>
               </div>
-              <StepDirectory steps={STEPS} activeIndex={stepIndex} onSelect={goToStep} />
+              <StepDirectory
+                steps={STEPS}
+                activeIndex={stepIndex}
+                states={stepStates}
+                onSelect={goToStep}
+              />
               <div className="directory-note">任何步骤都可以直接跳转，内容会保留。</div>
             </aside>
 
             <div className="editor-main">
               <button
+                ref={mobileStepButtonRef}
                 type="button"
                 className="mobile-step-button"
                 aria-expanded={mobileNavOpen}
@@ -962,18 +853,42 @@ function EditorApp({
                 <span>打开目录</span>
               </button>
               {mobileNavOpen ? (
-                <div className="mobile-step-panel" id="mobile-step-nav">
+                <div ref={mobileStepPanelRef} className="mobile-step-panel" id="mobile-step-nav">
                   <div className="mobile-step-panel-head">
                     <strong>病历目录</strong>
-                    <button type="button" className="button ghost compact-button" onClick={() => setMobileNavOpen(false)}>
+                    <button
+                      type="button"
+                      className="button ghost compact-button"
+                      onClick={() => {
+                        setMobileNavOpen(false);
+                        mobileStepButtonRef.current?.focus();
+                      }}
+                    >
                       关闭
                     </button>
                   </div>
-                  <StepDirectory steps={STEPS} activeIndex={stepIndex} onSelect={goToStep} />
+                  <StepDirectory
+                    steps={STEPS}
+                    activeIndex={stepIndex}
+                    states={stepStates}
+                    onSelect={goToStep}
+                  />
                 </div>
               ) : null}
 
-              <form className="editor-form" onSubmit={submitStep} onBlur={handleFieldBlur} noValidate>
+              <form
+                className="editor-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (stepIndex < STEPS.length - 1) {
+                    goToStep(stepIndex + 1);
+                  } else {
+                    void attemptSave(true);
+                  }
+                }}
+                onBlur={validation.handleFieldBlur}
+                noValidate
+              >
                 <Suspense fallback={<LazyContentFallback />}>
                   {stepContent}
                 </Suspense>
@@ -987,10 +902,19 @@ function EditorApp({
                     上一步
                   </button>
                   <div className="footer-secondary-actions">
+                    <button
+                      type="button"
+                      className="button ghost"
+                      disabled={!session.canUndo}
+                      title={session.undoLabel ? `撤销：${session.undoLabel}` : '没有可撤销的操作'}
+                      onClick={() => void session.undoLast()}
+                    >
+                      撤销
+                    </button>
                     <button type="button" className="button ghost" onClick={jumpToFirstInvalid}>
                       检查并定位
                     </button>
-                    <button type="button" className="button secondary" onClick={() => attemptSave(true)}>
+                    <button type="button" className="button secondary" onClick={() => void attemptSave(true)}>
                       保存
                     </button>
                   </div>
@@ -1004,9 +928,28 @@ function EditorApp({
         )}
       </main>
 
-      <div className={`toast${toast ? ' is-visible' : ''}`} role="status" aria-live="polite">
-        {toast?.message}
+      <div className={`toast${session.toast ? ' is-visible' : ''}`} role="status" aria-live="polite">
+        {session.toast?.message}
       </div>
+
+      <ConfirmModal
+        open={confirmState !== null}
+        title={confirmState?.title ?? ''}
+        message={confirmState?.message ?? ''}
+        confirmLabel={confirmState?.confirmLabel}
+        cancelLabel={confirmState?.cancelLabel}
+        danger={confirmState?.danger}
+        onConfirm={() => {
+          const resolve = confirmState?.resolve;
+          setConfirmState(null);
+          resolve?.(true);
+        }}
+        onCancel={() => {
+          const resolve = confirmState?.resolve;
+          setConfirmState(null);
+          resolve?.(false);
+        }}
+      />
     </div>
   );
 }

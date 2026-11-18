@@ -2,14 +2,15 @@ import { RECORD_CORE } from '@dabingli/domain';
 import { FieldRenderer } from '../components/FieldRenderer';
 import { Card, FormGrid, StepShell } from '../components/StepShell';
 import type { StepComponentProps } from '../editor-types';
-import { stringAt } from '../form-utils';
+import { stringAt, useStableListKeys } from '../form-utils';
 import { STEP_DESCRIPTIONS } from '../steps';
 
 export function AuxStep({ record, update, errors }: StepComponentProps) {
   const items = record.auxiliary.items.length ? record.auxiliary.items : [{ name: '', result: '' }];
+  const { keys, removeKeyAt } = useStableListKeys(items.length, record.id);
 
-  function updateItems(next: typeof items) {
-    update('auxiliary.items', next);
+  function updateItems(next: typeof items, snapshotLabel?: string) {
+    update('auxiliary.items', next, snapshotLabel ? { snapshotLabel } : undefined);
   }
 
   return (
@@ -21,14 +22,20 @@ export function AuxStep({ record, update, errors }: StepComponentProps) {
       <Card title="检查结果" description="按检查时间顺序记录；外院检查请写明机构名称和检查号。">
         <div className="array-list">
           {items.map((_item, index) => (
-            <article className="array-card" key={index}>
+            <article className="array-card" key={keys[index]}>
               <div className="array-card-head">
                 <h4>检查 {index + 1}</h4>
                 <button
                   type="button"
                   className="button danger ghost"
                   disabled={items.length === 1}
-                  onClick={() => updateItems(RECORD_CORE.cloneValue(items).filter((_, row) => row !== index))}
+                  onClick={() => {
+                    removeKeyAt(index);
+                    updateItems(
+                      RECORD_CORE.cloneValue(items).filter((_, row) => row !== index),
+                      `删除第 ${index + 1} 项辅助检查`,
+                    );
+                  }}
                 >
                   删除
                 </button>
@@ -98,7 +105,11 @@ export function AuxStep({ record, update, errors }: StepComponentProps) {
         >
           + 添加一项检查
         </button>
-        {errors['auxiliary.items'] ? <div className="field-error">{errors['auxiliary.items']}</div> : null}
+        {errors['auxiliary.items'] ? (
+          <div className="field-error" role="alert">
+            {errors['auxiliary.items']}
+          </div>
+        ) : null}
       </Card>
     </StepShell>
   );

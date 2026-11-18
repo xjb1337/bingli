@@ -1,28 +1,44 @@
-import { useRef, useState } from 'react';
-import type { RecoveryCopySummary } from '@dabingli/storage';
+import { useMemo, useRef, useState } from 'react';
+import type { CorruptLegacyEntry, RecoveryCopySummary } from '@dabingli/storage';
+import { ConfirmModal } from './ConfirmModal';
 
 export interface DataTransferPanelProps {
-  exportText: string;
+  exportText?: string;
+  getExportText?: (includeNotes: boolean) => string;
   recovery?: RecoveryCopySummary | null;
+  corruptEntries?: readonly CorruptLegacyEntry[];
   includeNotes: boolean;
   onIncludeNotesChange: (value: boolean) => void;
   onImport: (raw: string, mode: 'merge' | 'replace') => void;
   onDownload: (scope: 'current' | 'all', options?: { includeNotes?: boolean }) => void;
   onRestoreRecovery?: () => void;
+  onMergeLegacy?: () => void;
+  onExportCorruptLegacy?: () => void;
 }
 
 export function DataTransferPanel({
   exportText,
+  getExportText,
   recovery,
+  corruptEntries = [],
   includeNotes,
   onIncludeNotesChange,
   onImport,
   onDownload,
   onRestoreRecovery,
+  onMergeLegacy,
+  onExportCorruptLegacy,
 }: DataTransferPanelProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [mode, setMode] = useState<'merge' | 'replace'>('merge');
   const [showExport, setShowExport] = useState(false);
+  const [pendingReplaceRaw, setPendingReplaceRaw] = useState<string | null>(null);
+
+  const previewText = useMemo(() => {
+    if (!showExport) return '';
+    if (getExportText) return getExportText(includeNotes);
+    return exportText ?? '';
+  }, [exportText, getExportText, includeNotes, showExport]);
 
   return (
     <div className="data-transfer">
@@ -61,11 +77,13 @@ export function DataTransferPanel({
           onChange={(event) => {
             const file = event.target.files?.[0];
             if (!file) return;
-            if (mode === 'replace' && !window.confirm('替换全部会覆盖当前病历列表，确定继续吗？')) {
-              event.target.value = '';
-              return;
-            }
-            void file.text().then((raw) => onImport(raw, mode));
+            void file.text().then((raw) => {
+              if (mode === 'replace') {
+                setPendingReplaceRaw(raw);
+              } else {
+                onImport(raw, mode);
+              }
+            });
             event.target.value = '';
           }}
         />
@@ -74,6 +92,20 @@ export function DataTransferPanel({
         </button>
       </div>
       <p className="muted">数据仅保存在本机浏览器；替换导入前会先保存恢复副本。</p>
+      {onMergeLegacy || (corruptEntries.length > 0 && onExportCorruptLegacy) ? (
+        <div className="button-row">
+          {onMergeLegacy ? (
+            <button type="button" className="button ghost" onClick={onMergeLegacy}>
+              合并导入旧本地数据
+            </button>
+          ) : null}
+          {corruptEntries.length > 0 && onExportCorruptLegacy ? (
+            <button type="button" className="button ghost danger" onClick={onExportCorruptLegacy}>
+              导出损坏旧数据（{corruptEntries.length} 条）
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       {recovery && onRestoreRecovery ? (
         <div className="button-row">
           <p className="muted">
@@ -87,9 +119,22 @@ export function DataTransferPanel({
       {showExport ? (
         <label className="export-preview">
           <span>当前导出快照（JSON）</span>
-          <textarea readOnly value={exportText} rows={10} />
+          <textarea readOnly value={previewText} rows={10} />
         </label>
       ) : null}
+      <ConfirmModal
+        open={pendingReplaceRaw !== null}
+        title="确认替换全部病历"
+        message="替换全部会覆盖当前病历列表（系统会先自动保存一份替换前恢复副本），确定继续吗？"
+        confirmLabel="确定替换"
+        danger
+        onConfirm={() => {
+          const raw = pendingReplaceRaw;
+          setPendingReplaceRaw(null);
+          if (raw !== null) onImport(raw, 'replace');
+        }}
+        onCancel={() => setPendingReplaceRaw(null)}
+      />
     </div>
   );
 }

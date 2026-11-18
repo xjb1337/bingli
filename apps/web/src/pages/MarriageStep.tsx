@@ -1,4 +1,4 @@
-import { AGE, type DabingliRecord } from '@dabingli/domain';
+import { AGE, RECORD_CORE } from '@dabingli/domain';
 import { Collapsible } from '../components/Collapsible';
 import { FieldRenderer } from '../components/FieldRenderer';
 import { Card, FormGrid, StepShell } from '../components/StepShell';
@@ -6,10 +6,19 @@ import type { StepComponentProps } from '../editor-types';
 import { stringAt } from '../form-utils';
 import { STEP_DESCRIPTIONS } from '../steps';
 
-export function MarriageStep({ record, update, errors }: StepComponentProps) {
+export function MarriageStep({ record, update, replaceRecord, errors, notify }: StepComponentProps) {
   const isFemale = record.basic.gender === '女';
-  const isChild = (AGE as unknown as { isChild: (value: DabingliRecord) => boolean }).isChild(record);
+  const isChild = AGE.isChild(record);
   const showPrepubertyHint = isFemale && isChild && !stringAt(record, 'menstruation.applicable').trim();
+  const conflict = RECORD_CORE.marriageConflict(record);
+  const maleChildrenValue = stringAt(record, 'childbirth.children') || stringAt(record, 'childbirth.gravida');
+
+  function resolveConflict(chosen: string) {
+    const next = RECORD_CORE.cloneValue(record);
+    RECORD_CORE.resolveMarriage(next, chosen);
+    replaceRecord(next, { snapshotLabel: '解决婚姻状态冲突' });
+    notify(`已采用婚姻状况：${chosen || '未填'}`, 'success');
+  }
 
   return (
     <StepShell
@@ -18,6 +27,30 @@ export function MarriageStep({ record, update, errors }: StepComponentProps) {
       description={STEP_DESCRIPTIONS.marriage}
     >
       <Card title="婚姻史">
+        {conflict ? (
+          <div className="doc-state doc-state-stale" data-doc-state="marriage-conflict" role="region" aria-label="婚姻状态冲突">
+            <div className="doc-state-title">旧存档里婚姻状态有两处不同的值，需要你选一个</div>
+            <p className="field-hint">
+              基本情况：{conflict.basicValue || '未填'}；婚姻史：{conflict.marriageValue || '未填'}。两个原值都已保留，选择前不会静默舍弃。
+            </p>
+            <div className="button-row compact">
+              <button
+                type="button"
+                className="button primary compact-button"
+                onClick={() => resolveConflict(conflict.basicValue)}
+              >
+                采用「{conflict.basicValue || '未填'}」
+              </button>
+              <button
+                type="button"
+                className="button secondary compact-button"
+                onClick={() => resolveConflict(conflict.marriageValue)}
+              >
+                采用「{conflict.marriageValue || '未填'}」
+              </button>
+            </div>
+          </div>
+        ) : null}
         <FormGrid>
           <FieldRenderer
             path="basic.marital"
@@ -102,7 +135,7 @@ export function MarriageStep({ record, update, errors }: StepComponentProps) {
                 className="field-wide"
               />
             </FormGrid>
-            <Collapsible title="结构化填写">
+            <Collapsible title="结构化填写" syncKey={record.id}>
               <FormGrid>
                 <FieldRenderer path="menstruation.age" label="初潮年龄" value={stringAt(record, 'menstruation.age')} onChange={update} kind="number" inputMode="numeric" error={errors['menstruation.age']} />
                 <FieldRenderer path="menstruation.cycle" label="周期（天）" value={stringAt(record, 'menstruation.cycle')} onChange={update} kind="number" inputMode="numeric" error={errors['menstruation.cycle']} />
@@ -128,7 +161,7 @@ export function MarriageStep({ record, update, errors }: StepComponentProps) {
               <FieldRenderer path="childbirth.abortion" label="流产或人流数" value={stringAt(record, 'childbirth.abortion')} onChange={update} kind="number" inputMode="numeric" error={errors['childbirth.abortion']} />
               <FieldRenderer path="childbirth.alive" label="存活数" value={stringAt(record, 'childbirth.alive')} onChange={update} kind="number" inputMode="numeric" error={errors['childbirth.alive']} />
             </FormGrid>
-            <Collapsible title="其他生育信息">
+            <Collapsible title="其他生育信息" syncKey={record.id}>
               <FormGrid>
                 <FieldRenderer path="childbirth.gravida" label="孕次" value={stringAt(record, 'childbirth.gravida')} onChange={update} kind="number" inputMode="numeric" error={errors['childbirth.gravida']} />
                 <FieldRenderer path="childbirth.para" label="产次" value={stringAt(record, 'childbirth.para')} onChange={update} kind="number" inputMode="numeric" error={errors['childbirth.para']} />
@@ -145,8 +178,13 @@ export function MarriageStep({ record, update, errors }: StepComponentProps) {
             <FieldRenderer
               path="childbirth.children"
               label="子女数"
-              value={stringAt(record, 'childbirth.children') || stringAt(record, 'childbirth.gravida')}
-              onChange={update}
+              value={maleChildrenValue}
+              onChange={(path, val) => {
+                update(path, val);
+                if (val === '' && stringAt(record, 'childbirth.gravida')) {
+                  update('childbirth.gravida', '');
+                }
+              }}
               kind="number"
               inputMode="numeric"
               error={errors['childbirth.children'] ?? errors['childbirth.gravida']}

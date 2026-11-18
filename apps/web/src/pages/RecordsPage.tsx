@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { RECORD_CORE, SCHEMA, type RecordListItem } from '@dabingli/domain';
-import type { RecoveryCopySummary } from '@dabingli/storage';
+import type { CorruptLegacyEntry, RecoveryCopySummary } from '@dabingli/storage';
+import { ConfirmModal } from '../components/ConfirmModal';
 import { DataTransferPanel } from '../components/DataTransferPanel';
 import { Card } from '../components/StepShell';
 
@@ -8,7 +9,9 @@ export function RecordsPage({
   list,
   activeId,
   exportText,
+  getExportText,
   recovery,
+  corruptEntries,
   includeNotes,
   onNew,
   onOpen,
@@ -18,11 +21,15 @@ export function RecordsPage({
   onDownload,
   onIncludeNotesChange,
   onRestoreRecovery,
+  onMergeLegacy,
+  onExportCorruptLegacy,
 }: {
   list: readonly RecordListItem[];
   activeId?: string;
-  exportText: string;
+  exportText?: string;
+  getExportText?: (includeNotes: boolean) => string;
   recovery?: RecoveryCopySummary | null;
+  corruptEntries?: readonly CorruptLegacyEntry[];
   includeNotes: boolean;
   onNew: () => void;
   onOpen: (record: RecordListItem) => void;
@@ -32,8 +39,16 @@ export function RecordsPage({
   onDownload: (scope: 'current' | 'all', options?: { includeNotes?: boolean }) => void;
   onIncludeNotesChange: (value: boolean) => void;
   onRestoreRecovery?: () => void;
+  onMergeLegacy?: () => void;
+  onExportCorruptLegacy?: () => void;
 }) {
   const [query, setQuery] = useState('');
+  const [pendingConfirm, setPendingConfirm] = useState<{
+    kind: 'copy' | 'delete';
+    item: RecordListItem;
+    name: string;
+  } | null>(null);
+
   const departmentNames = useMemo(
     () => new Map(SCHEMA.DEPARTMENTS.map((item) => [item.key, item.name])),
     [],
@@ -106,18 +121,14 @@ export function RecordsPage({
                 <button
                   type="button"
                   className="button ghost"
-                  onClick={() => {
-                    if (window.confirm('复制为新病历？将保留科室和病种相关结构，清空身份信息、生命体征数值、日期和号码，且不复制原始笔记。')) onCopy(item);
-                  }}
+                  onClick={() => setPendingConfirm({ kind: 'copy', item, name: summary.name })}
                 >
                   复制为新病历
                 </button>
                 <button
                   type="button"
                   className="button ghost danger"
-                  onClick={() => {
-                    if (window.confirm(`删除“${summary.name}”及其草稿（含原始笔记）吗？`)) onDelete(item);
-                  }}
+                  onClick={() => setPendingConfirm({ kind: 'delete', item, name: summary.name })}
                 >
                   删除
                 </button>
@@ -148,14 +159,38 @@ export function RecordsPage({
       <Card title="导入 / 导出">
         <DataTransferPanel
           exportText={exportText}
+          getExportText={getExportText}
           recovery={recovery}
+          corruptEntries={corruptEntries}
           includeNotes={includeNotes}
           onIncludeNotesChange={onIncludeNotesChange}
           onImport={onImport}
           onDownload={onDownload}
           onRestoreRecovery={onRestoreRecovery}
+          onMergeLegacy={onMergeLegacy}
+          onExportCorruptLegacy={onExportCorruptLegacy}
         />
       </Card>
+
+      <ConfirmModal
+        open={pendingConfirm !== null}
+        title={pendingConfirm?.kind === 'delete' ? '确认删除病历' : '确认复制为新病历'}
+        message={
+          pendingConfirm?.kind === 'delete'
+            ? `确定删除“${pendingConfirm.name}”及其草稿（含原始笔记）吗？删除后无法撤销。`
+            : '复制为新病历？将保留科室和病种相关结构，清空身份信息、生命体征数值、日期和号码，且不复制原始笔记。'
+        }
+        confirmLabel={pendingConfirm?.kind === 'delete' ? '确认删除' : '确认复制'}
+        danger={pendingConfirm?.kind === 'delete'}
+        onConfirm={() => {
+          const target = pendingConfirm;
+          setPendingConfirm(null);
+          if (!target) return;
+          if (target.kind === 'copy') onCopy(target.item);
+          else onDelete(target.item);
+        }}
+        onCancel={() => setPendingConfirm(null)}
+      />
     </section>
   );
 }

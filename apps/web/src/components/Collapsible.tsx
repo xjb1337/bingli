@@ -4,6 +4,7 @@ interface CollapsibleProps {
   title: string;
   children: ReactNode;
   defaultOpen?: boolean;
+  syncKey?: string | number;
   badge?: ReactNode;
   className?: string;
   id?: string;
@@ -13,6 +14,7 @@ export function Collapsible({
   title,
   children,
   defaultOpen = false,
+  syncKey,
   badge,
   className = '',
   id,
@@ -20,8 +22,10 @@ export function Collapsible({
   const detailsRef = useRef<HTMLDetailsElement>(null);
 
   useEffect(() => {
-    if (defaultOpen && detailsRef.current) detailsRef.current.open = true;
-  }, [defaultOpen]);
+    if (detailsRef.current) {
+      detailsRef.current.open = Boolean(defaultOpen);
+    }
+  }, [defaultOpen, syncKey]);
 
   return (
     <details ref={detailsRef} id={id} className={`collapsible-card ${className}`.trim()}>
