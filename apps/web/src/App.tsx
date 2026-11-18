@@ -29,6 +29,7 @@ import {
   createIndexedDbRepository,
   importStagedLegacy,
   serializeBackup,
+  StagedImportConflictError,
   type CorruptLegacyEntry,
   type RecordRepository,
 } from '@dabingli/storage';
@@ -42,7 +43,9 @@ import { useMobileViewport } from './hooks/useMobileViewport';
 import { useRecordSession, type InitialSessionState } from './hooks/useRecordSession';
 import { useValidation } from './hooks/useValidation';
 import {
+  getNativeAndroidBridge,
   nativeExportFile,
+  notifyNativeLegacyImportFailed,
   notifyNativeLegacyImported,
   notifyNativeLegacyLaunched,
   readNativeStagedLegacy,
@@ -138,7 +141,7 @@ function FocusStepField({
 
 type AppView = 'editor' | 'records' | 'settings' | 'ai';
 
-async function loadSessionState(repository: RecordRepository): Promise<InitialSessionState> {
+async function loadSessionState(repository: RecordRepository): Promise<InitialSessionState & { canConfirmNativeLaunch: boolean }> {
   const [current, listResult, settingsResult, recoveries, corruptEntries, quotaInfo] = await Promise.all([
     repository.loadCurrent(),
     repository.loadList(),
@@ -176,7 +179,42 @@ async function loadSessionState(repository: RecordRepository): Promise<InitialSe
     quotaInfo,
     stepIndex: stepIndexOf(settings.lastStep),
     alert: alerts.join(' '),
+    canConfirmNativeLaunch: settingsResult.ok && listResult.ok && current.ok,
   };
+}
+
+async function initializeApp(repo: RecordRepository): Promise<InitialSessionState> {
+  const init = await repo.initialize();
+  const alerts: string[] = [];
+  if (!init.ok) {
+    alerts.push(
+      `本地数据迁移未完成：${init.migration?.reason ?? init.reason ?? '未知错误'}。旧 localStorage 保持原样。`,
+    );
+  } else if (init.migration?.status === 'migrated') {
+    const corruptSuffix = init.migration.corruptCount ? `（另隔离 ${init.migration.corruptCount} 条损坏旧数据）` : '';
+    alerts.push(`已从 localStorage 迁移 ${init.migration.recordCount} 份病历到 IndexedDB${corruptSuffix}；旧数据仍保留。`);
+  }
+
+  const stagedRaw = readNativeStagedLegacy();
+  if (stagedRaw && init.ok) {
+    try {
+      const staged = await importStagedLegacy(stagedRaw, repo);
+      notifyNativeLegacyImported();
+      if (!staged.alreadyImported && (staged.recordCount || staged.corruptCount)) {
+        const corruptSuffix = staged.corruptCount ? `；已隔离 ${staged.corruptCount} 条损坏旧数据供导出` : '';
+        alerts.push(`已从 Android 旧版本迁移 ${staged.recordCount} 份病历${corruptSuffix}。`);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      alerts.push(`Android 旧数据导入未完成：${message}。可在设置中导出原始数据。`);
+      if (!(error instanceof StagedImportConflictError)) notifyNativeLegacyImportFailed(message);
+    }
+  }
+
+  const loaded = await loadSessionState(repo);
+  if (loaded.alert) alerts.push(loaded.alert);
+  if (init.ok && loaded.canConfirmNativeLaunch) notifyNativeLegacyLaunched();
+  return { ...loaded, alert: alerts.join(' ') };
 }
 
 export function App({
@@ -187,66 +225,25 @@ export function App({
   aiTransportFactory?: AiTransportFactory;
 }) {
   const repositoryRef = useRef<RecordRepository | null>(repository ?? null);
-  if (!repositoryRef.current) repositoryRef.current = createIndexedDbRepository();
+  if (!repositoryRef.current) {
+    repositoryRef.current = createIndexedDbRepository({
+      autoMigrate: typeof getNativeAndroidBridge()?.stagedLegacy !== 'function',
+    });
+  }
   const repo = repositoryRef.current;
+  const initialization = useRef<Promise<InitialSessionState> | null>(null);
   const [initial, setInitial] = useState<InitialSessionState | null>(null);
   const [loadError, setLoadError] = useState('');
 
   useEffect(() => {
     let active = true;
-    void (async () => {
-      try {
-        const init = await repo.initialize();
-        const alerts: string[] = [];
-
-        if (!init.ok) {
-          alerts.push(
-            `本地数据迁移未完成：${init.migration?.reason ?? init.reason ?? '未知错误'}。旧 localStorage 保持原样。`,
-          );
-        } else if (init.migration?.status === 'migrated') {
-          const corruptSuffix = init.migration.corruptCount
-            ? `（另隔离 ${init.migration.corruptCount} 条损坏旧数据）`
-            : '';
-          alerts.push(
-            `已从 localStorage 迁移 ${init.migration.recordCount} 份病历到 IndexedDB${corruptSuffix}；旧数据仍保留。`,
-          );
-        }
-
-        // Android staged legacy import closure: BingliAndroid.stagedLegacy() -> importStagedLegacy() -> legacyImportSucceeded()
-        const stagedRaw = readNativeStagedLegacy();
-        if (stagedRaw) {
-          const [existingList, existingCurrent, existingSettings] = await Promise.all([
-            repo.loadList(),
-            repo.loadCurrent(),
-            repo.loadSettings(),
-          ]);
-          const isDbEmpty = existingList.ok
-            && existingList.list.length === 0
-            && !existingCurrent.record
-            && !existingSettings.raw;
-          if (isDbEmpty) {
-            try {
-              const stagedResult = await importStagedLegacy(stagedRaw, repo);
-              notifyNativeLegacyImported();
-              const corruptSuffix = stagedResult.corruptCount
-                ? `；已隔离 ${stagedResult.corruptCount} 条损坏旧数据供导出`
-                : '';
-              alerts.push(`已从 Android 旧版本迁移 ${stagedResult.recordCount} 份病历${corruptSuffix}。`);
-            } catch (stagedError) {
-              const message = stagedError instanceof Error ? stagedError.message : String(stagedError);
-              alerts.push(`Android 旧数据导入未完成：${message}`);
-            }
-          }
-        }
-
-        const loaded = await loadSessionState(repo);
-        if (loaded.alert) alerts.push(loaded.alert);
-        notifyNativeLegacyLaunched();
-        if (active) setInitial({ ...loaded, alert: alerts.join(' ') });
-      } catch (error) {
+    initialization.current ??= initializeApp(repo);
+    void initialization.current.then(
+      (loaded) => { if (active) setInitial(loaded); },
+      (error: unknown) => {
         if (active) setLoadError(error instanceof Error ? error.message : String(error));
-      }
-    })();
+      },
+    );
     return () => {
       active = false;
     };
@@ -595,9 +592,8 @@ function EditorApp({
   });
   webHostRef.current = {
     handleBack: () => {
-      if (confirmState) {
-        confirmState.resolve(false);
-        setConfirmState(null);
+      if (document.querySelector('.modal-dialog[aria-modal="true"]')) {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }));
         return true;
       }
       if (mobileNavOpen) {

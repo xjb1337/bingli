@@ -1,6 +1,7 @@
 package com.xjb.bingli.migration
 
 import org.json.JSONArray
+import org.json.JSONException
 import org.json.JSONObject
 import org.json.JSONTokener
 import java.io.File
@@ -30,6 +31,7 @@ class LegacyMigrator(
         val recordCount: Int,
         val recordIds: List<String>,
         val corruptKeys: List<String>,
+        val formatVersion: Int = STAGING_FORMAT_VERSION,
     ) {
         fun toJson(): JSONObject = JSONObject().apply {
             put("bytes", bytes)
@@ -40,6 +42,7 @@ class LegacyMigrator(
             put("recordCount", recordCount)
             put("recordIds", JSONArray(recordIds))
             put("corruptKeys", JSONArray(corruptKeys))
+            put("formatVersion", formatVersion)
         }
 
         companion object {
@@ -49,6 +52,7 @@ class LegacyMigrator(
                 json.optInt("keyCount", 0), json.optInt("recordCount", 0),
                 json.optJSONArray("recordIds").toStrings(),
                 json.optJSONArray("corruptKeys").toStrings(),
+                json.optInt("formatVersion", 1),
             )
         }
     }
@@ -75,6 +79,23 @@ class LegacyMigrator(
     val reason: String? get() = readSnapshot().reason
     val snapshot: Snapshot get() = readSnapshot()
 
+    /** Legacy frontends could leave a snapshot from before the user added more records. */
+    fun needsCapture(): Boolean = when (state) {
+        State.NONE -> true
+        State.STAGED, State.FAILED -> manifest()?.let { it.formatVersion < STAGING_FORMAT_VERSION } ?: false
+        State.IMPORTED, State.CONFIRMED -> false
+    }
+
+    @Synchronized
+    fun capture(rawPayloadJson: String): StageResult {
+        val newKeys = JSONObject(rawPayloadJson).optJSONObject("keys")
+        val previous = manifest()
+        val payload = if (newKeys?.length() == 0 && previous != null && previous.keyCount > 0 && verify()) {
+            exportRaw()
+        } else rawPayloadJson
+        return stage(payload)
+    }
+
     @Synchronized
     fun stage(rawPayloadJson: String): StageResult {
         val payload = try { JSONObject(rawPayloadJson) } catch (e: Exception) {
@@ -95,6 +116,7 @@ class LegacyMigrator(
         val recordIds = linkedSetOf<String>()
         var recordCount = 0
         var keyCount = 0
+        var validKeyCount = 0
         for (key in keys.keys()) {
             keyCount++
             val value = keys.opt(key)
@@ -106,7 +128,8 @@ class LegacyMigrator(
                 throw IllegalArgumentException("迁移键 $key 不是字符串或 null")
             }
             try {
-                val parsed = JSONTokener(value).nextValue()
+                val parsed = parseLegacyJsonValue(value)
+                validKeyCount++
                 if (key == RECORDS_KEY && parsed is JSONArray) {
                     for (i in 0 until parsed.length()) {
                         val item = parsed.optJSONObject(i) ?: continue
@@ -119,18 +142,24 @@ class LegacyMigrator(
                 corrupt += key
             }
         }
+        val sortedCorrupt = corrupt.sorted()
         val raw = rawPayloadJson.toByteArray(StandardCharsets.UTF_8)
         val manifest = Manifest(raw.size.toLong(), sha256(raw), Instant.now(clock).toString(), appVersion,
-            keyCount, recordCount, recordIds.toList(), corrupt)
+            keyCount, recordCount, recordIds.toList(), sortedCorrupt)
+        // Quarantine partial corruption so valid keys still stage and migrate;
+        // fail only when every non-null key is unreadable.
+        val allNonNullKeysCorrupt = sortedCorrupt.isNotEmpty() && validKeyCount == 0
+        val nextState = if (allNonNullKeysCorrupt) State.FAILED else State.STAGED
+        val failReason = if (allNonNullKeysCorrupt) "迁移数据全部损坏：${sortedCorrupt.joinToString(",")}" else null
         try {
             atomicWrite(stagingFile, raw)
             atomicWrite(manifestFile, manifest.toJson().toString().toByteArray(StandardCharsets.UTF_8))
-            writeState(Snapshot(State.STAGED, null, 0))
+            writeState(Snapshot(nextState, failReason, 0))
         } catch (e: Exception) {
             fail("写入迁移暂存失败：${e.message ?: e.javaClass.simpleName}")
             throw e
         }
-        return StageResult(manifest, State.STAGED)
+        return StageResult(manifest, nextState)
     }
 
     @Synchronized
@@ -226,9 +255,25 @@ class LegacyMigrator(
 
     private fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 
+    private fun parseLegacyJsonValue(raw: String): Any {
+        val tokener = JSONTokener(raw)
+        val parsed = tokener.nextValue()
+        if (parsed !is JSONObject && parsed !is JSONArray) {
+            throw JSONException("迁移值必须是 JSON 对象或数组")
+        }
+        if (tokener.more()) {
+            val trailing = tokener.nextClean()
+            if (trailing != '\u0000') {
+                throw JSONException("迁移值包含多余字符")
+            }
+        }
+        return parsed
+    }
+
     private fun isAllowedKey(key: String): Boolean = key == RECORDS_KEY || key == CURRENT_KEY || key == SETTINGS_KEY || key.startsWith(DRAFT_PREFIX)
 
     companion object {
+        private const val STAGING_FORMAT_VERSION = 2
         const val RECORDS_KEY = "dabingli.records.v1"
         const val CURRENT_KEY = "dabingli.current.v1"
         const val SETTINGS_KEY = "dabingli.settings.v1"

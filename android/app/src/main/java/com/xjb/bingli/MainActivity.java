@@ -1,6 +1,7 @@
 package com.xjb.bingli;
 
 import android.app.*;
+import android.annotation.TargetApi;
 import android.os.*;
 import android.content.*;
 import android.net.Uri;
@@ -9,17 +10,25 @@ import android.provider.MediaStore;
 import android.webkit.*;
 import android.view.*;
 import android.widget.*;
+import android.window.OnBackInvokedCallback;
+import android.window.OnBackInvokedDispatcher;
 import androidx.core.content.FileProvider;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
+import androidx.webkit.WebViewAssetLoader;
 import java.io.*;
 import java.time.Clock;
+import org.json.JSONObject;
 import com.xjb.bingli.migration.LegacyMigrator;
 
 public class MainActivity extends Activity {
     private static final String ORIGIN = "https://appassets.androidplatform.net";
+    private static final String HANDLE_BACK_JS =
+        "(function(){try{if(window.BingliWebHost&&typeof window.BingliWebHost.handleBack==='function')return !!window.BingliWebHost.handleBack();return typeof APP!=='undefined'&&typeof APP.handleBack==='function'&&!!APP.handleBack();}catch(e){return false;}})()";
+    private static final String FLUSH_PENDING_SAVE_JS =
+        "(function(){try{if(window.BingliWebHost&&typeof window.BingliWebHost.flushPendingSave==='function'){window.BingliWebHost.flushPendingSave();}else if(typeof APP!=='undefined'&&typeof APP.flushPendingSave==='function'){APP.flushPendingSave();}}catch(e){}})()";
     private WebView web;
     private ValueCallback<Uri[]> chooser;
     private Uri cameraUri;
@@ -31,6 +40,9 @@ public class MainActivity extends Activity {
     private LinearLayout root;
     private WebView migrationWeb;
     private WebView printWeb;
+    private Object backCallback;
+    private WebViewAssetLoader assetLoader;
+    private boolean launchConfirmed;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -55,6 +67,9 @@ public class MainActivity extends Activity {
         settings.setAllowFileAccess(false); settings.setAllowContentAccess(true);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG);
+        assetLoader = new WebViewAssetLoader.Builder()
+            .addPathHandler("/assets/", this::openBundledAsset)
+            .build();
         web.addJavascriptInterface(new Bridge(), "BingliAndroid");
         web.setWebViewClient(new WebViewClient() {
             @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
@@ -92,8 +107,13 @@ public class MainActivity extends Activity {
         });
         updater = new UpdateManager(this);
         migrator = new LegacyMigrator(new File(getFilesDir(), "legacy-migration"), Clock.systemUTC(), BuildConfig.VERSION_NAME);
-        if (migrator.getState() == LegacyMigrator.State.NONE) beginLegacyMigration();
+        if (Build.VERSION.SDK_INT >= 33) {
+            backCallback = Api33Back.register(this, this::handleBackAction);
+        }
+        if (!BuildConfig.USE_MODERN_WEB) loadMain();
+        else if (migrator.needsCapture()) beginLegacyMigration();
         else if (migrator.getState() == LegacyMigrator.State.FAILED) loadRecovery();
+        else if (migrator.getState() == LegacyMigrator.State.STAGED && !migrator.verify()) loadRecovery();
         else loadMain();
     }
 
@@ -169,16 +189,65 @@ public class MainActivity extends Activity {
         if (file.exists()) file.delete();
     }
 
+    static final class AssetMatch {
+        final String assetPath;
+        final String mimeType;
+        final String encoding;
+        AssetMatch(String assetPath, String mimeType, String encoding) {
+            this.assetPath = assetPath;
+            this.mimeType = mimeType;
+            this.encoding = encoding;
+        }
+    }
+
+    static AssetMatch resolveSafeAsset(String scheme, String authority, String rawPath) {
+        if (!"https".equals(scheme) || !"appassets.androidplatform.net".equals(authority)) return null;
+        if (rawPath == null || rawPath.isEmpty()) return null;
+        String lower = rawPath.toLowerCase(java.util.Locale.ROOT);
+        if (rawPath.indexOf('\0') >= 0 || rawPath.indexOf('\\') >= 0 || rawPath.contains("//")
+            || lower.contains("%2e") || lower.contains("%2f") || lower.contains("%5c")) {
+            return null;
+        }
+        if ("/assets/index.html".equals(rawPath)) return new AssetMatch("index.html", "text/html", "UTF-8");
+        if ("/assets/legacy-migrate.html".equals(rawPath)) return new AssetMatch("legacy-migrate.html", "text/html", "UTF-8");
+        if ("/assets/migrate-recovery.html".equals(rawPath)) return new AssetMatch("migrate-recovery.html", "text/html", "UTF-8");
+        if (!rawPath.startsWith("/assets/assets/")) return null;
+        String relative = rawPath.substring("/assets/".length());
+        String[] segments = relative.split("/", -1);
+        if (segments.length < 2) return null;
+        for (String seg : segments) {
+            if (seg.isEmpty() || ".".equals(seg) || "..".equals(seg) || !seg.matches("[A-Za-z0-9._-]+")) {
+                return null;
+            }
+        }
+        String fileName = segments[segments.length - 1].toLowerCase(java.util.Locale.ROOT);
+        if (fileName.endsWith(".js")) return new AssetMatch(relative, "application/javascript", "UTF-8");
+        if (fileName.endsWith(".css")) return new AssetMatch(relative, "text/css", "UTF-8");
+        if (fileName.endsWith(".svg")) return new AssetMatch(relative, "image/svg+xml", "UTF-8");
+        if (fileName.endsWith(".png")) return new AssetMatch(relative, "image/png", null);
+        if (fileName.endsWith(".woff2")) return new AssetMatch(relative, "font/woff2", null);
+        if (fileName.endsWith(".json")) return new AssetMatch(relative, "application/json", "UTF-8");
+        if (fileName.endsWith(".webmanifest")) return new AssetMatch(relative, "application/manifest+json", "UTF-8");
+        return null;
+    }
+
     private WebResourceResponse assetResponse(Uri uri) {
-        if (!ORIGIN.equals(uri.getScheme() + "://" + uri.getAuthority()))
+        if (uri == null || uri.getUserInfo() != null) return blockedResponse();
+        String encodedPath = uri.getEncodedPath();
+        String decodedPath = uri.getPath();
+        if (resolveSafeAsset(uri.getScheme(), uri.getAuthority(), encodedPath) == null
+                || !encodedPath.equals(decodedPath)) {
             return blockedResponse();
-        String path = uri.getPath();
-        String asset = "/assets/index.html".equals(path) ? "index.html" :
-            "/assets/legacy-migrate.html".equals(path) ? "legacy-migrate.html" :
-            "/assets/migrate-recovery.html".equals(path) ? "migrate-recovery.html" : null;
-        if (asset == null) return blockedResponse();
-        try { return new WebResourceResponse("text/html", "UTF-8", getAssets().open(asset)); }
-        catch (IOException e) { return new WebResourceResponse("text/plain", "UTF-8", 500, "Error", null, new ByteArrayInputStream(new byte[0])); }
+        }
+        WebResourceResponse response = assetLoader.shouldInterceptRequest(uri);
+        return response == null ? blockedResponse() : response;
+    }
+
+    private WebResourceResponse openBundledAsset(String relativePath) {
+        AssetMatch match = resolveSafeAsset("https", WebViewAssetLoader.DEFAULT_DOMAIN, "/assets/" + relativePath);
+        if (match == null) return blockedResponse();
+        try { return new WebResourceResponse(match.mimeType, match.encoding, getAssets().open(match.assetPath)); }
+        catch (IOException e) { return new WebResourceResponse("text/plain", "UTF-8", 404, "Not Found", null, new ByteArrayInputStream(new byte[0])); }
     }
     private WebResourceResponse blockedResponse() {
         return new WebResourceResponse("text/plain", "UTF-8", 403, "Blocked", null, new ByteArrayInputStream(new byte[0]));
@@ -186,7 +255,6 @@ public class MainActivity extends Activity {
     private void loadMain() {
         web.setVisibility(View.VISIBLE);
         web.loadUrl(ORIGIN + "/assets/index.html");
-        if (migrator.getState() == LegacyMigrator.State.IMPORTED) migrator.confirmLaunch(true);
         updater.check(false);
     }
     private void loadRecovery() {
@@ -200,7 +268,7 @@ public class MainActivity extends Activity {
         migrationWeb.getSettings().setJavaScriptEnabled(true);
         migrationWeb.getSettings().setDomStorageEnabled(true);
         migrationWeb.getSettings().setAllowFileAccess(false);
-        migrationWeb.getSettings().setAllowContentAccess(true);
+        migrationWeb.getSettings().setAllowContentAccess(false);
         migrationWeb.setWebViewClient(new WebViewClient() {
             @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) { return assetResponse(request.getUrl()); }
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) { return !request.getUrl().toString().equals(ORIGIN + "/assets/legacy-migrate.html"); }
@@ -215,19 +283,17 @@ public class MainActivity extends Activity {
             migrationWeb.removeJavascriptInterface("BingliLegacyMigrate");
             migrationWeb.destroy(); migrationWeb = null;
         }
-        if (!failed) {
-            LegacyMigrator.Manifest manifest = migrator.manifest();
-            if (manifest != null && !manifest.getCorruptKeys().isEmpty()) {
-                migrator.markFailed("迁移数据包含损坏 JSON：" + String.join(",", manifest.getCorruptKeys()));
-                failed = true;
-            }
+        boolean isFailed = failed || migrator.getState() == LegacyMigrator.State.FAILED;
+        if (!isFailed && !migrator.verify()) {
+            migrator.markFailed("迁移暂存校验失败");
+            isFailed = true;
         }
-        if (failed) loadRecovery(); else loadMain();
+        if (isFailed) loadRecovery(); else loadMain();
     }
     public final class MigrationBridge {
         @JavascriptInterface public void submit(String json) {
             runOnUiThread(() -> {
-                try { migrator.stage(json); finishLegacyMigration(false); }
+                try { migrator.capture(json); finishLegacyMigration(false); }
                 catch (Exception e) { migrator.markFailed(e.getMessage() == null ? "迁移失败" : e.getMessage()); finishLegacyMigration(true); }
             });
         }
@@ -268,13 +334,13 @@ public class MainActivity extends Activity {
         @JavascriptInterface public String versionName() { return BuildConfig.VERSION_NAME; }
         @JavascriptInterface public String stagedLegacy() {
             try {
-                org.json.JSONObject out = new org.json.JSONObject();
-                String raw = migrator.exportRaw();
-                out.put("payload", new org.json.JSONObject(raw));
-                out.put("rawPayload", raw);
+                if (!BuildConfig.USE_MODERN_WEB || migrator.getState() != LegacyMigrator.State.STAGED) return "";
                 LegacyMigrator.Manifest manifest = migrator.manifest();
-                if (manifest != null) out.put("manifest", manifest.toJson());
-                return out.toString();
+                if (manifest == null || !migrator.verify()) return "";
+                return new JSONObject()
+                    .put("payload", new JSONObject(migrator.exportRaw()))
+                    .put("manifest", manifest.toJson())
+                    .toString();
             } catch (Exception e) { return ""; }
         }
         @JavascriptInterface public void exportLegacyRaw() {
@@ -282,9 +348,27 @@ public class MainActivity extends Activity {
         }
         @JavascriptInterface public void retryLegacy() { runOnUiThread(MainActivity.this::beginLegacyMigration); }
         @JavascriptInterface public void legacyImportSucceeded() {
-            try { migrator.markImported(); } catch (Exception e) { migrator.markFailed(e.getMessage() == null ? "导入失败" : e.getMessage()); }
+            runOnUiThread(() -> {
+                if (migrator.getState() != LegacyMigrator.State.STAGED) return;
+                try { migrator.markImported(); }
+                catch (Exception e) { failLegacyImport("无法确认迁移暂存"); }
+            });
         }
-        @JavascriptInterface public void legacyLaunchSucceeded() { migrator.confirmLaunch(true); }
+        @JavascriptInterface public void legacyImportFailed(String reason) {
+            runOnUiThread(() -> {
+                if (migrator.getState() == LegacyMigrator.State.STAGED) {
+                    failLegacyImport(reason == null ? "导入失败" : reason.substring(0, Math.min(reason.length(), 300)));
+                }
+            });
+        }
+        @JavascriptInterface public void legacyLaunchSucceeded() {
+            runOnUiThread(() -> {
+                if (!launchConfirmed && migrator.getState() == LegacyMigrator.State.IMPORTED) {
+                    migrator.confirmLaunch(true);
+                    launchConfirmed = true;
+                }
+            });
+        }
         @JavascriptInterface public void checkUpdates() { runOnUiThread(() -> updater.check(true)); }
         @JavascriptInterface public void copy(String text) {
             runOnUiThread(() -> ((ClipboardManager)getSystemService(CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("病历", text)));
@@ -374,11 +458,26 @@ public class MainActivity extends Activity {
             });
         }
     }
+    private void failLegacyImport(String reason) {
+        migrator.markFailed(reason);
+        if (web != null && !isFinishing() && !isDestroyed()) loadRecovery();
+    }
+
+    static String escapeJsSeparators(String jsonOrArgs) {
+        if (jsonOrArgs == null) return "";
+        return jsonOrArgs.replace("\u2028", "\\u2028").replace("\u2029", "\\u2029");
+    }
+
     private void aiResult(String id, org.json.JSONObject result) {
         runOnUiThread(() -> {
             if (web == null || isFinishing() || isDestroyed()) return;
-            String call = org.json.JSONObject.quote(id) + "," + result.toString();
-            web.evaluateJavascript("if(typeof BINGLI_AI_TRANSPORT_RECEIVE==='function'){BINGLI_AI_TRANSPORT_RECEIVE(" + call + ");}else if(typeof AI_ASSIST!=='undefined'){AI_ASSIST.receive(" + call + ");}", null);
+            String call = escapeJsSeparators(org.json.JSONObject.quote(id) + "," + result.toString());
+            web.evaluateJavascript(
+                "if(window.BingliWebHost&&typeof window.BingliWebHost.receiveAi==='function'){window.BingliWebHost.receiveAi(" + call + ");}"
+                + "else if(typeof BINGLI_AI_TRANSPORT_RECEIVE==='function'){BINGLI_AI_TRANSPORT_RECEIVE(" + call + ");}"
+                + "else if(typeof AI_ASSIST!=='undefined'){AI_ASSIST.receive(" + call + ");}",
+                null
+            );
         });
     }
     @Override protected void onActivityResult(int request, int result, Intent data) {
@@ -415,7 +514,7 @@ public class MainActivity extends Activity {
         // Flush the WebView editor's debounced draft before the Activity goes
         // into the background. The callback is intentionally best-effort;
         // Android may stop the process immediately after onPause.
-        web.evaluateJavascript("if(typeof APP!=='undefined' && APP._test.flushPendingSave) APP._test.flushPendingSave()", null);
+        if (web != null) web.evaluateJavascript(FLUSH_PENDING_SAVE_JS, null);
         super.onPause();
     }
     @Override protected void onStop() {
@@ -426,6 +525,10 @@ public class MainActivity extends Activity {
         clearCameraCache();
         clearShareCache();
         destroyPrintWeb();
+        if (Build.VERSION.SDK_INT >= 33 && backCallback != null) {
+            Api33Back.unregister(this, backCallback);
+            backCallback = null;
+        }
         if (aiClient != null) aiClient.close();
         if (updater != null) updater.close();
         if (chooser != null) { chooser.onReceiveValue(null); chooser = null; }
@@ -441,13 +544,37 @@ public class MainActivity extends Activity {
         }
         super.onDestroy();
     }
-    @Override public void onBackPressed() {
-        if (web == null) { super.onBackPressed(); return; }
-        web.evaluateJavascript("(function(){try{return !!(window.APP&&window.APP.handleBack&&APP.handleBack());}catch(e){return false;}})()", value -> {
+
+    private void handleBackAction() {
+        if (web == null || isFinishing() || isDestroyed()) return;
+        web.evaluateJavascript(HANDLE_BACK_JS, value -> {
             if ("true".equals(value) || isFinishing() || isDestroyed()) return;
-            web.evaluateJavascript("if(typeof APP!=='undefined' && APP._test && APP._test.flushPendingSave) APP._test.flushPendingSave()", null);
+            if (web != null) web.evaluateJavascript(FLUSH_PENDING_SAVE_JS, null);
             new AlertDialog.Builder(this).setMessage("退出大病历？请确认页面没有保存失败提示。")
                 .setPositiveButton("退出",(d,w)->finish()).setNegativeButton("继续填写",null).show();
         });
+    }
+
+    @Override
+    @SuppressWarnings("deprecation")
+    public void onBackPressed() {
+        if (web == null) { super.onBackPressed(); return; }
+        handleBackAction();
+    }
+
+    @TargetApi(33)
+    private static final class Api33Back {
+        static OnBackInvokedCallback register(Activity activity, Runnable onBack) {
+            OnBackInvokedCallback cb = onBack::run;
+            activity.getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
+                OnBackInvokedDispatcher.PRIORITY_DEFAULT, cb);
+            return cb;
+        }
+        static void unregister(Activity activity, Object callback) {
+            if (callback instanceof OnBackInvokedCallback) {
+                activity.getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(
+                    (OnBackInvokedCallback) callback);
+            }
+        }
     }
 }

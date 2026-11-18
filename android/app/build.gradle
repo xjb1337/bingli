@@ -2,6 +2,9 @@ plugins {
     id 'com.android.application'
     id 'org.jetbrains.kotlin.android'
 }
+def useModernWeb = project.findProperty('useModernWeb')?.toString()?.toBoolean() ?: false
+def modernWebDist = layout.buildDirectory.dir('generated/modernWebDist')
+def modernWebAssets = layout.buildDirectory.dir('generated/modernWebAssets')
 android {
     useLibrary 'android.test.runner'
     useLibrary 'android.test.base'
@@ -15,6 +18,7 @@ android {
         versionCode = (project.findProperty('versionCode') ?: '320001').toInteger()
         versionName = (project.findProperty('versionName') ?: '3.2.1')
         buildConfigField 'String', 'UPDATE_REPOSITORY', '"xjb1337/bingli"'
+        buildConfigField 'boolean', 'USE_MODERN_WEB', useModernWeb.toString()
     }
     signingConfigs {
         release {
@@ -28,17 +32,51 @@ android {
     }
     buildTypes {
         debug { if (System.getenv('BINGLI_SIGNED_TEST') == '1') signingConfig signingConfigs.release }
-        release { signingConfig signingConfigs.release; minifyEnabled false }
+        release {
+            signingConfig signingConfigs.release
+            minifyEnabled true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
     }
     buildFeatures { buildConfig true }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = '17' }
+    if (useModernWeb) {
+        sourceSets.main.assets.setSrcDirs([modernWebAssets])
+    }
 }
 dependencies {
     implementation 'androidx.core:core:1.13.1'
+    implementation 'androidx.webkit:webkit:1.12.1'
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'org.json:json:20240303'
 }
-tasks.register('buildWeb', Exec) { workingDir '../..'; commandLine 'node', 'build.js' }
-// Package the internal HTML asset; no standalone website is published.
-tasks.named('preBuild').configure { dependsOn 'buildWeb' }
+tasks.register('buildWeb', Exec) {
+    def repoRoot = file('../..')
+    def webDir = new File(repoRoot, 'apps/web')
+    def viteBin = new File(repoRoot, 'node_modules/vite/bin/vite.js')
+    if (useModernWeb) {
+        doFirst {
+            exec {
+                workingDir repoRoot
+                commandLine 'node', 'scripts/build-domain.cjs'
+            }
+        }
+        workingDir webDir
+        environment 'VITE_BASE', '/assets/'
+        commandLine 'node', viteBin.absolutePath, 'build', '--outDir',
+            modernWebDist.get().asFile.absolutePath, '--emptyOutDir'
+    } else {
+        workingDir repoRoot
+        commandLine 'node', 'build.js'
+    }
+}
+if (useModernWeb) {
+    tasks.register('stageModernWeb', Sync) {
+        dependsOn 'buildWeb'
+        from('src/main/assets') { exclude 'index.html', 'assets/**' }
+        from(modernWebDist) { include 'index.html', 'assets/**' }
+        into modernWebAssets
+    }
+}
+tasks.named('preBuild').configure { dependsOn(useModernWeb ? 'stageModernWeb' : 'buildWeb') }

@@ -4694,7 +4694,10 @@ const APP = (() => {
     // 自动保存
     // The periodic checkpoint also covers programmatic edits made by callers
     // that do not pass through the DOM input handler (tests, AI and imports).
-    setInterval(() => { flushPendingSave(); saveCurrent(); }, 10000);
+    setInterval(() => {
+      if (saveDirty) { flushPendingSave(); return; }
+      if (!currentSaveBlocked && R && !remoteConflict && !REPO.draftMatches(R)) saveCurrent();
+    }, 10000);
 
     // 防误关：尝试保存一次
     window.addEventListener('beforeunload', () => { flushPendingSave(); });
@@ -4806,6 +4809,7 @@ const APP = (() => {
       return Object.keys(AI_CORE.fields).find(path => path.startsWith(key + '.')) || 'hpi.symptoms';
     },
     handleBack,
+    flushPendingSave,
     async applyAI(request, result, selected, allowReplace, model) {
       if (currentSaveBlocked || listSaveBlocked || remoteConflict) throw Error('请先处理页面上的保存异常或修订冲突');
       const next = AI_CORE.apply(R, request, result, selected, allowReplace, model);
@@ -4819,7 +4823,13 @@ const APP = (() => {
       if (!Object.prototype.hasOwnProperty.call(AI_CORE.labels, path) || CORE.fieldState(R, path).source !== 'ai') return false;
       CORE.markFieldReviewed(R, path, 'ai');
       if (path === 'summary') CORE.markDocumentReviewed(R, 'summary');
-      saveCurrent(); render(); return true;
+      saveDirty = false;
+      if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+      return afterSave(saveCurrentAwait(), saved => {
+        render();
+        if (!saved) toast('核对状态尚未写入本机，请查看顶部保存提示');
+        return saved;
+      });
     },
     undoAI() {
       if (!lastAiUndo || !R || lastAiUndo.recordId !== R.id) { toast('没有本次 AI 采纳记录'); return false; }
@@ -4827,10 +4837,13 @@ const APP = (() => {
       const undone = AI_CORE.undoAdoption(R, lastAiUndo);
       R = undone.record;
       lastAiUndo = null;
-      const saved = saveCurrent();
-      render();
-      toast(`已撤销 ${undone.restored} 项${undone.kept ? `，保留 ${undone.kept} 项后来修改的内容` : ''}${saved ? '' : '（尚未写入本机）'}`);
-      return true;
+      saveDirty = false;
+      if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+      return afterSave(saveCurrentAwait(), saved => {
+        render();
+        toast(`已撤销 ${undone.restored} 项${undone.kept ? `，保留 ${undone.kept} 项后来修改的内容` : ''}${saved ? '' : '（尚未写入本机）'}`);
+        return true;
+      });
     },
     // 供测试使用
     _test: {

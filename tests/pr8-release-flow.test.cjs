@@ -200,11 +200,14 @@ test('PR8-06 UpdateManager still reads update.json from GitHub releases', () => 
   assert.match(source, /asset\(assets,\s*"update\.json"\)/);
 });
 
-const hasPython3 = spawnSync('python3', ['--version'], { encoding: 'utf8' }).status === 0;
+const python3 = ['python3', 'python'].find((command) => {
+  const version = spawnSync(command, ['--version'], { encoding: 'utf8' });
+  return version.status === 0 && /Python 3\./.test(version.stdout + version.stderr);
+});
 
 test(
   'PR8-07 check-release.py rejects equal or lower versionCode and accepts higher',
-  { skip: hasPython3 ? false : 'python3 is not installed' },
+  { skip: python3 ? false : 'Python 3 is not installed' },
   () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bingli-pr8-release-'));
     const latestPath = path.join(tempDir, 'update.json');
@@ -229,8 +232,9 @@ test(
 
     function check(candidateVersionCode) {
       return spawnSync(
-        'python3',
+        python3,
         [
+          '-X', 'utf8',
           CHECK_RELEASE,
           '--latest',
           latestPath,

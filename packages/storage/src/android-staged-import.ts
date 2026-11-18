@@ -6,7 +6,7 @@ import {
 } from '@dabingli/domain';
 import { readLegacyLocalStorage } from './browser-migration.js';
 import { createBackupBundle, serializeBackup } from './backup-format.js';
-import type { CorruptLegacyEntry, RecordRepository } from './repository.js';
+import { StagedImportConflictError, type CorruptLegacyEntry, type RecordRepository } from './repository.js';
 import type { StagedImportCommitInput } from './indexeddb-repository.js';
 
 export interface StagedLegacyPayload {
@@ -26,10 +26,11 @@ export interface StagedImportResult {
   corruptCount: number;
   corruptEntries: CorruptLegacyEntry[];
   comparison: LegacyComparison;
+  alreadyImported?: boolean;
 }
 
 interface AtomicStagedRepo extends RecordRepository {
-  importStagedSnapshot(input: StagedImportCommitInput): Promise<void>;
+  importStagedSnapshot(input: StagedImportCommitInput): Promise<boolean>;
 }
 
 function supportsAtomicStagedImport(repo: RecordRepository): repo is AtomicStagedRepo {
@@ -89,22 +90,26 @@ export async function importStagedLegacy(
   const parsed = asPayload(payload);
   const now = new Date().toISOString();
   const snapshot = readLegacyLocalStorage(storageFrom(parsed), () => now);
-  const existing = await repo.loadList();
-  if (!existing.ok) throw new Error(existing.reason || '无法读取现有病历');
-  const current = await repo.loadCurrent();
-  const settings = await repo.loadSettings();
-  if (existing.list.length || current.record || settings.raw) throw new Error('IndexedDB 已有数据，未覆盖');
+  const manifest = parsed.manifest as { sha256?: unknown } | undefined;
+  const receipt = typeof manifest?.sha256 === 'string' && /^[a-f0-9]{64}$/i.test(manifest.sha256)
+    ? manifest.sha256.toLowerCase()
+    : undefined;
 
   const byId = new Map<string, DabingliRecord>();
   for (const item of snapshot.records) byId.set(item.id, RECORD_CORE.cloneValue(item.data));
   for (const record of snapshot.drafts) if (record.id && !byId.has(record.id)) byId.set(record.id, RECORD_CORE.cloneValue(record));
   const records = [...byId.values()];
-  const list = records.map((record) => itemFor(record, now));
+  const listById = new Map(snapshot.records.map((item) => [item.id, item]));
+  const list = records.map((record) => listById.get(String(record.id)) ?? itemFor(record, now));
   const bundle = createBackupBundle(list, null, now, { includeNotes: true });
 
+  let alreadyImported = false;
   if (supportsAtomicStagedImport(repo)) {
-    await repo.importStagedSnapshot({ snapshot, records, list, now });
+    alreadyImported = !(await repo.importStagedSnapshot({ snapshot, records, list, now, receipt }));
   } else {
+    const [existing, current, settings] = await Promise.all([repo.loadList(), repo.loadCurrent(), repo.loadSettings()]);
+    if (!existing.ok || !current.ok || !settings.ok) throw new Error('无法读取现有病历及设置');
+    if (existing.list.length || current.record || settings.raw) throw new StagedImportConflictError();
     await repo.importBackup(serializeBackup(bundle), 'replace');
     if (snapshot.currentId) {
       const selected = byId.get(snapshot.currentId);
@@ -150,6 +155,7 @@ export async function importStagedLegacy(
     ids: records.map((record) => String(record.id)),
     corruptCount: snapshot.corruptEntries.length,
     corruptEntries: snapshot.corruptEntries,
+    ...(alreadyImported ? { alreadyImported } : {}),
     comparison: {
       records: perRecord.every((item) => item.idMatch && item.name && item.chiefComplaint && item.diagnosis),
       exportJson: expected === actual,

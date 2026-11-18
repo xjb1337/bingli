@@ -6,6 +6,7 @@ import android.content.pm.*;
 import android.net.Uri;
 import android.os.Build;
 import android.provider.Settings;
+import android.widget.*;
 import androidx.core.content.FileProvider;
 import org.json.*;
 import java.io.*;
@@ -19,9 +20,19 @@ final class UpdateManager {
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private volatile boolean busy;
     private volatile File ready;
-    private ProgressDialog progress;
+    private AlertDialog progressDialog;
+    private ProgressBar progressBar;
+    private TextView progressText;
     UpdateManager(Activity activity) { this.activity=activity; }
-    void close() { worker.shutdownNow(); if (progress != null) progress.dismiss(); }
+    void close() {
+        worker.shutdownNow();
+        if (progressDialog != null) {
+            if (progressDialog.isShowing()) progressDialog.dismiss();
+            progressDialog = null;
+        }
+        progressBar = null;
+        progressText = null;
+    }
     private void ui(Runnable task) { activity.runOnUiThread(() -> { if(!activity.isFinishing() && !activity.isDestroyed()) task.run(); }); }
     private void message(String text) { ui(() -> new AlertDialog.Builder(activity).setTitle("应用更新").setMessage(text).setPositiveButton("确定",null).show()); }
 
@@ -71,10 +82,41 @@ final class UpdateManager {
         PackageInfo installed=info(null);
         if(!cert(installed).equalsIgnoreCase(m.getString("signingCertSha256"))) throw new IOException("更新签名与本机版本不同");
     }
+    private void showDownloadDialog() {
+        float density = activity.getResources().getDisplayMetrics().density;
+        int pad = Math.round(20 * density);
+        LinearLayout container = new LinearLayout(activity);
+        container.setOrientation(LinearLayout.VERTICAL);
+        container.setPadding(pad, Math.round(12 * density), pad, Math.round(8 * density));
+        progressBar = new ProgressBar(activity, null, android.R.attr.progressBarStyleHorizontal);
+        progressBar.setIndeterminate(false);
+        progressBar.setMax(100);
+        progressBar.setProgress(0);
+        progressText = new TextView(activity);
+        progressText.setText("0%");
+        progressText.setPadding(0, Math.round(8 * density), 0, 0);
+        container.addView(progressBar, new LinearLayout.LayoutParams(-1, -2));
+        container.addView(progressText, new LinearLayout.LayoutParams(-1, -2));
+        progressDialog = new AlertDialog.Builder(activity)
+            .setTitle("正在下载并校验更新")
+            .setView(container)
+            .setCancelable(false)
+            .create();
+        progressDialog.show();
+    }
+
+    private void dismissDownloadDialog() {
+        if (progressDialog != null && progressDialog.isShowing()) {
+            progressDialog.dismiss();
+        }
+        progressDialog = null;
+        progressBar = null;
+        progressText = null;
+    }
+
     private void download(String url,JSONObject manifest) {
         if(busy) return; busy=true;
-        progress=new ProgressDialog(activity); progress.setTitle("正在下载并校验更新"); progress.setProgressStyle(ProgressDialog.STYLE_HORIZONTAL);
-        progress.setMax(100); progress.setCancelable(false); progress.show();
+        showDownloadDialog();
         worker.execute(() -> {
             File file=new File(activity.getCacheDir(),"updates/bingli.apk");
             try {
@@ -86,7 +128,11 @@ final class UpdateManager {
                     while((n=input.read(buffer))!=-1) {
                         total+=n; if(total>size) throw new IOException("下载大小超出预期");
                         output.write(buffer,0,n); digest.update(buffer,0,n);
-                        int percent=(int)(total*100/size); ui(()->progress.setProgress(percent));
+                        int percent=(int)(total*100/size);
+                        ui(()->{
+                            if (progressBar != null) progressBar.setProgress(percent);
+                            if (progressText != null) progressText.setText(percent + "%");
+                        });
                     }
                 } finally { connection.disconnect(); }
                 UpdatePolicy.verifyDownload(size, total, manifest.getString("apkSha256"), hex(digest.digest()));
@@ -98,7 +144,7 @@ final class UpdateManager {
                 ready=file;
                 ui(()->new AlertDialog.Builder(activity).setMessage("更新包已校验，开始安装？").setPositiveButton("安装",(d,w)->install()).setNegativeButton("稍后",null).show());
             } catch(Exception e) { file.delete(); ready=null; message("更新失败："+e.getMessage()); }
-            finally { busy=false; ui(()->progress.dismiss()); }
+            finally { busy=false; ui(this::dismissDownloadDialog); }
         });
     }
     private void install() {

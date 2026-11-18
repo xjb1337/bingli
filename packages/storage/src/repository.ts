@@ -29,6 +29,13 @@ export interface CorruptLegacyEntry {
   raw: string;
 }
 
+export class StagedImportConflictError extends Error {
+  constructor() {
+    super('IndexedDB 已有数据，未覆盖');
+    this.name = 'StagedImportConflictError';
+  }
+}
+
 export interface StorageQuotaInfo {
   supported: boolean;
   usage: number;

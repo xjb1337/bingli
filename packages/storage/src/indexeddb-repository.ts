@@ -28,6 +28,8 @@ import type {
   StorageQuotaInfo,
 } from './repository.js';
 
+import { StagedImportConflictError } from './repository.js';
+
 export const DEFAULT_DATABASE_NAME = 'dabingli.indexeddb.v1';
 export const LEGACY_MIGRATION_META_KEY = 'browserLegacyMigration';
 export const CORRUPT_LEGACY_META_KEY = 'corruptLegacyEntries';
@@ -36,6 +38,7 @@ const CURRENT_KEY = 'current';
 const SETTINGS_KEY = 'settings';
 const RECOVERY_PREFIX = 'recovery:';
 const SYNC_CHANNEL_PREFIX = 'dabingli.sync:';
+const ANDROID_STAGED_RECEIPT_KEY = 'androidStagedImportReceipt';
 const QUOTA_LOW_SPACE_RATIO = 0.85;
 
 interface StoredCurrent {
@@ -71,6 +74,7 @@ export interface StagedImportCommitInput {
   records: DabingliRecord[];
   list: RecordListItem[];
   now: string;
+  receipt?: string;
 }
 
 export class DabingliDatabase extends Dexie {
@@ -577,8 +581,8 @@ export class IndexedDbRecordRepository implements RecordRepository {
   }
 
   /** Atomically commit an Android-staged legacy payload in one IndexedDB transaction. */
-  async importStagedSnapshot(input: StagedImportCommitInput): Promise<void> {
-    await this.db.transaction(
+  async importStagedSnapshot(input: StagedImportCommitInput): Promise<boolean> {
+    const applied = await this.db.transaction(
       'rw',
       this.db.records,
       this.db.drafts,
@@ -586,6 +590,10 @@ export class IndexedDbRecordRepository implements RecordRepository {
       this.db.settings,
       this.db.meta,
       async () => {
+        if (input.receipt) {
+          const previous = await this.db.meta.get(ANDROID_STAGED_RECEIPT_KEY);
+          if (previous?.value === input.receipt) return false;
+        }
         const [recordCount, draftCount, currentCount, settingsCount] = await Promise.all([
           this.db.records.count(),
           this.db.drafts.count(),
@@ -593,7 +601,7 @@ export class IndexedDbRecordRepository implements RecordRepository {
           this.db.settings.count(),
         ]);
         if (recordCount + draftCount + currentCount + settingsCount > 0) {
-          throw new Error('IndexedDB 已有数据，未覆盖');
+          throw new StagedImportConflictError();
         }
 
         const listItems = input.list.map((item) => ({
@@ -650,9 +658,18 @@ export class IndexedDbRecordRepository implements RecordRepository {
           value: migrationMeta,
           updatedAt: input.now,
         });
+        if (input.receipt) {
+          await this.db.meta.put({
+            key: ANDROID_STAGED_RECEIPT_KEY,
+            value: input.receipt,
+            updatedAt: input.now,
+          });
+        }
+        return true;
       },
     );
-    this.notifyChange('backup-imported');
+    if (applied) this.notifyChange('backup-imported');
+    return applied;
   }
 
   async exportCorruptLegacyEntries(): Promise<CorruptLegacyEntry[]> {

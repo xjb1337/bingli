@@ -10,6 +10,7 @@ export interface BingliAndroidNativeBridge {
   exportLegacyRaw?: () => void;
   retryLegacy?: () => void;
   legacyImportSucceeded?: () => void;
+  legacyImportFailed?: (reason: string) => void;
   legacyLaunchSucceeded?: () => void;
   checkUpdates?: () => void;
   copy?: (text: string) => void;
@@ -202,6 +203,14 @@ export function notifyNativeLegacyImported(): void {
     getNativeAndroidBridge()?.legacyImportSucceeded?.();
   } catch {
     // Ignore native callback failures during teardown.
+  }
+}
+
+export function notifyNativeLegacyImportFailed(reason: string): void {
+  try {
+    getNativeAndroidBridge()?.legacyImportFailed?.(reason);
+  } catch {
+    // Keep the import error visible if the native bridge is unavailable.
   }
 }
 

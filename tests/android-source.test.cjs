@@ -24,8 +24,8 @@ test('P0-2 image requests force deepseek-flash in the request body and result on
 
 test('P0-7 back gesture asks the web app first, flushes, then confirms exit',()=>{
   const source=readMain();
-  assert.match(source,/window\.APP&&window\.APP\.handleBack&&APP\.handleBack\(\)/);
-  assert.match(source,/APP\._test\.flushPendingSave/);
+  assert.match(source,/typeof APP!=='undefined'&&typeof APP\.handleBack==='function'&&!!APP\.handleBack\(\)/);
+  assert.match(source,/typeof APP!=='undefined'&&typeof APP\.flushPendingSave==='function'/);
   assert.match(source,/退出大病历？/);
   const back=source.slice(source.indexOf('public void onBackPressed'));
   assert.match(back,/super\.onBackPressed\(\)/);
@@ -93,4 +93,54 @@ test('3.2 share uses ACTION_SEND with a private FileProvider txt and print uses 
   assert.match(source,/onCreate\([^}]*clearShareCache\(\)/s);
   const paths=fs.readFileSync(path.join(mainRoot,'res/xml/file_paths.xml'),'utf8');
   assert.match(paths,/cache-path name="share" path="share\/"/);
+});
+
+test('Wave 2 MainActivity lifecycle safety, JS separator escaping, asset whitelist, migration gate, and API 33 back',()=>{
+  const source=readMain();
+  assert.match(source,/onPause\(\)\s*\{[^}]*if\s*\(web\s*!=\s*null\)/s);
+  assert.match(source,/window\.BingliWebHost&&typeof window\.BingliWebHost\.flushPendingSave==='function'/);
+  assert.match(source,/window\.BingliWebHost&&typeof window\.BingliWebHost\.handleBack==='function'/);
+  assert.match(source,/escapeJsSeparators/);
+  assert.match(source,/\\u2028/);
+  assert.match(source,/\\u2029/);
+  assert.match(source,/window\.BingliWebHost\.receiveAi/);
+  assert.match(source,/\/assets\/assets\//);
+  assert.match(source,/application\/javascript/);
+  assert.match(source,/application\/manifest\+json/);
+  assert.match(source,/new WebViewAssetLoader\.Builder\(\)/);
+  assert.match(source,/assetLoader\.shouldInterceptRequest\(uri\)/);
+  assert.match(source,/migrator\.needsCapture\(\)/);
+  assert.match(source,/BuildConfig\.USE_MODERN_WEB/);
+  assert.match(source,/OnBackInvokedCallback/);
+  assert.doesNotMatch(source,/manifest\.getCorruptKeys\(\)\.isEmpty\(\)/);
+});
+
+test('Wave 2 UpdateManager, build.gradle, proguard-rules, LegacyMigrator quarantine, and legacy app.js fixes',()=>{
+  const updater=fs.readFileSync(path.join(javaRoot,'UpdateManager.java'),'utf8');
+  assert.doesNotMatch(updater,/ProgressDialog/);
+  assert.match(updater,/ProgressBar/);
+  assert.match(updater,/AlertDialog\.Builder/);
+
+  const gradle=fs.readFileSync(path.join(__dirname,'../android/app/build.gradle'),'utf8');
+  assert.match(gradle,/minifyEnabled\s+true/);
+  assert.match(gradle,/proguard-rules\.pro/);
+  assert.match(gradle,/useModernWeb/);
+  assert.match(gradle,/VITE_BASE/);
+  assert.match(gradle,/commandLine 'node', 'build\.js'/);
+
+  const proguard=fs.readFileSync(path.join(__dirname,'../android/app/proguard-rules.pro'),'utf8');
+  assert.match(proguard,/@android\.webkit\.JavascriptInterface/);
+  assert.match(proguard,/MainActivity\$Bridge/);
+  assert.match(proguard,/MainActivity\$MigrationBridge/);
+  assert.match(proguard,/LegacyMigrator/);
+
+  const migrator=fs.readFileSync(path.join(javaRoot,'migration/LegacyMigrator.kt'),'utf8');
+  assert.match(migrator,/validKeyCount/);
+  assert.match(migrator,/allNonNullKeysCorrupt/);
+
+  const appJs=fs.readFileSync(path.join(__dirname,'../src/app.js'),'utf8');
+  assert.match(appJs,/if\s*\(saveDirty\)\s*\{\s*flushPendingSave\(\);\s*return;\s*\}/);
+  assert.match(appJs,/!REPO\.draftMatches\(R\)/);
+  assert.match(appJs,/reviewAI\(path\)[\s\S]*?afterSave\(saveCurrentAwait\(\)/);
+  assert.match(appJs,/undoAI\(\)[\s\S]*?afterSave\(saveCurrentAwait\(\)/);
 });

@@ -19,6 +19,12 @@ function seedFor(name) {
   if (name === 'corrupt') {
     st.setItem('dabingli.records.v1', '[{"id":"broken",');
     st.setItem('dabingli.settings.v1', '{"rosMode":"detail"}');
+  } else if (name === 'quarantine') {
+    const parsed = JSON.parse(fs.readFileSync(path.join(root, 'tests/fixtures/legacy/v1-backup.json'), 'utf8'));
+    st.setItem('dabingli.records.v1', JSON.stringify(parsed.records));
+    st.setItem('dabingli.draft.v1.broken-draft', '{bad-draft-json');
+    st.setItem('dabingli.current.v1', '{bad-current');
+    st.setItem('dabingli.settings.v1', '{"rosMode":"detail"}');
   } else if (name === 'mixed') {
     const recs = ['v1','v2','v3'].flatMap(v => JSON.parse(fs.readFileSync(path.join(root, `tests/fixtures/legacy/${v}-backup.json`), 'utf8')).records);
     st.setItem('dabingli.records.v1', JSON.stringify(recs));
@@ -38,9 +44,11 @@ function seedFor(name) {
 }
 
 (async () => {
-  const b = await chromium.launch();
+  const b = await chromium.launch({
+    executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
+  });
   const report = [];
-  for (const name of ['v1', 'v2', 'v3', 'mixed', 'corrupt']) {
+  for (const name of ['v1', 'v2', 'v3', 'mixed', 'corrupt', 'quarantine']) {
     const ctx = await b.newContext({ viewport: { width: 412, height: 800 } });
     await ctx.route(ORIGIN + '/**', route => {
       const p = new URL(route.request().url()).pathname;
@@ -81,13 +89,17 @@ function seedFor(name) {
       stagedBytes: staged ? Buffer.byteLength(staged) : 0, stagedSha256: stagedSha,
       importOk: res.ok, error: res.ok ? undefined : res.error,
       indexedDbRecordCount: dump.list.length, ids: dump.list.map(x => x.id),
+      corruptCount: res.ok ? (res.result.corruptCount || 0) : 0,
+      corruptKeys: res.ok ? (res.result.corruptEntries || []).map(x => x.key) : [],
       comparison: res.ok ? res.result.comparison : undefined,
       indexedDbExportSha256: dump.list.length ? sha(typeof dump.exportJson === 'string' ? dump.exportJson : JSON.stringify(dump.exportJson)) : null });
     await ctx.close();
   }
   await b.close();
   fs.writeFileSync(path.join(out, 'report.json'), JSON.stringify(report, null, 2));
-  console.log(JSON.stringify(report.map(r => ({ case: r.case, legacy: r.legacyRecordCount, idb: r.indexedDbRecordCount, ok: r.importOk, unchanged: r.localStorageUnchanged, staged: r.stagedSha256 && r.stagedSha256.slice(0, 12), err: r.error })), null, 1));
+  console.log(JSON.stringify(report.map(r => ({ case: r.case, legacy: r.legacyRecordCount, idb: r.indexedDbRecordCount, ok: r.importOk, corruptCount: r.corruptCount, unchanged: r.localStorageUnchanged, staged: r.stagedSha256 && r.stagedSha256.slice(0, 12), err: r.error })), null, 1));
   if (report.some(r => r.case !== 'corrupt' && (!r.importOk || r.legacyRecordCount !== r.indexedDbRecordCount || !r.localStorageUnchanged))) process.exit(1);
   const c = report.find(r => r.case === 'corrupt'); if (c.importOk || c.indexedDbRecordCount || !c.localStorageUnchanged) process.exit(1);
+  const q = report.find(r => r.case === 'quarantine');
+  if (!q || !q.importOk || q.corruptCount !== 2 || !q.corruptKeys.includes('dabingli.draft.v1.broken-draft') || !q.corruptKeys.includes('dabingli.current.v1')) process.exit(1);
 })();

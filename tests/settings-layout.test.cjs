@@ -12,8 +12,9 @@ const native = read('android/app/src/main/java/com/xjb/bingli/MainActivity.java'
 test('APK packages the legacy source, including its settings layout', () => {
   const gradle = read('android/app/build.gradle');
   const build = read('build.js');
-  assert.match(gradle, /tasks\.register\('buildWeb', Exec\)[^\n]*'node', 'build\.js'/);
-  assert.match(gradle, /preBuild[^\n]*dependsOn 'buildWeb'/);
+  assert.match(gradle, /def useModernWeb = .*\?: false/);
+  assert.match(gradle, /tasks\.register\('buildWeb', Exec\)[\s\S]*?else\s*\{\s*workingDir repoRoot\s*commandLine 'node', 'build\.js'/);
+  assert.match(gradle, /preBuild[^\n]*dependsOn\(useModernWeb \? 'stageModernWeb' : 'buildWeb'\)/);
   assert.match(build, /const SRC = path\.join\(__dirname, 'src'\)/);
   assert.match(build, /'android', 'app', 'src', 'main', 'assets'/);
   assert.match(native, /web\.loadUrl\(ORIGIN \+ "\/assets\/index\.html"\)/);

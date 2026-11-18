@@ -49,6 +49,20 @@ describe('Android staged legacy import', () => {
     await expect(importStagedLegacy(payload(), r)).rejects.toThrow(/已有数据/);
     expect((await r.loadList()).list[0]!.data.basic.name).toBe('已有患者');
   });
+  it('retries acknowledgement of the same staged payload without rewriting IndexedDB', async () => {
+    const r = repo('android-acknowledgement'); await r.initialize();
+    const staged = { payload: JSON.parse(payload()), manifest: { sha256: 'a'.repeat(64) } };
+    const applied = await importStagedLegacy(JSON.stringify(staged), r);
+    expect(applied.alreadyImported).toBeUndefined();
+    const before = (await r.loadList()).list;
+
+    const resumed = await importStagedLegacy(JSON.stringify(staged), r);
+    expect(resumed.alreadyImported).toBe(true);
+    expect((await r.loadList()).list).toEqual(before);
+
+    const otherStage = { ...staged, manifest: { sha256: 'b'.repeat(64) } };
+    await expect(importStagedLegacy(JSON.stringify(otherStage), r)).rejects.toThrow(/已有数据/);
+  });
   it('keeps raw notes when migrating staged Android legacy data', async () => {
     const r = repo('android-raw-notes'); await r.initialize();
     const result = await importStagedLegacy(payload((records) => {
