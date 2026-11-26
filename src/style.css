@@ -2661,7 +2661,8 @@ footer .btn { min-width: 0; min-height: 48px; white-space: nowrap; }
 }
 
 .list-box { max-height: 58vh; padding: 2px; }
-.list-search { display: block; margin: 0 0 10px; }
+.list-search { display: block; margin: 0 0 6px; }
+.list-count { margin: 0 0 8px; color: var(--text-soft); font-size: .85em; }
 .list-search input {
   box-sizing: border-box;
   width: 100%;
@@ -2698,10 +2699,24 @@ footer .btn { min-width: 0; min-height: 48px; white-space: nowrap; }
   font-weight: 700;
 }
 
-.list-main { min-width: 0; padding: 2px 0; }
+.list-main {
+  min-width: 0;
+  min-height: 44px;
+  padding: 4px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+.list-main > span { display: block; }
+.list-main:active { background: var(--primary-soft); }
 .list-name { color: var(--gray-6); }
 .list-meta { color: var(--text-soft); }
 .list-sub { color: var(--text-soft); }
+.list-sub.list-current { color: var(--primary-strong); font-weight: 700; }
 
 .nav-sheet {
   max-width: 760px;

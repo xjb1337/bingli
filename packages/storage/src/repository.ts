@@ -117,6 +117,7 @@ export interface RecordRepository {
   newRecord(): DabingliRecord;
   loadList(): Promise<LoadListResult>;
   loadCurrent(preferredId?: string): Promise<LoadCurrentResult>;
+  activateRecord(id: string): Promise<LoadCurrentResult>;
   saveCurrent(record: DabingliRecord, expectedRevision?: number): Promise<SaveResult>;
   saveToLibrary(record: DabingliRecord, expectedRevision?: number): Promise<SaveResult>;
   saveList(list: RecordListItem[]): Promise<SaveResult>;
@@ -124,7 +125,7 @@ export interface RecordRepository {
   loadSettings(): Promise<SettingsResult>;
   saveSettings(settings: AppSettings): Promise<SaveResult>;
   importBackup(raw: string, mode: ImportMode): Promise<ImportSummary>;
-  exportBackup(scope?: BackupScope, options?: { includeNotes?: boolean }): Promise<ExportBundle>;
+  exportBackup(scope?: BackupScope, options?: { includeNotes?: boolean; draft?: DabingliRecord }): Promise<ExportBundle>;
   listRecoveryCopies(): Promise<RecoveryCopySummary[]>;
   restoreRecovery(id: string): Promise<RestoreSummary>;
   readMeta<T = unknown>(key: string): Promise<T | null>;

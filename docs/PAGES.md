@@ -12,13 +12,13 @@ npx vite build apps/web
 node --test tests/pr7-offline.test.cjs
 ```
 
-产物位于 `apps/web/dist`。构建会同时生成 `sw.js`，其缓存名由本次资源列表计算，
+产物位于 `apps/web/dist`。构建会同时生成 `sw.js`，其缓存名按本次资源列表、入口 HTML 和离线逻辑计算，
 格式为 `bingli-pages-<hash>`。
 
 ## 离线行为
 
 - 首次在线打开后，Service Worker 会预缓存入口 HTML、`./`、CSS、JavaScript 以及所有懒加载页面块。
-- 页面导航采用网络优先，断网时回退到已缓存的 `index.html`；同源静态资源采用缓存优先。
+- 页面入口和同源静态资源优先读取同一版本的缓存，已打开的页面可以继续加载其对应版本的编辑页面。
 - 新建、编辑、保存、导入导出和三份文书生成均使用本机 IndexedDB 与本地领域代码，断网可继续使用。
 - Service Worker 只处理同源 GET 请求。`https://api.deepseek.com` 等跨域请求不会被拦截或缓存，AI 功能仍需联网。
 - 页面不加载外部字体、CDN 或第三方脚本。DeepSeek 是唯一的显式外部业务请求。
@@ -26,9 +26,9 @@ node --test tests/pr7-offline.test.cjs
 
 ## 更新与版本
 
-每次静态构建都会按完整预缓存列表生成新缓存名。新 Service Worker 安装时重新预缓存当前构建，
-激活时只删除 `bingli-pages-` 前缀下不是当前版本的旧缓存，不会清理同源下其他应用的缓存。
-发布新版本后刷新页面即可获取新入口；已打开的旧页面建议在更新提示或重新加载后继续使用。
+新 Service Worker 安装时重新预缓存当前构建，
+激活时清理 `bingli-pages-` 前缀下的旧缓存。新版本下载完成后会等待旧页面关闭。
+看到更新提示后，保存编辑并关闭此应用的所有标签页，再打开即可使用新版本。
 
 `sw.js` 本身不进入预缓存，避免浏览器长期使用旧缓存清单。浏览器仍按自身策略检查脚本更新。
 

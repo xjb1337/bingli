@@ -510,15 +510,17 @@ export class IndexedDbRecordRepository implements RecordRepository {
           const byId = new Map<string, RecordListItem>();
           for (const item of snapshot.records) byId.set(item.id, clone(item));
           for (const draft of snapshot.drafts) {
-            if (draft.id && !byId.has(draft.id)) {
-              byId.set(draft.id, buildListItem(draft, String(draft.updatedAt || now)));
-            }
+            if (!draft.id) continue;
+            const listed = byId.get(draft.id);
+            const draftTime = String(draft.meta.updatedAt || draft.updatedAt || '');
+            if (!listed || draftTime > listed.updatedAt) byId.set(draft.id, buildListItem(draft, draftTime || now));
           }
           const incomingItems = [...byId.values()];
           const merged = RECORD_CORE.mergeImport(existingList, incomingItems);
           const changed = merged.list.filter((item) => existingById.get(item.id) !== item);
 
           if (changed.length) {
+            await this.rebaseReplacedRevisions(changed, existingById);
             await this.db.records.bulkPut(changed.map((item) => clone(item)));
             await this.db.drafts.bulkPut(changed.map((item) => clone(item.data)));
           }
@@ -694,12 +696,12 @@ export class IndexedDbRecordRepository implements RecordRepository {
 
   async loadCurrent(preferredId?: string): Promise<LoadCurrentResult> {
     try {
-      return await this.db.transaction('r', this.db.drafts, this.db.current, async () => {
+      return await this.db.transaction('r', this.db.drafts, this.db.records, this.db.current, async () => {
         const pointer = preferredId ? null : await this.db.current.get(CURRENT_KEY);
         const id = String(preferredId || pointer?.id || '').trim();
         if (!id) return { ok: true, record: null, fresh: true };
 
-        const stored = await this.db.drafts.get(id);
+        const stored = (await this.db.drafts.get(id)) ?? (await this.db.records.get(id))?.data;
         if (!stored) return { ok: true, record: null, fresh: true, missingDraft: true };
         try {
           const record = RECORD_CORE.normalizeRecord(
@@ -727,6 +729,20 @@ export class IndexedDbRecordRepository implements RecordRepository {
     }
   }
 
+  async activateRecord(id: string): Promise<LoadCurrentResult> {
+    try {
+      return await this.db.transaction('rw', this.db.drafts, this.db.records, this.db.current, async () => {
+        const result = await this.loadCurrent(id);
+        if (result.ok && result.record) {
+          await this.db.current.put({ key: CURRENT_KEY, id, at: this.now() });
+        }
+        return result;
+      });
+    } catch (error) {
+      return { ok: false, record: null, error: true, reason: `打开病历失败：${errorMessage(error)}` };
+    }
+  }
+
   async saveCurrent(record: DabingliRecord, expectedRevision?: number): Promise<SaveResult> {
     if (!record || typeof record !== 'object') {
       return { ok: false, error: true, reason: '病历内容无效' };
@@ -751,13 +767,13 @@ export class IndexedDbRecordRepository implements RecordRepository {
               ? null
               : Number(expectedRevision);
 
-          if (existing && expected !== null && remoteRevision !== expected) {
+          if (expected !== null && remoteRevision !== expected) {
             return {
               ok: false,
               conflict: true,
-              remote: existing,
+              ...(existing ? { remote: existing } : {}),
               remoteRevision,
-              reason: '其他页面已保存新版本',
+              reason: existing ? '其他页面已保存新版本' : '这份病历已从本机移除',
             };
           }
 
@@ -811,13 +827,13 @@ export class IndexedDbRecordRepository implements RecordRepository {
               ? null
               : Number(expectedRevision);
 
-          if (existing && expected !== null && remoteRevision !== expected) {
+          if (expected !== null && remoteRevision !== expected) {
             return {
               ok: false,
               conflict: true,
-              remote: existing,
+              ...(existing ? { remote: existing } : {}),
               remoteRevision,
-              reason: '其他页面已保存新版本',
+              reason: existing ? '其他页面已保存新版本' : '这份病历已从本机移除',
             };
           }
 
@@ -959,12 +975,14 @@ export class IndexedDbRecordRepository implements RecordRepository {
         this.db.meta,
         async () => {
           const existingList = await this.db.records.toArray();
+          const existingById = new Map(existingList.map((item) => [item.id, item]));
           const now = this.now();
 
           if (mode === 'replace') {
             const pointer = await this.db.current.get(CURRENT_KEY);
             const existingDrafts = await this.db.drafts.toArray();
             const replacedItems = RECORD_CORE.replaceImport(importedItems, existingList);
+            await this.rebaseReplacedRevisions(replacedItems, existingById);
             const storedSettings = await this.db.settings.get(SETTINGS_KEY);
             const hasExistingData = existingList.length > 0 || existingDrafts.length > 0;
             let recoveryId: string | undefined;
@@ -1019,10 +1037,10 @@ export class IndexedDbRecordRepository implements RecordRepository {
             };
           }
 
-          const existingById = new Map(existingList.map((item) => [item.id, item]));
           const merged = RECORD_CORE.mergeImport(existingList, importedItems);
           const changed = merged.list.filter((item) => existingById.get(item.id) !== item);
           if (changed.length) {
+            await this.rebaseReplacedRevisions(changed, existingById);
             await this.db.records.bulkPut(changed.map((item) => clone(item)));
             await this.db.drafts.bulkPut(changed.map((item) => clone(item.data)));
           }
@@ -1051,14 +1069,26 @@ export class IndexedDbRecordRepository implements RecordRepository {
     }
   }
 
+  private async rebaseReplacedRevisions(items: RecordListItem[], previousById: ReadonlyMap<string, RecordListItem>) {
+    const drafts = await this.db.drafts.bulkGet(items.map((item) => item.id));
+    items.forEach((item, index) => {
+      const previous = drafts[index] ?? previousById.get(item.id)?.data;
+      if (previous) {
+        item.data.meta.revision = Math.max(Number(previous.meta.revision) || 0, Number(item.data.meta.revision) || 0) + 1;
+      }
+    });
+  }
+
   async exportBackup(
     scope: BackupScope = 'all',
-    options: { includeNotes?: boolean } = {},
+    options: { includeNotes?: boolean; draft?: DabingliRecord } = {},
   ): Promise<ExportBundle> {
     return this.db.transaction('r', this.db.records, this.db.drafts, this.db.current, async () => {
       const list = scope === 'current' ? [] : await this.db.records.toArray();
-      const pointer = await this.db.current.get(CURRENT_KEY);
-      const draft = pointer ? await this.db.drafts.get(pointer.id) : undefined;
+      const pointer = options.draft ? null : await this.db.current.get(CURRENT_KEY);
+      const draft = options.draft ?? (pointer
+        ? (await this.db.drafts.get(pointer.id)) ?? (await this.db.records.get(pointer.id))?.data
+        : undefined);
       return createBackupBundle(list, draft, this.now(), options);
     });
   }
@@ -1090,13 +1120,31 @@ export class IndexedDbRecordRepository implements RecordRepository {
         const recovery = entry ? asRecovery(entry.value) : null;
         if (!recovery) throw new Error('找不到恢复副本');
 
+        const restoredRecords = clone(recovery.records);
+        const restoredDrafts = clone(recovery.drafts);
+        const restoredIds = [...new Set([...restoredRecords, ...restoredDrafts]
+          .map(({ id }) => id).filter((id): id is string => Boolean(id)))];
+        const [currentRecords, currentDrafts] = await Promise.all([
+          this.db.records.bulkGet(restoredIds),
+          this.db.drafts.bulkGet(restoredIds),
+        ]);
+        const overwrittenRevisions = new Map<string, number>();
+        restoredIds.forEach((id, index) => {
+          const previous = currentDrafts[index] ?? currentRecords[index]?.data;
+          if (previous) overwrittenRevisions.set(id, Number(previous.meta.revision) || 0);
+        });
+        for (const restored of [...restoredRecords.map((item) => item.data), ...restoredDrafts]) {
+          const previous = restored.id ? overwrittenRevisions.get(restored.id) : undefined;
+          if (previous !== undefined) restored.meta.revision = Math.max(previous, Number(restored.meta.revision) || 0) + 1;
+        }
+
         await this.db.records.clear();
         await this.db.drafts.clear();
         await this.db.current.clear();
         await this.db.settings.clear();
 
-        if (recovery.records.length) await this.db.records.bulkPut(clone(recovery.records));
-        if (recovery.drafts.length) await this.db.drafts.bulkPut(clone(recovery.drafts));
+        if (restoredRecords.length) await this.db.records.bulkPut(restoredRecords);
+        if (restoredDrafts.length) await this.db.drafts.bulkPut(restoredDrafts);
         if (recovery.currentId) {
           await this.db.current.put({
             key: CURRENT_KEY,

@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
-import type { CorruptLegacyEntry, RecoveryCopySummary } from '@dabingli/storage';
+import { parseBackup, type CorruptLegacyEntry, type RecoveryCopySummary } from '@dabingli/storage';
 import { ConfirmModal } from './ConfirmModal';
 
 export interface DataTransferPanelProps {
@@ -32,9 +32,15 @@ export function DataTransferPanel({
   const inputRef = useRef<HTMLInputElement>(null);
   const [mode, setMode] = useState<'merge' | 'replace'>('merge');
   const [showExport, setShowExport] = useState(false);
-  const [pendingReplaceRaw, setPendingReplaceRaw] = useState<string | null>(null);
+  const [pendingImport, setPendingImport] = useState<{
+    raw: string;
+    fileName: string;
+    count: number;
+    mode: 'merge' | 'replace';
+  } | null>(null);
   const [readingFile, setReadingFile] = useState(false);
   const [fileError, setFileError] = useState('');
+  const replacing = pendingImport?.mode === 'replace';
 
   const previewText = useMemo(() => {
     if (!showExport) return '';
@@ -61,12 +67,12 @@ export function DataTransferPanel({
           checked={includeNotes}
           onChange={(event) => onIncludeNotesChange(event.target.checked)}
         />
-        <span>备份中包含原始笔记（默认关闭；笔记可能含患者信息）</span>
+        <span>备份中包含原始笔记（可能含患者信息）</span>
       </label>
       <div className="import-row">
         <label>
           <span>导入方式</span>
-          <select value={mode} onChange={(event) => setMode(event.target.value as 'merge' | 'replace')}>
+          <select value={mode} disabled={readingFile} onChange={(event) => setMode(event.target.value as 'merge' | 'replace')}>
             <option value="merge">合并导入（同 ID 保留较新者）</option>
             <option value="replace">替换全部（需确认）</option>
           </select>
@@ -84,11 +90,12 @@ export function DataTransferPanel({
             setFileError('');
             const reader = new FileReader();
             reader.onload = () => {
-              const raw = String(reader.result ?? '');
-              if (mode === 'replace') {
-                setPendingReplaceRaw(raw);
-              } else {
-                onImport(raw, mode);
+              try {
+                const raw = String(reader.result ?? '');
+                const { records } = parseBackup(raw);
+                setPendingImport({ raw, fileName: file.name, count: records.length, mode });
+              } catch (error) {
+                setFileError(error instanceof Error ? error.message : '无法读取 JSON 备份');
               }
             };
             reader.onerror = () => setFileError('无法读取 JSON 文件，请重新选择');
@@ -102,7 +109,7 @@ export function DataTransferPanel({
         </button>
       </div>
       {fileError ? <p className="field-error" role="alert">{fileError}</p> : null}
-      <p className="muted">数据仅保存在本机浏览器；替换导入前会先保存恢复副本。</p>
+      <p className="muted">备份文件含病历资料，请妥善保管。替换导入前会先保存恢复副本。</p>
       {onMergeLegacy || (corruptEntries.length > 0 && onExportCorruptLegacy) ? (
         <div className="button-row">
           {onMergeLegacy ? (
@@ -134,17 +141,23 @@ export function DataTransferPanel({
         </label>
       ) : null}
       <ConfirmModal
-        open={pendingReplaceRaw !== null}
-        title="确认替换全部病历"
-        message="替换全部会覆盖当前病历列表（系统会先自动保存一份替换前恢复副本），确定继续吗？"
-        confirmLabel="确定替换"
-        danger
+        open={pendingImport !== null}
+        title={replacing ? '确认替换全部病历' : '确认合并导入'}
+        message={pendingImport ? (
+          <>
+            <p className="import-file-summary">{pendingImport.fileName} · {pendingImport.count} 份病历</p>
+            <p>{replacing
+              ? '将替换当前病历列表。应用会先保存替换前的恢复副本。'
+              : '同一份病历按更新时间保留较新的版本。'}</p>
+          </>
+        ) : ''}
+        confirmLabel={replacing ? '确定替换' : '确认导入'}
+        danger={replacing}
         onConfirm={() => {
-          const raw = pendingReplaceRaw;
-          setPendingReplaceRaw(null);
-          if (raw !== null) onImport(raw, 'replace');
+          setPendingImport(null);
+          if (pendingImport) onImport(pendingImport.raw, pendingImport.mode);
         }}
-        onCancel={() => setPendingReplaceRaw(null)}
+        onCancel={() => setPendingImport(null)}
       />
     </div>
   );

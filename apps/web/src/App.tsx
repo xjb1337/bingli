@@ -8,6 +8,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { createPortal } from 'react-dom';
 import {
   RECORD_CORE,
   type DabingliRecord,
@@ -52,6 +53,7 @@ import {
   registerBingliWebHost,
 } from './native-host';
 import type { ThemePreference } from './pages/SettingsPage';
+import { watchWaitingUpdate } from './pwa/register';
 import { STEPS, stepIndexOf, stepKeyForPath, type StepKey } from './steps';
 
 const BasicStep = lazy(() => import('./pages/BasicStep').then((m) => ({ default: m.BasicStep })));
@@ -290,7 +292,10 @@ function EditorApp({
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [pendingFocus, setPendingFocus] = useState<string | null>(null);
   const [exportIncludeNotes, setExportIncludeNotes] = useState(false);
+  const [aiUndo, setAiUndo] = useState<AiAdoptionUndo | null>(null);
   const [theme, setTheme] = useState<ThemePreference>(() => readStoredTheme());
+  const [offlineUpdateReady, setOfflineUpdateReady] = useState(false);
+  useEffect(() => watchWaitingUpdate(() => setOfflineUpdateReady(true)), []);
 
   // Accessible inline ConfirmModal promise queue
   const [confirmState, setConfirmState] = useState<(ConfirmDialogOptions & { resolve: (ok: boolean) => void }) | null>(null);
@@ -306,6 +311,9 @@ function EditorApp({
     setView('editor');
     setStepIndex(0);
     setMobileNavOpen(false);
+    setPendingFocus(null);
+    setAiUndo(null);
+    document.scrollingElement?.scrollTo?.(0, 0);
   }, []);
 
   const session = useRecordSession({
@@ -315,6 +323,10 @@ function EditorApp({
     onAfterRecordSwitch,
     confirmAction,
   });
+  const workspaceRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    workspaceRef.current?.toggleAttribute('inert', session.changingRecord);
+  }, [session.changingRecord]);
 
   const validation = useValidation(session.record);
   validationResetRef.current = validation.resetValidationState;
@@ -324,7 +336,6 @@ function EditorApp({
   const androidBridge = useMemo(() => getAndroidAiBridge(), []);
   const [androidStatus, setAndroidStatus] = useState<AiTransportStatus | null>(null);
   const [androidStatusLoading, setAndroidStatusLoading] = useState(Boolean(androidBridge));
-  const [aiUndo, setAiUndo] = useState<AiAdoptionUndo | null>(null);
 
   const step = STEPS[stepIndex] ?? STEPS[0];
   const stepKey: StepKey = step.key;
@@ -401,6 +412,7 @@ function EditorApp({
       setView('editor');
       setStepIndex(safeIndex);
       setMobileNavOpen(false);
+      document.scrollingElement?.scrollTo?.(0, 0);
       if (session.settings.lastStep !== STEPS[safeIndex]?.key) {
         const nextSettings = { ...session.settings, lastStep: STEPS[safeIndex]?.key ?? 'basic' };
         void session.saveSettings(nextSettings);
@@ -433,6 +445,7 @@ function EditorApp({
       }
       setMobileNavOpen(false);
       setView(nextView);
+      document.scrollingElement?.scrollTo?.(0, 0);
     },
     [aiSession, confirmAction, defaultAiTarget, refreshAndroidAiStatus, view],
   );
@@ -457,17 +470,19 @@ function EditorApp({
 
   const attemptSave = useCallback(
     async (showToast = true): Promise<boolean> => {
+      if (session.changingRecord) return false;
       validation.setValidationAttempted(true);
       const saved = await session.persistRecord(showToast);
-      if (firstInvalidPath) jumpToPath(firstInvalidPath);
+      if (saved && view === 'editor' && firstInvalidPath) jumpToPath(firstInvalidPath);
       return saved;
     },
-    [firstInvalidPath, jumpToPath, session, validation],
+    [firstInvalidPath, jumpToPath, session, validation, view],
   );
 
   async function handleImportJson(raw: string, mode: 'merge' | 'replace') {
     const ok = await session.importJson(raw, mode);
     if (ok) setView('records');
+    return ok;
   }
 
   async function handleRestoreRecovery() {
@@ -478,11 +493,15 @@ function EditorApp({
   async function exportJson(scope: 'current' | 'all', options: { includeNotes?: boolean } = {}) {
     const includeNotes = options.includeNotes === true;
     try {
-      const bundle = await repo.exportBackup(scope, { includeNotes });
+      const draft = session.recordRef.current;
+      const bundle = await repo.exportBackup(scope, {
+        includeNotes,
+        ...(scope === 'current' || !session.saveConflict ? { draft } : {}),
+      });
       const text = serializeBackup(bundle);
       nativeExportFile(
         text,
-        scope === 'all' ? 'dabingli-records.json' : `dabingli-${session.record.id ?? 'record'}.json`,
+        scope === 'all' ? 'dabingli-records.json' : `dabingli-${draft.id ?? 'record'}.json`,
         'application/json',
       );
       session.notify(includeNotes ? '已下载 JSON 备份（含原始笔记）' : '已下载 JSON 备份（不含原始笔记）', 'success');
@@ -549,6 +568,7 @@ function EditorApp({
   // Stable global keyboard handler via ref
   const keyHandlerRef = useRef<(event: KeyboardEvent) => void>(() => {});
   keyHandlerRef.current = (event: KeyboardEvent) => {
+    if (session.changingRecord) return;
     if (event.key === 'Escape') {
       if (confirmState) {
         confirmState.resolve(false);
@@ -592,6 +612,7 @@ function EditorApp({
   });
   webHostRef.current = {
     handleBack: () => {
+      if (session.changingRecord) return true;
       if (document.querySelector('.modal-dialog[aria-modal="true"]')) {
         window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }));
         return true;
@@ -684,8 +705,16 @@ function EditorApp({
       break;
   }
 
+  const saveStatus = session.saving ? '正在保存…'
+    : session.saveError ? '保存失败'
+      : session.saveConflict ? '本机版本已变更'
+        : session.dirty ? '有未保存的编辑'
+          : session.record.meta.revision || session.list.some(({ id }) => id === session.record.id)
+            ? '已保存到本机'
+            : '空白病历';
+
   return (
-    <div className="app-shell">
+    <div className="app-shell" ref={workspaceRef}>
       <a className="skip-link" href="#main-content">跳到主要内容</a>
       <header className="app-header">
         <div className="brand">
@@ -699,9 +728,12 @@ function EditorApp({
               <path d="m31 34 2 2 4-5" stroke="#073f3a" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </div>
-          <div>
+          <div className="brand-copy">
             <div className="brand-title">大病历生成器</div>
-            <div className="brand-subtitle">Web UI · {session.record.basic.name || '未命名病历'}</div>
+            <div className="brand-subtitle">{session.record.basic.name || '未命名病历'}</div>
+          </div>
+          <div className="save-state" data-error={Boolean(session.saveError || session.saveConflict)}>
+            {saveStatus}
           </div>
         </div>
         <nav className="header-actions" aria-label="全局操作">
@@ -713,6 +745,7 @@ function EditorApp({
           <button
             type="button"
             className={`button ghost${view === 'records' ? ' is-active' : ''}`}
+            aria-current={view === 'records' ? 'page' : undefined}
             onClick={() => void navigateView('records')}
           >
             病历列表
@@ -728,15 +761,42 @@ function EditorApp({
           <button
             type="button"
             className={`button ghost${view === 'settings' ? ' is-active' : ''}`}
+            aria-current={view === 'settings' ? 'page' : undefined}
             onClick={() => void navigateView('settings')}
           >
             设置
           </button>
-          <button type="button" className="button primary" onClick={() => void attemptSave(true)}>
-            {session.dirty ? '保存病历 *' : '保存病历'}
+          <button type="button" className="button primary" disabled={session.saving} onClick={() => void attemptSave(true)}>
+            保存病历
           </button>
         </nav>
       </header>
+
+      {offlineUpdateReady ? (
+        <div className="global-notice">
+          <Notice tone="info" title="新版已缓存">
+            保存编辑后，关闭本应用的所有标签页，再打开即可更新。
+          </Notice>
+        </div>
+      ) : null}
+
+      {session.saveError || session.saveConflict ? (
+        <div className="global-notice">
+          <Notice tone="warning" title={session.saveError ? '当前编辑尚未保存' : '本机病历有新版本'}>
+            <p>{session.saveError || '其他标签页已更新或删除这份病历。可先导出当前编辑，再读取本机版本。'}</p>
+            <div className="button-row compact">
+              <button type="button" className="button secondary" onClick={() => void exportJson('current', { includeNotes: exportIncludeNotes })}>
+                导出当前编辑
+              </button>
+              {session.saveConflict ? (
+                <button type="button" className="button ghost" onClick={() => void session.reloadFromStorage()}>
+                  重新读取本机版本
+                </button>
+              ) : null}
+            </div>
+          </Notice>
+        </div>
+      ) : null}
 
       {session.storageAlert ? (
         <div className="global-notice">
@@ -924,11 +984,11 @@ function EditorApp({
                     <button type="button" className="button ghost" onClick={jumpToFirstInvalid}>
                       检查并定位
                     </button>
-                    <button type="button" className="button secondary" onClick={() => void attemptSave(true)}>
+                    <button type="button" className="button secondary" disabled={session.saving} onClick={() => void attemptSave(true)}>
                       保存
                     </button>
                   </div>
-                  <button type="submit" className="button primary">
+                  <button type="submit" className="button primary" disabled={stepIndex === STEPS.length - 1 && session.saving}>
                     {stepIndex === STEPS.length - 1 ? '保存病历' : '下一步'}
                   </button>
                 </footer>
@@ -938,9 +998,12 @@ function EditorApp({
         )}
       </main>
 
-      <div className={`toast${session.toast ? ' is-visible' : ''}`} role="status" aria-live="polite">
-        {session.toast?.message}
-      </div>
+      {createPortal(
+        <div className={`toast${session.toast || session.changingRecord ? ' is-visible' : ''}`} role="status" aria-live="polite">
+          {session.changingRecord ? '正在处理本机病历…' : session.toast?.message}
+        </div>,
+        document.body,
+      )}
 
       <ConfirmModal
         open={confirmState !== null}

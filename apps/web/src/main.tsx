@@ -10,10 +10,10 @@ applyNativeInsetsClass();
 const root = document.getElementById('root');
 if (!root) throw new Error('Missing root element');
 
+registerServiceWorker();
+
 createRoot(root).render(
   <StrictMode>
     <App />
   </StrictMode>,
 );
-
-registerServiceWorker();

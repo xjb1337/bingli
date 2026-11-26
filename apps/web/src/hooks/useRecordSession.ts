@@ -72,12 +72,17 @@ export function useRecordSession({
   const [quotaInfo, setQuotaInfo] = useState<StorageQuotaInfo | null>(initial.quotaInfo);
   const [storageAlert, setStorageAlert] = useState(initial.alert);
   const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [changingRecord, setChangingRecord] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const [saveConflict, setSaveConflict] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [undoVersion, setUndoVersion] = useState(0);
 
   const toastTimerRef = useRef<number | null>(null);
   const saveTimerRef = useRef<number | null>(null);
   const saveQueueRef = useRef<Promise<unknown>>(Promise.resolve());
+  const changingRecordRef = useRef(false);
   const mutationSeqRef = useRef(0);
   const recordRef = useRef(record);
   const dirtyRef = useRef(dirty);
@@ -142,17 +147,20 @@ export function useRecordSession({
     [pushUndoSnapshot],
   );
 
-  const persistRecord = useCallback(
-    async (showToast = true): Promise<boolean> =>
-      enqueueSave(async () => {
+  const writeRecord = useCallback(
+    async (showToast: boolean): Promise<boolean> => {
+      if (!showToast && !dirtyRef.current) return true;
+      setSaving(true);
+      try {
         const snapshot = recordRef.current;
         const targetSeq = mutationSeqRef.current;
         const revision = Number(snapshot.meta.revision) || 0;
         const saved = await repo.saveToLibrary(snapshot, revision);
         if (!saved.ok) {
           const reason = saved.reason ?? '保存失败，请先导出备份。';
-          setStorageAlert(reason);
-          notify(reason, 'error');
+          setSaveError(reason);
+          setSaveConflict(saved.conflict === true);
+          if (showToast) notify(reason, 'error');
           return false;
         }
         const nextRevision = saved.revision ?? saved.record?.meta?.revision;
@@ -168,11 +176,21 @@ export function useRecordSession({
 
         const loaded = await repo.loadList();
         if (loaded.ok) setList(loaded.list);
+        setSaveError('');
+        setSaveConflict(false);
         void refreshQuota();
         if (showToast) notify('已保存到本机', 'success');
         return true;
-      }),
-    [enqueueSave, notify, refreshQuota, repo],
+      } finally {
+        setSaving(false);
+      }
+    },
+    [notify, refreshQuota, repo],
+  );
+
+  const persistRecord = useCallback(
+    (showToast = true) => enqueueSave(() => writeRecord(showToast)),
+    [enqueueSave, writeRecord],
   );
 
   const flushPendingSave = useCallback(() => {
@@ -186,7 +204,7 @@ export function useRecordSession({
       const expectedSequence = mutationSeqRef.current;
       return enqueueSave(async () => {
         const previous = recordRef.current;
-        if (previous.id !== nextRecord.id || mutationSeqRef.current !== expectedSequence) {
+        if (changingRecordRef.current || previous.id !== nextRecord.id || mutationSeqRef.current !== expectedSequence) {
           notify('病历已改变，请核对后重试 AI 操作', 'error');
           return false;
         }
@@ -231,6 +249,7 @@ export function useRecordSession({
 
   const update: UpdateField = useCallback(
     (path, value, options) => {
+      if (changingRecordRef.current) return;
       maybePushBurstSnapshot(path, options?.snapshotLabel);
       mutationSeqRef.current += 1;
       let next = setPathImmutable(recordRef.current, path, value);
@@ -245,6 +264,7 @@ export function useRecordSession({
 
   const updateRawNotes = useCallback(
     (value: string) => {
+      if (changingRecordRef.current) return;
       maybePushBurstSnapshot('rawNotes');
       mutationSeqRef.current += 1;
       const next: DabingliRecord = {
@@ -261,6 +281,7 @@ export function useRecordSession({
 
   const replaceRecord = useCallback(
     (next: DabingliRecord, options?: { snapshotLabel?: string }) => {
+      if (changingRecordRef.current) return;
       pushUndoSnapshot(options?.snapshotLabel ?? '更新病历');
       mutationSeqRef.current += 1;
       const cloned = RECORD_CORE.cloneValue(next);
@@ -273,6 +294,7 @@ export function useRecordSession({
   );
 
   const undoLast = useCallback(async (): Promise<boolean> => {
+    if (changingRecordRef.current) return false;
     const active = recordRef.current;
     const item = historyRef.current.pop(active.id ?? '');
     setUndoVersion((v) => v + 1);
@@ -303,21 +325,53 @@ export function useRecordSession({
     return true;
   }, [cancelSaveTimer, notify, persistRecord]);
 
-  const ensureCurrentSavedBeforeSwitch = useCallback(async (): Promise<boolean> => {
-    cancelSaveTimer();
-    if (!dirtyRef.current) {
-      await saveQueueRef.current;
-      return true;
+  const changeRecord = useCallback(
+    async (task: () => Promise<boolean>, { saveFirst = true } = {}): Promise<boolean> => {
+      if (changingRecordRef.current) return false;
+      changingRecordRef.current = true;
+      setChangingRecord(true);
+      cancelSaveTimer();
+      try {
+        return await enqueueSave(async () => {
+          if (saveFirst && !(await writeRecord(false))) {
+            notify('当前编辑未能保存，请先导出当前病历', 'error');
+            return false;
+          }
+          return task();
+        });
+      } finally {
+        changingRecordRef.current = false;
+        setChangingRecord(false);
+      }
+    },
+    [cancelSaveTimer, enqueueSave, notify, writeRecord],
+  );
+
+  const activate = useCallback((next: DabingliRecord) => {
+    mutationSeqRef.current += 1;
+    recordRef.current = next;
+    dirtyRef.current = false;
+    lastEditPathRef.current = '';
+    setRecord(next);
+    setDirty(false);
+    setSaveError('');
+    setSaveConflict(false);
+    onResetValidation();
+    onAfterRecordSwitch();
+  }, [onAfterRecordSwitch, onResetValidation]);
+
+  const refreshAfterMerge = useCallback(async (firstRecordId?: string) => {
+    const previous = recordRef.current;
+    const current = await repo.loadCurrent(previous.id);
+    if (current.record && current.record.meta.revision !== previous.meta.revision) {
+      historyRef.current.clear(previous.id ?? '');
+      setUndoVersion((value) => value + 1);
+      activate(current.record);
+    } else if (current.ok && !current.record && !previous.meta.revision && firstRecordId) {
+      const first = await repo.activateRecord(firstRecordId);
+      if (first.record) activate(first.record);
     }
-    const saved = await persistRecord(false);
-    if (!saved) {
-      const msg = '当前病历保存失败，已阻止切换；请先导出 JSON 备份。';
-      setStorageAlert(msg);
-      notify(msg, 'error');
-      return false;
-    }
-    return true;
-  }, [cancelSaveTimer, notify, persistRecord]);
+  }, [activate, repo]);
 
   const saveSettings = useCallback(
     async (next: AppSettings) => {
@@ -329,153 +383,110 @@ export function useRecordSession({
     [notify, repo],
   );
 
-  const createNewRecord = useCallback(async (): Promise<boolean> => {
-    if (!(await ensureCurrentSavedBeforeSwitch())) return false;
-    return enqueueSave(async () => {
-      const next = repo.newRecord();
-      const saved = await repo.saveToLibrary(next, 0);
-      if (!saved.ok) {
-        notify(saved.reason ?? '新建病历保存失败', 'error');
-        return false;
-      }
-      const persisted = saved.record ?? next;
-      mutationSeqRef.current += 1;
-      recordRef.current = persisted;
-      dirtyRef.current = false;
-      setRecord(persisted);
-      setDirty(false);
-      onResetValidation();
-      onAfterRecordSwitch();
-      const loaded = await repo.loadList();
-      if (loaded.ok) setList(loaded.list);
-      notify('已新建空白病历', 'success');
-      return true;
-    });
-  }, [enqueueSave, ensureCurrentSavedBeforeSwitch, notify, onAfterRecordSwitch, onResetValidation, repo]);
+  const createNewRecord = useCallback(() => changeRecord(async () => {
+    const next = repo.newRecord();
+    const saved = await repo.saveToLibrary(next, 0);
+    if (!saved.ok) {
+      notify(saved.reason ?? '新建病历保存失败', 'error');
+      return false;
+    }
+    activate(saved.record ?? next);
+    const loaded = await repo.loadList();
+    if (loaded.ok) setList(loaded.list);
+    notify('已新建空白病历', 'success');
+    return true;
+  }), [activate, changeRecord, notify, repo]);
 
   const openRecord = useCallback(
-    async (item: RecordListItem): Promise<boolean> => {
-      if (!(await ensureCurrentSavedBeforeSwitch())) return false;
-      return enqueueSave(async () => {
-        const stored = await repo.loadCurrent(item.id);
-        const next = RECORD_CORE.cloneValue(stored.ok && stored.record ? stored.record : item.data);
-        mutationSeqRef.current += 1;
-        const openSequence = mutationSeqRef.current;
-        recordRef.current = next;
-        dirtyRef.current = false;
-        setRecord(next);
-        setDirty(false);
-        onResetValidation();
-        onAfterRecordSwitch();
-        const saved = await repo.saveToLibrary(next, Number(next.meta.revision) || 0);
-        if (saved.ok) {
-          const persisted = saved.record ?? next;
-          const latest = mutationSeqRef.current === openSequence
-            ? persisted
-            : mergeRevisionMeta(recordRef.current, saved.revision ?? persisted.meta.revision,
-              persisted.meta.updatedAt ?? persisted.updatedAt);
-          recordRef.current = latest;
-          setRecord(latest);
-        }
-        notify(`已打开 ${item.basic?.name || RECORD_CORE.summarize(item).name}`);
-        return true;
-      });
-    },
-    [enqueueSave, ensureCurrentSavedBeforeSwitch, notify, onAfterRecordSwitch, onResetValidation, repo],
+    (item: RecordListItem) => changeRecord(async () => {
+      const stored = await repo.activateRecord(item.id);
+      if (!stored.ok || !stored.record) {
+        notify(stored.reason ?? '这份病历已从本机移除，请刷新列表后重试', 'error');
+        const loaded = await repo.loadList();
+        if (loaded.ok) setList(loaded.list);
+        return false;
+      }
+      if (stored.record.meta.revision !== item.data.meta.revision) historyRef.current.clear(item.id);
+      activate(stored.record);
+      notify(`已打开 ${stored.record.basic.name || '未命名病历'}`);
+      return true;
+    }),
+    [activate, changeRecord, notify, repo],
   );
 
   const copyRecord = useCallback(
-    async (item: RecordListItem): Promise<boolean> => {
-      if (!(await ensureCurrentSavedBeforeSwitch())) return false;
-      return enqueueSave(async () => {
-        const stored = await repo.loadCurrent(item.id);
-        const source = stored.ok && stored.record ? stored.record : item.data;
-        const copy = RECORD_CORE.copyRecordAsNew(source);
-        const saved = await repo.saveToLibrary(copy, 0);
-        if (!saved.ok) {
-          notify(saved.reason ?? '复制病历保存失败', 'error');
-          return false;
-        }
-        const persisted = saved.record ?? copy;
-        mutationSeqRef.current += 1;
-        recordRef.current = persisted;
-        dirtyRef.current = false;
-        setRecord(persisted);
-        setDirty(false);
-        onResetValidation();
-        onAfterRecordSwitch();
-        const loaded = await repo.loadList();
-        if (loaded.ok) setList(loaded.list);
-        notify('已复制为新病历；身份信息、生命体征数值、日期和号码已清空', 'success');
-        return true;
-      });
-    },
-    [enqueueSave, ensureCurrentSavedBeforeSwitch, notify, onAfterRecordSwitch, onResetValidation, repo],
+    (item: RecordListItem) => changeRecord(async () => {
+      const stored = await repo.loadCurrent(item.id);
+      if (!stored.ok || !stored.record) {
+        notify(stored.reason ?? '这份病历已从本机移除', 'error');
+        return false;
+      }
+      const copy = RECORD_CORE.copyRecordAsNew(stored.record);
+      const saved = await repo.saveToLibrary(copy, 0);
+      if (!saved.ok) {
+        notify(saved.reason ?? '复制病历保存失败', 'error');
+        return false;
+      }
+      activate(saved.record ?? copy);
+      const loaded = await repo.loadList();
+      if (loaded.ok) setList(loaded.list);
+      notify('已复制为新病历；身份信息、生命体征数值、日期和号码已清空', 'success');
+      return true;
+    }),
+    [activate, changeRecord, notify, repo],
   );
 
   const deleteRecord = useCallback(
-    async (item: RecordListItem) => {
-      if (recordRef.current.id === item.id) cancelSaveTimer();
-      await enqueueSave(async () => {
-        const nextList = RECORD_CORE.removeRecord(list, item.id);
-        const result = await repo.deleteRecord(item.id);
-        if (!result.ok) {
-          notify(result.reason ?? '删除失败', 'error');
-          return;
-        }
-        historyRef.current.clear(item.id);
-        setList(nextList);
-        if (recordRef.current.id === item.id) {
-          const next = repo.newRecord();
-          mutationSeqRef.current += 1;
-          recordRef.current = next;
-          dirtyRef.current = false;
-          setRecord(next);
-          setDirty(false);
-          onResetValidation();
-          onAfterRecordSwitch();
-        }
-        notify('病历已删除', 'success');
-      });
-    },
-    [cancelSaveTimer, enqueueSave, list, notify, onAfterRecordSwitch, onResetValidation, repo],
+    (item: RecordListItem) => changeRecord(async () => {
+      const result = await repo.deleteRecord(item.id);
+      if (!result.ok) {
+        notify(result.reason ?? '删除失败', 'error');
+        return false;
+      }
+      historyRef.current.clear(item.id);
+      const loaded = await repo.loadList();
+      if (loaded.ok) setList(loaded.list);
+      else setList((previous) => RECORD_CORE.removeRecord(previous, item.id));
+      if (recordRef.current.id === item.id) {
+        activate(repo.newRecord());
+      }
+      notify('病历已删除', 'success');
+      return true;
+    }, { saveFirst: false }),
+    [activate, changeRecord, notify, repo],
   );
 
   const importJson = useCallback(
-    async (raw: string, mode: 'merge' | 'replace'): Promise<boolean> => {
-      cancelSaveTimer();
-      return enqueueSave(async () => {
-        try {
-          const summary = await repo.importBackup(raw, mode);
-          const loaded = await repo.loadList();
-          const nextList = loaded.ok ? loaded.list : [];
-          setList(nextList);
+    (raw: string, mode: 'merge' | 'replace') => changeRecord(async () => {
+      try {
+        const summary = await repo.importBackup(raw, mode);
+        const loaded = await repo.loadList();
+        if (loaded.ok) setList(loaded.list);
 
-          const preferred = summary.firstRecordId
-            ? await repo.loadCurrent(summary.firstRecordId)
-            : await repo.loadCurrent();
-          if (preferred.ok && preferred.record) {
-            mutationSeqRef.current += 1;
-            recordRef.current = preferred.record;
-            dirtyRef.current = false;
-            setRecord(preferred.record);
-            setDirty(false);
-            onResetValidation();
-            onAfterRecordSwitch();
-          }
-          const recoveries = await repo.listRecoveryCopies().catch(() => []);
-          setRecovery(recoveries[0] ?? null);
-          const recoveryMsg = summary.recoveryId ? '；已生成替换前恢复副本' : '';
-          notify(`导入完成：${summary.recordCount} 份病历${recoveryMsg}`, 'success');
-          return true;
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          notify(`导入失败：${message}`, 'error');
-          return false;
+        if (mode === 'replace') {
+          historyRef.current = RECORD_CORE.createHistory(20);
+          setUndoVersion((value) => value + 1);
+          const current = await repo.loadCurrent();
+          activate(current.record ?? repo.newRecord());
+          if (!current.ok) setStorageAlert(current.reason ?? '请从病历列表重新打开导入的病历');
+        } else {
+          await refreshAfterMerge(summary.firstRecordId);
         }
-      });
-    },
-    [cancelSaveTimer, enqueueSave, notify, onAfterRecordSwitch, onResetValidation, repo],
+        const recoveries = await repo.listRecoveryCopies().catch(() => []);
+        setRecovery(recoveries[0] ?? null);
+        const recoveryMsg = summary.recoveryId ? '；已生成替换前恢复副本' : '';
+        const details = mode === 'merge' && summary.added !== undefined
+          ? `新增 ${summary.added} 份，更新 ${summary.updated ?? 0} 份，跳过 ${summary.skipped ?? 0} 份`
+          : `${summary.recordCount} 份病历`;
+        notify(`导入完成：${details}${recoveryMsg}`, 'success');
+        return true;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        notify(`导入失败：${message}`, 'error');
+        return false;
+      }
+    }),
+    [activate, changeRecord, notify, refreshAfterMerge, repo],
   );
 
   const restoreRecovery = useCallback(async (): Promise<boolean> => {
@@ -488,8 +499,7 @@ export function useRecordSession({
     });
     if (!confirmed) return false;
 
-    cancelSaveTimer();
-    return enqueueSave(async () => {
+    return changeRecord(async () => {
       try {
         await repo.restoreRecovery(recovery.id);
         const [loaded, current, loadedSettings] = await Promise.all([
@@ -497,19 +507,11 @@ export function useRecordSession({
           repo.loadCurrent(),
           repo.loadSettings(),
         ]);
-        const nextList = loaded.ok ? loaded.list : [];
-        const nextRecord = current.ok && current.record ? current.record : repo.newRecord();
-        historyRef.current.clear(recordRef.current.id ?? '');
-        historyRef.current.clear(nextRecord.id ?? '');
-        mutationSeqRef.current += 1;
-        recordRef.current = nextRecord;
-        dirtyRef.current = false;
-        setList(nextList);
-        setRecord(nextRecord);
-        setDirty(false);
+        historyRef.current = RECORD_CORE.createHistory(20);
+        if (loaded.ok) setList(loaded.list);
+        activate(current.record ?? repo.newRecord());
+        if (!current.ok) setStorageAlert(current.reason ?? '请从病历列表重新打开恢复的病历');
         if (loadedSettings.ok) setSettings(loadedSettings.settings);
-        onResetValidation();
-        onAfterRecordSwitch();
         setUndoVersion((v) => v + 1);
         notify('已恢复替换前病历', 'success');
         return true;
@@ -519,13 +521,32 @@ export function useRecordSession({
         return false;
       }
     });
-  }, [cancelSaveTimer, confirmAction, enqueueSave, notify, onAfterRecordSwitch, onResetValidation, recovery, repo]);
+  }, [activate, changeRecord, confirmAction, notify, recovery, repo]);
 
-  const mergeLegacy = useCallback(async () => {
-    if (!repo.mergeLegacyLocalStorage) {
-      notify('当前存储模式不支持合并旧本地数据');
-      return;
-    }
+  const reloadFromStorage = useCallback(async () => {
+    const confirmed = await confirmAction({
+      title: '重新读取本机病历',
+      message: '本页未保存的编辑将丢弃。请先导出当前病历，留存需要的内容。若原病历已移除，将打开空白病历。',
+      confirmLabel: '丢弃编辑并读取',
+      danger: true,
+    });
+    if (!confirmed) return;
+    await changeRecord(async () => {
+      const id = recordRef.current.id ?? '';
+      const loaded = await repo.activateRecord(id);
+      if (!loaded.ok) {
+        notify(loaded.reason ?? '读取病历失败', 'error');
+        return false;
+      }
+      historyRef.current.clear(id);
+      setUndoVersion((value) => value + 1);
+      activate(loaded.record ?? repo.newRecord());
+      return true;
+    }, { saveFirst: false });
+  }, [activate, changeRecord, confirmAction, notify, repo]);
+
+  const mergeLegacy = useCallback(() => changeRecord(async () => {
+    if (!repo.mergeLegacyLocalStorage) return false;
     try {
       const result = await repo.mergeLegacyLocalStorage();
       const [loaded, entries] = await Promise.all([
@@ -536,11 +557,16 @@ export function useRecordSession({
       setCorruptEntries(entries);
       if (result.status === 'no-legacy-data') {
         notify('未检测到可合并的旧 localStorage 数据');
-        return;
+        return false;
       }
       if (!result.ok) {
         notify(result.reason ?? '合并旧本地数据失败', 'error');
-        return;
+        return false;
+      }
+      await refreshAfterMerge(result.currentId ?? undefined);
+      if (result.settingsMigrated) {
+        const loadedSettings = await repo.loadSettings();
+        if (loadedSettings.ok) setSettings(loadedSettings.settings);
       }
       const parts = [
         result.added ? `新增 ${result.added} 份` : '',
@@ -549,10 +575,12 @@ export function useRecordSession({
         result.corruptCount ? `隔离损坏 ${result.corruptCount} 条` : '',
       ].filter(Boolean);
       notify(`旧数据合并完成${parts.length ? `（${parts.join('，')}）` : ''}`, 'success');
+      return true;
     } catch (error) {
       notify(`合并失败：${error instanceof Error ? error.message : String(error)}`, 'error');
+      return false;
     }
-  }, [notify, repo]);
+  }), [changeRecord, notify, refreshAfterMerge, repo]);
 
   const exportCorruptLegacy = useCallback(async () => {
     try {
@@ -573,26 +601,26 @@ export function useRecordSession({
     (includeNotes: boolean) =>
       JSON.stringify(
         RECORD_CORE.buildExport(list, undefined, {
-          includeDraft: true,
+          includeDraft: !saveConflict,
           draft: recordRef.current,
           includeNotes,
         }),
         null,
         2,
       ),
-    [list],
+    [list, saveConflict],
   );
 
   // Debounced autosave
   useEffect(() => {
-    if (!dirty) return;
+    if (!dirty || changingRecord) return;
     cancelSaveTimer();
     saveTimerRef.current = window.setTimeout(() => {
       saveTimerRef.current = null;
       void persistRecord(false);
     }, 900);
     return cancelSaveTimer;
-  }, [cancelSaveTimer, dirty, persistRecord, record]);
+  }, [cancelSaveTimer, changingRecord, dirty, persistRecord, record]);
 
   // Lifecycle pagehide/visibilitychange flush
   useEffect(() => {
@@ -617,8 +645,23 @@ export function useRecordSession({
       void repo.loadList().then((loaded) => {
         if (loaded.ok) setList(loaded.list);
       });
-      if (event.recordId && event.recordId === recordRef.current.id) {
-        setStorageAlert('检测到其他标签页已修改当前病历，请注意避免覆盖最新内容。');
+      const id = recordRef.current.id;
+      if (!id) return;
+      const flagConflict = () => {
+        historyRef.current.clear(id);
+        setUndoVersion((value) => value + 1);
+        setSaveConflict(true);
+      };
+      if (event.recordId === id) {
+        if (event.type === 'record-deleted' || (event.revision ?? 0) > (recordRef.current.meta.revision ?? 0)) {
+          flagConflict();
+        }
+      } else if (event.type === 'backup-imported' || event.type === 'recovery-restored' || event.type === 'legacy-merged') {
+        void repo.loadCurrent(id).then((loaded) => {
+          const active = recordRef.current;
+          if (active.id !== id || !loaded.ok) return;
+          if ((loaded.record?.meta.revision ?? 0) !== (active.meta.revision ?? 0)) flagConflict();
+        });
       }
     });
   }, [repo]);
@@ -632,6 +675,10 @@ export function useRecordSession({
     record,
     recordRef,
     dirty,
+    saving,
+    changingRecord,
+    saveError,
+    saveConflict,
     dirtyRef,
     list,
     settings,
@@ -659,6 +706,7 @@ export function useRecordSession({
     deleteRecord,
     importJson,
     restoreRecovery,
+    reloadFromStorage,
     mergeLegacy,
     exportCorruptLegacy,
     buildExportJson,

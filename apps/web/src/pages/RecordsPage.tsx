@@ -73,14 +73,13 @@ export function RecordsPage({
     <section className="workspace-page" aria-labelledby="records-heading">
       <header className="page-header">
         <div>
-          <div className="eyebrow">本机病历</div>
           <div className="records-heading-row">
             <h2 id="records-heading">病历列表</h2>
             <span className="record-count" role="status" aria-label={`病历数量：${countLabel}`}>
               {countLabel}
             </span>
           </div>
-          <p>病历保存在本机 IndexedDB；旧 localStorage 只在首次启动时只读迁移，原数据不会删除。</p>
+          <p>病历保存在本机。换设备或清理浏览器数据前，请先导出备份。</p>
         </div>
         <button type="button" className="button primary" onClick={onNew}>
           + 新建病历
@@ -93,7 +92,7 @@ export function RecordsPage({
           type="search"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="姓名、主诉、科室、诊断，支持部分匹配"
+          placeholder="姓名、主诉、科室或诊断"
           autoComplete="off"
         />
       </label>

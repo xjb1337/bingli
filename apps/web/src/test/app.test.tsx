@@ -66,7 +66,7 @@ function fixtureRecord(raw: string): DabingliRecord {
 
 async function seedLibrary(repository: IndexedDbRecordRepository, record: DabingliRecord): Promise<void> {
   await repository.initialize();
-  const saved = await repository.saveToLibrary(record, Number(record.meta.revision) || 0);
+  const saved = await repository.saveToLibrary(record, 0);
   if (!saved.ok) throw new Error(saved.reason ?? 'failed to seed repository');
 }
 
