@@ -25,7 +25,7 @@ const APP = (() => {
 
   /** 浏览器构建的回退版本；Android 运行时优先读取原生 BuildConfig.VERSION_NAME。 */
   // 与当前 Android 发布线保持一致；原生桥接存在时以 BuildConfig.VERSION_NAME 为准。
-  const APP_VERSION = '3.2.3';
+  const APP_VERSION = '3.2.4';
 
   function appVersion() {
     try {
@@ -780,6 +780,9 @@ const APP = (() => {
     return `
       <div class="card">
         <div class="card-title">基本情况</div>
+        ${select('科别', 'basic.department', deptGroups(), {
+          hint: '选择科别后，体格检查会自动追加该科室的专科查体项目。'
+        })}
         ${renderTemplates()}
         <div class="section-title">一般项目</div>
         ${input('姓名', 'basic.name', { placeholder: '如：张三' })}
@@ -787,9 +790,6 @@ const APP = (() => {
         ${input('年龄', 'basic.age', {
           placeholder: '58 或 7月 / 3天',
           hint: '成人填数字；婴儿可填「7月」或「3天」。'
-        })}
-        ${select('科别', 'basic.department', deptGroups(), {
-          hint: '选择科别后，体格检查会自动追加该科室的专科查体项目。'
         })}
         ${input('床号', 'basic.bedNo', { placeholder: '如：32 / 12-3' })}
         ${input('住院号', 'basic.recordNo', { placeholder: '如：01234567' })}

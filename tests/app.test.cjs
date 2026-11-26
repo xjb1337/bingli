@@ -734,13 +734,15 @@ test('STEPS 有 10 个步骤', () => {
   assert.equal(app.run('APP.STEPS.length'), 10);
 });
 
-test('入院记录表单按医院基本项目排列，旧身份补充资料仍可编辑', () => {
+test('科别位于模板选择前，其余基本项目和补充资料可正常填写', () => {
   const app = boot();
   const html = app.document.querySelector('#content').innerHTML;
-  const paths = ['name', 'gender', 'age', 'department', 'bedNo', 'recordNo', 'nationality', 'birthPlace', 'marital', 'occupation', 'admitDate', 'recordDate', 'informant', 'reliability'];
+  const paths = ['department', 'name', 'gender', 'age', 'bedNo', 'recordNo', 'nationality', 'birthPlace', 'marital', 'occupation', 'admitDate', 'recordDate', 'informant', 'reliability'];
   const positions = paths.map(key => html.search(new RegExp(`data-(?:path|seg)="basic\\.${key}"`)));
   assert.ok(positions.every(position => position >= 0));
   assert.equal(positions.join(','), [...positions].sort((left, right) => left - right).join(','));
+  const templatePosition = html.indexOf('id="tplCard"');
+  assert.ok(positions[0] < templatePosition && templatePosition < positions[1]);
   ['birthDate', 'nativePlace', 'workUnit', 'address', 'phone'].forEach(key => assert.ok(html.includes(`data-path="basic.${key}"`)));
   assert.doesNotMatch(app.run('APP._test.navRowsHtml()'), /系统回顾/);
 });

@@ -131,7 +131,19 @@ export function BasicStep({ record, update, replaceRecord, errors, notify }: Ste
       title="基本情况"
       description={STEP_DESCRIPTIONS.basic}
     >
-      <Card title="模板起点（可选）">
+      <Card title="科室与模板">
+        <FormGrid>
+          <FieldRenderer
+            path="basic.department"
+            label="科别"
+            value={stringAt(record, 'basic.department')}
+            onChange={update}
+            kind="select"
+            options={SCHEMA.DEPARTMENTS.map((department) => ({ value: department.key, label: department.name }))}
+            hint="选择科别后，查体步骤会显示对应专科项目。"
+            error={errors['basic.department']}
+          />
+        </FormGrid>
         <Collapsible
           title={templatesMod ? `用模板开始（可选，${templates.length} 个病种）` : '用模板开始（可选，正在加载模板…）'}
           defaultOpen={false}
@@ -245,16 +257,6 @@ export function BasicStep({ record, update, replaceRecord, errors, notify }: Ste
             hint="成人填数字；婴儿可填“7月”或“3天”。"
             required
             error={errors['basic.age']}
-          />
-          <FieldRenderer
-            path="basic.department"
-            label="科别"
-            value={stringAt(record, 'basic.department')}
-            onChange={update}
-            kind="select"
-            options={SCHEMA.DEPARTMENTS.map((department) => ({ value: department.key, label: department.name }))}
-            hint="选择科别后，查体步骤会显示对应专科项目。"
-            error={errors['basic.department']}
           />
           <FieldRenderer path="basic.bedNo" label="床号" value={stringAt(record, 'basic.bedNo')} onChange={update} error={errors['basic.bedNo']} />
           <FieldRenderer path="basic.recordNo" label="住院号" value={stringAt(record, 'basic.recordNo')} onChange={update} error={errors['basic.recordNo']} />

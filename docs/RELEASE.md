@@ -40,8 +40,8 @@
 
 ## 版本与身份约束
 
-当前代码线目标版本为 **3.2.3 / versionCode 320003**。发布此版本时，在 workflow
-分别填入 `version_name=3.2.3` 和 `version_code=320003`。
+当前代码线目标版本为 **3.2.4 / versionCode 320004**。发布此版本时，在 workflow
+分别填入 `version_name=3.2.4` 和 `version_code=320004`。
 
 留空时，workflow 根据 `package.json` 的版本和运行编号生成候选版本。
 
@@ -58,7 +58,7 @@ minSdk = 26
   拒绝。需要修复时先合并修复，再发起新的 workflow run。
 - 每次发布前仍应人工确认当前 `update.json` 的 `versionCode` 低于候选值；不能使用
   `force` 推送 tag 或手工改写已发布清单来绕过检查。
-- `android/app/build.gradle` 的默认 `320003` 用于本地构建。release workflow 会传入本次发布的版本号。
+- `android/app/build.gradle` 的默认 `320004` 用于本地构建。release workflow 会传入本次发布的版本号。
 
 构建后 workflow 使用 Android build-tools 中的 `aapt2 dump badging` 校验首行包名为
 `com.xjb.bingli`，并在 `update.json` 中再次验证包名、`versionCode`、`versionName`、minSdk

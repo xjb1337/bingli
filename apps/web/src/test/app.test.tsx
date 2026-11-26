@@ -128,12 +128,14 @@ describe('step navigation and keyboard flow', () => {
     expect(details).not.toHaveAttribute('open');
   });
 
-  it('shows template source and the unverified hospital-template status', async () => {
+  it('places department selection before the template list and shows template provenance', async () => {
     const user = userEvent.setup();
     await renderApp();
 
-    await user.selectOptions(screen.getByLabelText('科别'), 'respiratory');
+    const department = screen.getByLabelText('科别');
+    await user.selectOptions(department, 'respiratory');
     const summary = await screen.findByText('用模板开始（可选，6 个病种）');
+    expect(department.compareDocumentPosition(summary)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     await user.click(summary);
 
     expect(screen.getAllByText('待医院模板核对').length).toBeGreaterThan(0);
@@ -153,11 +155,11 @@ describe('step navigation and keyboard flow', () => {
     expect(screen.getByTestId('doc-record')).toBeInTheDocument();
   });
 
-  it('keeps hospital basic field order, removes ROS navigation and persists examination categories', async () => {
+  it('places department first, keeps the remaining basic field order, removes ROS navigation and persists examination categories', async () => {
     const user = userEvent.setup();
     const { repository } = await renderApp();
     const paths = Array.from(document.querySelectorAll('[data-field-wrap]')).map(element => element.getAttribute('data-field-wrap'));
-    const expected = ['name', 'gender', 'age', 'department', 'bedNo', 'recordNo', 'nationality', 'birthPlace', 'marital', 'occupation', 'admitDate', 'recordDate', 'informant', 'reliability'];
+    const expected = ['department', 'name', 'gender', 'age', 'bedNo', 'recordNo', 'nationality', 'birthPlace', 'marital', 'occupation', 'admitDate', 'recordDate', 'informant', 'reliability'];
     const positions = expected.map(key => paths.indexOf(`basic.${key}`));
     expect(positions.every(position => position >= 0)).toBe(true);
     expect(positions).toEqual([...positions].sort((left, right) => left - right));
