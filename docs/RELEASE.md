@@ -1,19 +1,13 @@
 # Android 发布流程
 
-本文件描述 `.github/workflows/release.yml` 的人工发布、审批、版本与回滚流程。普通
-`push`、Pull Request、定时任务和 GitHub Release 事件都不会触发 APK 构建；只有具有仓库
-写权限的人手动运行 `workflow_dispatch`，并通过 `release` Environment 审批后才可能发布。
+维护者在 `main` 手动运行 `.github/workflows/release.yml`，并输入 `RELEASE` 确认发布。
+源码检查完成后，工作流在 `release` 环境签名并发布 APK。
 
 ## 谁可以发布
 
 - **发起人**：仓库所有者，或所有者明确指定的维护者。发起人必须具有运行 Actions 工作流的
   仓库写权限。
-- **审批人**：`release` Environment 的 required reviewer。审批人必须独立核对提交、版本和
-  发布说明；建议至少指定两名维护者并启用 **Prevent self-review**，避免发起人自行批准。
-- **配置人**：只有仓库所有者/管理员可以创建 Environment、指定审批人和写入签名 Secrets。
-  这些保护无法由仓库内的 YAML 自行授予或绕过。
-
-任何 PR 合并都不等于发布授权。不要把发布权限改成无人审批，也不要让机器人自动批准部署。
+- **配置人**：仓库所有者或管理员负责维护 `release` 环境、部署分支和签名 Secrets。
 
 ## 必需的 GitHub Environment
 
@@ -21,13 +15,10 @@
 
 1. 打开 **Settings → Environments → New environment**，名称必须是 `release`。
 2. 在 **Deployment branches and tags** 中只允许 `main`。
-3. 在 **Required reviewers** 中加入所有者指定的审批人；建议启用 **Prevent self-review**。
+3. 清空 **Required reviewers**。发布确认在手动运行工作流时完成。
 4. 将下述签名 Secrets 放在该 Environment（推荐）或仓库 Secrets 中。
-5. 保存后，手动运行 release workflow 的 `release` job 会停在审批门禁，未批准不会构建或
-   发布签名的 Release APK。
 
-如果 `release` Environment 不存在、没有 required reviewer，或 Secrets 不完整，发布必须
-中止。不得通过临时移除审批人或改用其他环境来绕过门禁。
+发起前检查 `release` 环境存在、部署分支为 `main`，并且签名 Secrets 已配置。
 
 ## Secrets
 
@@ -102,9 +93,8 @@ key 后，已安装用户无法通过普通覆盖安装升级，只能走另行�
    失败；`notes` 可选，会追加到 GitHub Release 和 `update.json.releaseNotes`。
 4. 运行后先执行 `verify` job：它运行 Node 全套验证和 Android debug 单测/lint/debug APK，
    不构建 release APK，也不需要签名 Secrets。
-5. `release` job 进入 `release` Environment，等待 required reviewer 批准。审批人应核对
-   候选提交、版本、说明和验证结果；不批准则不会生成签名 Release。
-6. 批准后，`release` job 校验提交仍是 `main` 当前头、要求全部签名 Secrets、构建签名 APK、
+5. 源码验证通过后，`release` job 进入 `release` 环境。
+6. `release` job 校验提交仍是 `main` 当前头、要求全部签名 Secrets、构建签名 APK、
    用 `aapt2` 校验 `com.xjb.bingli`、生成并校验 `update.json`、核对证书与版本。
 7. 发布前再次检查 `main` 没有前进且 tag 未被占用，创建 draft Release，上传
    `update.json`、`bingli.apk`（及可选的 `mapping.txt`），再标记为正式 latest。
