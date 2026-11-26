@@ -136,17 +136,30 @@ describe('DataTransferPanel', () => {
     const props = transferProps();
     const { container } = render(<DataTransferPanel {...props} />);
     await user.selectOptions(screen.getByLabelText('导入方式'), 'replace');
-    const file = new File(['{"records":[]}'], 'fixture.json', { type: 'application/json' });
+    const raw = JSON.stringify(SCHEMA.emptyRecord());
+    const file = new File([raw], 'fixture.json', { type: 'application/json' });
     const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
     await user.upload(input, file);
     const dialog = await screen.findByRole('alertdialog', { name: '确认替换全部病历' });
+    expect(dialog).toHaveTextContent('fixture.json · 1 份病历');
     expect(props.onImport).not.toHaveBeenCalled();
     await user.click(within(dialog).getByRole('button', { name: '取消' }));
     expect(props.onImport).not.toHaveBeenCalled();
     await user.upload(input, file);
     await user.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: '确定替换' }));
     expect(props.onImport).toHaveBeenCalledOnce();
-    expect(props.onImport).toHaveBeenCalledWith('{"records":[]}', 'replace');
+    expect(props.onImport).toHaveBeenCalledWith(raw, 'replace');
+  });
+
+  it('shows an inline error for invalid backup files before offering confirmation', async () => {
+    const user = userEvent.setup();
+    const props = transferProps();
+    const { container } = render(<DataTransferPanel {...props} />);
+    await user.upload(container.querySelector<HTMLInputElement>('input[type="file"]')!,
+      new File(['{"records":[]}'], 'empty.json', { type: 'application/json' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('备份中没有病历数据');
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(props.onImport).not.toHaveBeenCalled();
   });
 
   it('wires the recovery and quarantine exports to their own actions', async () => {

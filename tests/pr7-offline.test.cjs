@@ -50,6 +50,9 @@ if (!fs.existsSync(DIST)) {
     );
     assert.match(source, /url\.origin !== self\.location\.origin/);
     assert.match(source, /request\.mode === 'navigate'/);
+    assert.doesNotMatch(source, /skipWaiting\(/, '新缓存应等旧页面退出后再接管');
+    assert.match(source, /caches\.match\(INDEX_URL, \{ cacheName: CACHE_NAME/,
+      'HTML 与懒加载资源必须来自同一版本的缓存');
   });
 
   test('PR7-02 HTML, CSS and app JS load no external resources except DeepSeek AI', () => {

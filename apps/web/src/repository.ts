@@ -59,7 +59,25 @@ export function createLocalStorageRepository(
       return RECORD_CORE.loadList(storage);
     },
     async loadCurrent(preferredId?: string): Promise<LoadCurrentResult> {
-      return RECORD_CORE.loadCurrent(storage, SCHEMA.emptyRecord, deptKeys, preferredId);
+      const result = RECORD_CORE.loadCurrent(storage, SCHEMA.emptyRecord, deptKeys, preferredId);
+      if (!preferredId || !result.ok || result.record) return result;
+      const loaded = RECORD_CORE.loadList(storage);
+      if (!loaded.ok) return { ok: false, record: null, error: true, reason: loaded.reason };
+      const item = RECORD_CORE.findRecord(loaded.list, preferredId);
+      return item ? { ok: true, record: item.data } : result;
+    },
+    async activateRecord(id: string): Promise<LoadCurrentResult> {
+      const result = await this.loadCurrent(id);
+      if (result.ok && result.record) {
+        try {
+          const at = new Date().toISOString();
+          storage.setItem(RECORD_CORE.draftKey(id), JSON.stringify(result.record));
+          storage.setItem(keys.current, JSON.stringify({ id, at }));
+        } catch {
+          return { ok: false, record: null, error: true, reason: '打开病历失败：无法保存当前病历位置' };
+        }
+      }
+      return result;
     },
     async saveCurrent(record: DabingliRecord, expectedRevision?: number): Promise<SaveResult> {
       return RECORD_CORE.saveCurrent(storage, record, expectedRevision);
@@ -139,14 +157,14 @@ export function createLocalStorageRepository(
     },
     async exportBackup(
       scope: BackupScope = 'all',
-      options: { includeNotes?: boolean } = {},
+      options: { includeNotes?: boolean; draft?: DabingliRecord } = {},
     ): Promise<ExportBundle> {
       const loaded = RECORD_CORE.loadList(storage);
       if (!loaded.ok) throw new Error(loaded.reason ?? '病历列表读取失败');
-      const current = RECORD_CORE.loadCurrent(storage, SCHEMA.emptyRecord, deptKeys);
+      const current = options.draft ? null : await this.loadCurrent();
       return createBackupBundle(
         scope === 'current' ? [] : loaded.list,
-        current.ok ? current.record : null,
+        options.draft ?? (current?.ok ? current.record : null),
         undefined,
         options,
       );

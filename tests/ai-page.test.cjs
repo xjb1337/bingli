@@ -233,8 +233,11 @@ test('病历列表支持部分搜索，复制为新病历保留结构并清空�
   })()`);
 
   a.run('APP._test.openList()');
-  const count = () => a.d.querySelector('.modal-count').textContent.trim();
-  assert.equal(count(), '2');
+  const count = () => a.d.querySelector('.list-count').textContent.trim();
+  assert.equal(count(), '2 份病历');
+  assert.equal(a.d.activeElement, a.d.querySelector('.modal-close'));
+  assert.equal(a.d.querySelector('[data-open="search-b"]').tagName, 'BUTTON');
+  assert.equal(a.d.querySelector('[data-open="search-b"]').getAttribute('aria-current'), 'true');
   const deleteButton = a.d.querySelector('[data-del="search-a"]');
   assert.ok(deleteButton, '每份病历应有删除按钮');
   assert.ok(deleteButton.classList.contains('btn'));
@@ -248,24 +251,24 @@ test('病历列表支持部分搜索，复制为新病历保留结构并清空�
   let html = a.d.querySelector('#recordListBox').innerHTML;
   assert.match(html, /虚构搜索甲/);
   assert.doesNotMatch(html, /虚构搜索乙/);
-  assert.equal(count(), '1/2');
+  assert.equal(count(), '1 / 2 份病历');
 
   search.value = '不存在';
   search.dispatchEvent(new a.w.Event('input'));
   html = a.d.querySelector('#recordListBox').innerHTML;
   assert.match(html, /没有匹配的病历/);
-  assert.equal(count(), '0/2');
+  assert.equal(count(), '0 / 2 份病历');
 
   search.value = '虚构搜索';
   search.dispatchEvent(new a.w.Event('input'));
   html = a.d.querySelector('#recordListBox').innerHTML;
   assert.match(html, /虚构搜索甲/);
   assert.match(html, /虚构搜索乙/);
-  assert.equal(count(), '2/2');
+  assert.equal(count(), '2 / 2 份病历');
 
   search.value = '';
   search.dispatchEvent(new a.w.Event('input'));
-  assert.equal(count(), '2');
+  assert.equal(count(), '2 份病历');
 
   const copyButton = a.d.querySelector('[data-copy="search-a"]');
   assert.ok(copyButton, '每份病历应有复制为新病历按钮');

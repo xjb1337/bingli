@@ -285,29 +285,29 @@ test('旧病历与旧备份没有 rawNotes 时无损兼容为空白', () => {
   assert.equal(normalized.basic.name, '旧病历虚构患者');
 });
 
-test('3.2.2 / 320002 版本号在代码与文档中同步', () => {
+test('3.2.3 / 320003 版本号在代码与文档中同步', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
-  assert.equal(pkg.version, '3.2.2');
+  assert.equal(pkg.version, '3.2.3');
   for (const workspace of ['apps/web', 'packages/ai', 'packages/domain', 'packages/storage']) {
     const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, workspace, 'package.json'), 'utf8'));
-    assert.equal(manifest.version, '3.2.2', workspace);
+    assert.equal(manifest.version, '3.2.3', workspace);
   }
   const lock = JSON.parse(fs.readFileSync(path.join(ROOT, 'package-lock.json'), 'utf8'));
-  assert.equal(lock.version, '3.2.2');
-  assert.equal(lock.packages[''].version, '3.2.2');
-  assert.equal(lock.packages['apps/web'].version, '3.2.2');
-  assert.equal(lock.packages['packages/ai'].version, '3.2.2');
-  assert.equal(lock.packages['packages/domain'].version, '3.2.2');
-  assert.equal(lock.packages['packages/storage'].version, '3.2.2');
+  assert.equal(lock.version, '3.2.3');
+  assert.equal(lock.packages[''].version, '3.2.3');
+  assert.equal(lock.packages['apps/web'].version, '3.2.3');
+  assert.equal(lock.packages['packages/ai'].version, '3.2.3');
+  assert.equal(lock.packages['packages/domain'].version, '3.2.3');
+  assert.equal(lock.packages['packages/storage'].version, '3.2.3');
 
   const gradle = fs.readFileSync(path.join(ROOT, 'android', 'app', 'build.gradle'), 'utf8');
-  assert.match(gradle, /versionCode\s*=\s*\(project\.findProperty\('versionCode'\)\s*\?:\s*'320002'\)/);
-  assert.match(gradle, /versionName\s*=\s*\(project\.findProperty\('versionName'\)\s*\?:\s*'3\.2\.2'\)/);
+  assert.match(gradle, /versionCode\s*=\s*\(project\.findProperty\('versionCode'\)\s*\?:\s*'320003'\)/);
+  assert.match(gradle, /versionName\s*=\s*\(project\.findProperty\('versionName'\)\s*\?:\s*'3\.2\.3'\)/);
   const app = fs.readFileSync(path.join(ROOT, 'src', 'app.js'), 'utf8');
-  assert.match(app, /const APP_VERSION = '3\.2\.2'/);
+  assert.match(app, /const APP_VERSION = '3\.2\.3'/);
   const powershell = fs.readFileSync(path.join(ROOT, 'tools', 'build-android.ps1'), 'utf8');
-  assert.match(powershell, /VersionName = '3\.2\.2'[\s\S]*VersionCode = 320002/);
+  assert.match(powershell, /VersionName = '3\.2\.3'[\s\S]*VersionCode = 320003/);
   const release = fs.readFileSync(path.join(ROOT, 'docs', 'RELEASE.md'), 'utf8');
-  assert.match(release, /3\.2\.2 \/ versionCode 320002/);
-  assert.match(release, /默认 `320002`/);
+  assert.match(release, /3\.2\.3 \/ versionCode 320003/);
+  assert.match(release, /默认 `320003`/);
 });

@@ -2,10 +2,10 @@ import type { Plugin } from 'vite';
 
 const CACHE_PREFIX = 'bingli-pages-';
 
-function hashPrecacheUrls(urls: readonly string[]): string {
+function cacheVersion(parts: readonly string[]): string {
   let first = 0x811c9dc5;
   let second = 0x9e3779b9;
-  for (const character of urls.join('\n')) {
+  for (const character of parts.join('\n')) {
     const code = character.charCodeAt(0);
     first = Math.imul(first ^ code, 0x01000193) >>> 0;
     second = Math.imul(second ^ code, 0x85ebca6b) >>> 0;
@@ -25,9 +25,10 @@ self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then((cache) => cache.addAll(
-        PRECACHE_URLS.map((path) => new URL(path, self.registration.scope).href),
-      ))
-      .then(() => self.skipWaiting()),
+        PRECACHE_URLS.map((path) => new Request(new URL(path, self.registration.scope), {
+          cache: path === './' || path === './index.html' ? 'reload' : 'default',
+        })),
+      )),
   );
 });
 
@@ -43,16 +44,13 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-async function networkFirstNavigation(request) {
-  try {
-    return await fetch(request);
-  } catch {
-    return (await caches.match(INDEX_URL, { ignoreVary: true })) || Response.error();
-  }
+async function cacheFirstNavigation(request) {
+  const shell = await caches.match(INDEX_URL, { cacheName: CACHE_NAME, ignoreVary: true });
+  return shell || fetch(request);
 }
 
 async function cacheFirstAsset(request) {
-  const cached = await caches.match(request.url, { ignoreVary: true });
+  const cached = await caches.match(request.url, { cacheName: CACHE_NAME, ignoreVary: true });
   if (cached) return cached;
 
   const response = await fetch(request);
@@ -68,10 +66,10 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') return;
 
   const url = new URL(request.url);
-  if (url.origin !== self.location.origin) return;
+  if (url.origin !== self.location.origin || !url.href.startsWith(self.registration.scope)) return;
 
   if (request.mode === 'navigate') {
-    event.respondWith(networkFirstNavigation(request));
+    event.respondWith(cacheFirstNavigation(request));
     return;
   }
 
@@ -83,23 +81,28 @@ self.addEventListener('fetch', (event) => {
 export function offlineServiceWorker(): Plugin {
   return {
     name: 'bingli-offline-service-worker',
-    generateBundle(_options, bundle) {
-      const emittedFiles = Object.values(bundle)
-        .map((output) => output.fileName)
-        .filter((fileName) => fileName !== 'sw.js')
-        .sort((left, right) => left.localeCompare(right));
-      const precacheUrls = [...new Set([
-        './',
-        './index.html',
-        ...emittedFiles.map((fileName) => `./${fileName}`),
-      ])];
-      const version = hashPrecacheUrls(precacheUrls);
+    generateBundle: {
+      order: 'post',
+      handler(_options, bundle) {
+        const emittedFiles = Object.values(bundle)
+          .map((output) => output.fileName)
+          .filter((fileName) => fileName !== 'sw.js')
+          .sort((left, right) => left.localeCompare(right));
+        const precacheUrls = [...new Set([
+          './',
+          './index.html',
+          ...emittedFiles.map((fileName) => `./${fileName}`),
+        ])];
+        const shell = bundle['index.html'];
+        const shellSource = shell?.type === 'asset' ? shell.source.toString() : '';
+        const version = cacheVersion([...precacheUrls, shellSource, serviceWorkerSource(precacheUrls, '')]);
 
-      this.emitFile({
-        type: 'asset',
-        fileName: 'sw.js',
-        source: serviceWorkerSource(precacheUrls, version),
-      });
+        this.emitFile({
+          type: 'asset',
+          fileName: 'sw.js',
+          source: serviceWorkerSource(precacheUrls, version),
+        });
+      },
     },
   };
 }

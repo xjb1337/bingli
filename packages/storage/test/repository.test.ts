@@ -50,6 +50,34 @@ afterEach(async () => {
 });
 
 describe('IndexedDB repository', () => {
+  it('opens a saved record without writing its contents or revision', async () => {
+    const repository = await openRepository('activate-record');
+    const first = await repository.saveToLibrary(newNamedRecord(repository, '第一份病历'), 0);
+    await repository.saveToLibrary(newNamedRecord(repository, '第二份病历'), 0);
+    const opened = await repository.activateRecord(first.record!.id!);
+    expect(opened.record).toEqual((await repository.loadCurrent()).record);
+    expect(opened.record?.meta.revision).toBe(first.revision);
+    expect(opened.record?.updatedAt).toBe(first.record?.updatedAt);
+    await repository.deleteRecord(first.record!.id!);
+    expect((await repository.activateRecord(first.record!.id!)).record).toBeNull();
+    expect(await repository.saveToLibrary(first.record!, first.revision)).toMatchObject({ ok: false, conflict: true });
+    expect((await repository.loadList()).list).toHaveLength(1);
+  });
+
+  it('rejects a stale save after importing a newer copy with the same revision', async () => {
+    const repository = await openRepository('imported-revision');
+    const saved = await repository.saveToLibrary(newNamedRecord(repository, '覆盖前病历'), 0);
+    const stale = saved.record!;
+    const newer = RECORD_CORE.cloneValue(stale);
+    newer.basic.name = '备份中的新版病历';
+    const raw = JSON.stringify(RECORD_CORE.buildExport([], '2026-11-02T12:00:00.000Z', {
+      includeDraft: true, draft: newer,
+    }));
+    expect(await repository.importBackup(raw, 'merge')).toMatchObject({ updated: 1 });
+    expect(await repository.saveToLibrary(stale, saved.revision)).toMatchObject({ ok: false, conflict: true });
+    expect((await repository.loadCurrent(stale.id)).record?.basic.name).toBe('备份中的新版病历');
+  });
+
   it('continuously saves, opens, and deletes 100 records', async () => {
     const repository = await openRepository('hundred-records');
     const ids: string[] = [];
@@ -302,7 +330,7 @@ describe('IndexedDB repository', () => {
   it('caps recovery copies at 5 without storing redundant bundle snapshots', async () => {
     const repository = await openRepository('recovery-cap');
     for (let index = 0; index < 7; index += 1) {
-      await repository.saveToLibrary(newNamedRecord(repository, `备份前${index}`), index);
+      expect((await repository.saveToLibrary(newNamedRecord(repository, `备份前${index}`), 0)).ok).toBe(true);
       await repository.importBackup(JSON.stringify(v2Backup), 'replace');
       // Re-create a record so the next replace-import has existing data to snapshot.
     }

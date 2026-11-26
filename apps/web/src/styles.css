@@ -270,8 +270,27 @@ code {
   font-weight: 800;
 }
 
-.brand > div:last-child {
+.brand-copy {
   min-width: 0;
+}
+
+.save-state {
+  flex: none;
+  margin-left: 4px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.save-state[data-error="true"] {
+  color: var(--danger);
+}
+
+.import-file-summary {
+  font-weight: 650;
+  overflow-wrap: anywhere;
 }
 
 .brand-title {
@@ -1363,8 +1382,16 @@ textarea[aria-invalid="true"] {
 }
 
 .export-notes-option input {
-  flex: 0 0 auto;
+  flex: 0 0 20px;
+  width: 20px;
+  min-height: 20px;
+  height: 20px;
   margin-top: 4px;
+}
+
+.export-notes-option span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .ai-recognize {
@@ -2811,6 +2838,10 @@ textarea:focus {
 
   .brand-subtitle {
     max-width: none;
+  }
+
+  .save-state {
+    margin-left: auto;
   }
 
   .header-actions {

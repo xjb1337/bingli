@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { RECORD_CORE, SCHEMA, type DabingliRecord } from '@dabingli/domain';
 import {
@@ -192,14 +192,64 @@ describe('v3.2 record notes and list features', () => {
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
 
     await user.click(screen.getByRole('button', { name: '下载全部 JSON' }));
-    await waitFor(() => expect(exportSpy).toHaveBeenCalledWith('all', { includeNotes: false }));
+    await waitFor(() => expect(exportSpy).toHaveBeenCalledWith('all', expect.objectContaining({ includeNotes: false })));
 
     await user.click(checkbox);
     await waitFor(() => expect(exportText.value).toContain('虚构备份笔记'));
     expect(exportText.value).toContain('includesNotes');
     await user.click(screen.getByRole('button', { name: '下载全部 JSON' }));
-    await waitFor(() => expect(exportSpy).toHaveBeenLastCalledWith('all', { includeNotes: true }));
+    await waitFor(() => expect(exportSpy).toHaveBeenLastCalledWith('all', expect.objectContaining({ includeNotes: true })));
   }, 15000);
+
+  it('downloads the visible draft and includes pending edits in a replacement recovery copy', async () => {
+    const repository = createTestRepository();
+    const original = makeRecord('备份前病历');
+    await seed(repository, original);
+    const { container } = await renderApp(repository);
+    const exportSpy = vi.spyOn(repository, 'exportBackup');
+    const nativeExport = vi.fn();
+    vi.stubGlobal('BingliAndroid', { export: nativeExport });
+    const latestName = '替换前尚未自动保存的编辑';
+    fireEvent.change(screen.getByLabelText(/姓名/), { target: { value: latestName } });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: '病历列表' }));
+    await user.click(await screen.findByRole('button', { name: '下载当前病历' }));
+    const call = exportSpy.mock.calls.at(-1);
+    expect(call?.[0]).toBe('current');
+    expect(call?.[1]?.draft?.basic.name).toBe(latestName);
+    expect((await exportSpy.mock.results.at(-1)?.value)?.records[0]?.data.basic.name).toBe(latestName);
+    await waitFor(() => expect(nativeExport).toHaveBeenCalledWith(
+      expect.stringContaining(latestName), expect.any(String), 'application/json'));
+
+    await user.selectOptions(screen.getByLabelText('导入方式'), 'replace');
+    await user.upload(container.querySelector<HTMLInputElement>('input[type="file"]')!,
+      new File([JSON.stringify(makeRecord('导入后的病历'))], 'replacement.json', { type: 'application/json' }));
+    const dialog = await screen.findByRole('alertdialog', { name: '确认替换全部病历' });
+    await user.click(within(dialog).getByRole('button', { name: '确定替换' }));
+    await screen.findByRole('heading', { name: '导入后的病历' });
+    const [recovery] = await repository.listRecoveryCopies();
+    expect(recovery?.recordCount).toBe(1);
+    await repository.restoreRecovery(recovery!.id);
+    expect((await repository.loadCurrent(original.id)).record?.basic.name).toBe(latestName);
+  });
+
+  it('can remove another record to free space while the current edit cannot be saved', async () => {
+    const repository = createTestRepository();
+    const unused = makeRecord('可移除的旧备份');
+    await seed(repository, unused);
+    await seed(repository, makeRecord('当前编辑病历'));
+    await renderApp(repository);
+    vi.spyOn(repository, 'saveToLibrary').mockResolvedValue({ ok: false, reason: '存储空间不足' });
+    fireEvent.change(screen.getByLabelText(/姓名/), { target: { value: '需要保留的编辑' } });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: '病历列表' }));
+    const card = (await screen.findByRole('heading', { name: '可移除的旧备份' })).closest('article')!;
+    await user.click(within(card).getByRole('button', { name: '删除' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: '确认删除' }));
+    await waitFor(async () => expect((await repository.loadCurrent(unused.id)).record).toBeNull());
+    await user.click(screen.getByRole('button', { name: '返回编辑' }));
+    expect(await screen.findByLabelText(/姓名/)).toHaveValue('需要保留的编辑');
+  });
 
   it('preserves local notes when the web localStorage fallback merges a no-notes backup', async () => {
     const repository = createLocalStorageRepository(window.localStorage);

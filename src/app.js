@@ -25,7 +25,7 @@ const APP = (() => {
 
   /** 浏览器构建的回退版本；Android 运行时优先读取原生 BuildConfig.VERSION_NAME。 */
   // 与当前 Android 发布线保持一致；原生桥接存在时以 BuildConfig.VERSION_NAME 为准。
-  const APP_VERSION = '3.2.2';
+  const APP_VERSION = '3.2.3';
 
   function appVersion() {
     try {
@@ -2811,7 +2811,9 @@ const APP = (() => {
     }
     if (nextBtn) {
       nextBtn.hidden = settingsView;
-      nextBtn.textContent = step === STEPS.length - 1 ? '保存病历' : '下一步';
+      const lastStep = step === STEPS.length - 1;
+      nextBtn.disabled = lastStep && saveFeedbackBusy;
+      nextBtn.textContent = lastStep ? (saveFeedbackBusy ? '保存中…' : '保存病历') : '下一步';
     }
 
     // 系统回顾详情区
@@ -4191,14 +4193,15 @@ const APP = (() => {
       return `
         <div class="list-row">
           <span class="list-avatar" aria-hidden="true">${esc((s.name || '病').trim().slice(0, 1))}</span>
-          <div class="list-main" data-open="${esc(s.id)}">
-            <div class="list-name">${esc(s.name)}
+          <button type="button" class="list-main" data-open="${esc(s.id)}"${R && R.id === s.id ? ' aria-current="true"' : ''}>
+            <span class="list-name">${esc(s.name)}
               <span class="list-meta">${esc(s.gender)} ${esc(AGE.display({ age: s.age, birthDate: s.birthDate, admitDate: s.admitDate }))}</span>
-            </div>
-            ${item.data && item.data.meta && item.data.meta.importDraftCopy ? '<div class="list-sub">导入前的本机草稿副本</div>' : ''}
-            <div class="list-sub">${esc(dept)} · ${esc((s.chiefComplaint || '无主诉').slice(0, 20))}</div>
-            <div class="list-sub muted">更新于 ${esc(fmtTime(s.updatedAt))}</div>
-          </div>
+            </span>
+            ${R && R.id === s.id ? '<span class="list-sub list-current">当前编辑</span>' : ''}
+            ${item.data && item.data.meta && item.data.meta.importDraftCopy ? '<span class="list-sub">导入前的本机草稿副本</span>' : ''}
+            <span class="list-sub">${esc(dept)} · ${esc((s.chiefComplaint || '无主诉').slice(0, 20))}</span>
+            <span class="list-sub muted">更新于 ${esc(fmtTime(s.updatedAt))}</span>
+          </button>
           <div class="list-actions">
             <button class="btn btn-ghost btn-sm" data-copy="${esc(s.id)}">复制为新病历</button>
             <button class="btn btn-ghost btn-sm btn-danger" data-del="${esc(s.id)}">删除</button>
@@ -4248,7 +4251,7 @@ const APP = (() => {
     wrap.innerHTML = `
       <div class="modal list-modal" role="dialog" aria-modal="true" aria-labelledby="listTitle">
         <div class="modal-head">
-          <div><span class="modal-eyebrow">本机存储</span><div class="modal-title" id="listTitle">我的病历 <span class="modal-count">${LIST.length}</span></div></div>
+          <div><div class="modal-title" id="listTitle">我的病历</div></div>
           <button type="button" class="modal-close" data-close aria-label="关闭病历列表">关闭</button>
         </div>
         ${alertHtml}
@@ -4256,34 +4259,56 @@ const APP = (() => {
           <span class="visually-hidden">搜索病历</span>
           <input type="search" id="recordSearch" placeholder="搜索姓名、主诉、科室、诊断" autocomplete="off">
         </label>
+        <p class="list-count" role="status" aria-live="polite">${LIST.length} 份病历</p>
         <div class="list-box" id="recordListBox">${rows}</div>
         <div class="btn-row">
           <button class="btn" data-new>新建病历</button>
           <button class="btn btn-ghost" data-backup>导出备份</button>
           <button class="btn btn-ghost" data-backup-current>导出当前病历</button>
           <button class="btn btn-ghost" data-import-file>导入备份</button>
-          <button class="btn btn-ghost" data-close>关闭</button>
         </div>
         <label class="hint"><input type="checkbox" id="exportIncludeNotes"> 导出备份时包含原始笔记（默认关闭；笔记可能含患者信息）</label>
         <div class="hint">病历和备份文件未加密，请妥善保管。数据只存在本机浏览器；换设备或清理数据前请先备份。</div>
       </div>`;
+    const opener = document.activeElement;
     document.body.appendChild(wrap);
 
     const search = wrap.querySelector('#recordSearch');
     const listBox = wrap.querySelector('#recordListBox');
-    const count = wrap.querySelector('.modal-count');
-    if (search && listBox) {
-      search.addEventListener('input', () => {
-        const query = String(search.value || '');
-        const trimmed = query.trim();
-        const filtered = CORE.searchRecords(LIST, query, { departmentName: departmentNameOf });
-        listBox.innerHTML = listRowsHtml(CORE.sortByUpdated(filtered), trimmed);
-        if (count) count.textContent = trimmed ? `${filtered.length}/${LIST.length}` : String(LIST.length);
-      });
-    }
+    const count = wrap.querySelector('.list-count');
+    const closeButton = wrap.querySelector('.modal-close');
+    let busy = false;
+    const close = () => {
+      wrap.remove();
+      if (opener && opener.isConnected && opener !== document.body) opener.focus({ preventScroll: true });
+    };
+    wrap.closeDialog = () => {
+      if (!busy) close();
+    };
+    const renderRows = () => {
+      const query = search.value.trim();
+      const filtered = CORE.searchRecords(LIST, query, { departmentName: departmentNameOf });
+      listBox.innerHTML = listRowsHtml(CORE.sortByUpdated(filtered), query);
+      count.textContent = query ? `${filtered.length} / ${LIST.length} 份病历` : `${LIST.length} 份病历`;
+    };
+    search.addEventListener('input', renderRows);
+    closeButton.focus({ preventScroll: true });
+    wrap.addEventListener('keydown', ev => {
+      if (ev.key === 'Escape') {
+        ev.preventDefault();
+        wrap.closeDialog();
+      } else if (ev.key === 'Tab') {
+        const controls = wrap.querySelectorAll('button:not(:disabled), input:not(:disabled)');
+        const boundary = ev.shiftKey ? controls[0] : controls[controls.length - 1];
+        if (document.activeElement !== boundary) return;
+        ev.preventDefault();
+        (ev.shiftKey ? controls[controls.length - 1] : controls[0]).focus();
+      }
+    });
 
     wrap.addEventListener('click', async ev => {
-      if (ev.target === wrap || ev.target.hasAttribute('data-close')) { wrap.remove(); return; }
+      if (busy) return;
+      if (ev.target === wrap || ev.target.hasAttribute('data-close')) { close(); return; }
       if (ev.target.hasAttribute('data-backup')) {
         const box = wrap.querySelector('#exportIncludeNotes');
         exportBackup(!!(box && box.checked));
@@ -4294,48 +4319,56 @@ const APP = (() => {
         exportCurrentBackup(!!(box && box.checked));
         return;
       }
-      if (ev.target.hasAttribute('data-import-file')) { wrap.remove(); importBackup(); return; }
-      if (ev.target.hasAttribute('data-new')) {
-        if (hasRecordContent(R)) {
-          if (!confirm('新建病历？当前病历会先保存。')) return;
-          if (!(await saveToLibrary())) { wrap.remove(); render(); return; }
+      if (ev.target.hasAttribute('data-import-file')) { close(); importBackup(); return; }
+      busy = true;
+      try {
+        if (ev.target.hasAttribute('data-new')) {
+          if (hasRecordContent(R)) {
+            if (!confirm('新建病历？当前病历会先保存。')) return;
+            if (!(await saveToLibrary())) { close(); render(); return; }
+          }
+          if (!(await switchRecord(newRecord()))) { close(); render(); return; }
+          close();
+          render();
+          return;
         }
-        if (!(await switchRecord(newRecord()))) { wrap.remove(); render(); return; }
-        wrap.remove();
-        render();
-        return;
-      }
-      const delId = ev.target.dataset.del;
-      if (delId) {
-        if (!confirm('确定删除这份病历？删除后无法恢复，建议先导出备份。')) return;
-        const deleted = await deleteRecord(delId);
-        if (!deleted) toast('删除失败，请查看页面顶部提示');
-        wrap.remove();
-        openList();
-        return;
-      }
-      const copyId = ev.target.dataset.copy;
-      if (copyId) {
-        if (!confirm('复制为新病历？将保留科室和病种相关结构，清空身份信息、生命体征数值、日期和号码，且不复制原始笔记。')) return;
-        await copyRecordFromList(copyId);
-        wrap.remove();
-        return;
-      }
-      const openId = ev.target.closest('[data-open]') && ev.target.closest('[data-open]').dataset.open;
-      if (openId) {
-        let found = CORE.findRecord(LIST, openId);
-        if (!found) return;
-        if (!confirm('打开这份病历？当前病历会先保存。')) return;
-        if (hasRecordContent(R) && !(await saveToLibrary())) { wrap.remove(); render(); return; }
-        // 保存当前记录可能刚好更新了用户选择的那一条。
-        found = CORE.findRecord(LIST, openId) || found;
-        // 用 core 规范化，兼容旧版本存档
-        const next = recordForOpen(found.id, found.data || found, found);
-        if (!next) { wrap.remove(); render(); return; }
-        next.id = found.id;
-        if (!(await switchRecord(next))) { wrap.remove(); render(); return; }
-        wrap.remove();
-        render();
+        const delId = ev.target.dataset.del;
+        if (delId) {
+          if (!confirm('确定删除这份病历？删除后无法恢复，建议先导出备份。')) return;
+          const deleted = await deleteRecord(delId);
+          if (!deleted) toast('删除失败，请查看页面顶部提示');
+          if (deleted) {
+            // Move focus off the deleted row, preserving the search and list position.
+            closeButton.focus({ preventScroll: true });
+            renderRows();
+          }
+          return;
+        }
+        const copyId = ev.target.dataset.copy;
+        if (copyId) {
+          if (!confirm('复制为新病历？将保留科室和病种相关结构，清空身份信息、生命体征数值、日期和号码，且不复制原始笔记。')) return;
+          await copyRecordFromList(copyId);
+          close();
+          return;
+        }
+        const openId = ev.target.closest('[data-open]') && ev.target.closest('[data-open]').dataset.open;
+        if (openId) {
+          let found = CORE.findRecord(LIST, openId);
+          if (!found) return;
+          if (!confirm('打开这份病历？当前病历会先保存。')) return;
+          if (hasRecordContent(R) && !(await saveToLibrary())) { close(); render(); return; }
+          // 保存当前记录可能刚好更新了用户选择的那一条。
+          found = CORE.findRecord(LIST, openId) || found;
+          // 用 core 规范化，兼容旧版本存档
+          const next = recordForOpen(found.id, found.data || found, found);
+          if (!next) { close(); render(); return; }
+          next.id = found.id;
+          if (!(await switchRecord(next))) { close(); render(); return; }
+          close();
+          render();
+        }
+      } finally {
+        busy = false;
       }
     });
   }
@@ -4744,15 +4777,25 @@ const APP = (() => {
   function saveWithFeedback() {
     if (saveFeedbackBusy) return false;
     saveFeedbackBusy = true;
-    const buttons = $$('[data-save-action]');
-    const oldLabels = buttons.map(btn => btn.textContent);
-    buttons.forEach(btn => { btn.disabled = true; btn.textContent = '保存中…'; });
+    const saveButton = $('#btnSave');
+    const saveLabel = saveButton.querySelector('span');
+    const nextButton = $('#btnNext');
+    saveButton.disabled = true;
+    saveButton.setAttribute('aria-busy', 'true');
+    saveLabel.textContent = '保存中…';
+    if (step === STEPS.length - 1) {
+      nextButton.disabled = true;
+      nextButton.textContent = '保存中…';
+    }
     const finish = ok => {
       saveFeedbackBusy = false;
-      buttons.forEach((btn, i) => {
-        btn.disabled = false;
-        btn.textContent = oldLabels[i] || '保存病历';
-      });
+      saveButton.disabled = false;
+      saveButton.removeAttribute('aria-busy');
+      saveLabel.textContent = '保存';
+      if (step === STEPS.length - 1) {
+        nextButton.disabled = false;
+        nextButton.textContent = '保存病历';
+      }
       if (ok) toast('已保存到本机');
       else {
         toast('保存失败，请查看页面顶部提示');
@@ -4782,7 +4825,11 @@ const APP = (() => {
     };
     // 1) 任意打开中的模态框（病历列表、导入预览、手动复制框等）
     const modal = findMask('modal-mask');
-    if (modal) { modal.remove(); return true; }
+    if (modal) {
+      if (modal.closeDialog) modal.closeDialog();
+      else modal.remove();
+      return true;
+    }
     // 2) 目录弹层
     const nav = findMask('nav-mask');
     if (nav) { nav.remove(); return true; }
